@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.metrics import mae, mase, r2, smape  # noqa: E402
+from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
@@ -25,6 +26,11 @@ REGISTRY = {
     "seasonal_naive": lambda: SeasonalNaive(season=12),
     "drift": lambda: Drift(),
     "seasonal_drift": lambda: SeasonalDrift(season=12),
+    "ets_damped": lambda: ETS(damped=True),
+    "ets_seasonal": lambda: ETS(damped=True, seasonal=True),
+    "theta": lambda: Theta(),
+    "arima111": lambda: ARIMA(order=(1, 1, 1)),
+    "arima011": lambda: ARIMA(order=(0, 1, 1)),
 }
 
 # Prophet в канонической конфигурации стоит 3.5 с на подгонку против 0.08 с без
@@ -121,7 +127,30 @@ def summarise(per_series: pd.DataFrame) -> pd.DataFrame:
         }
     )
     summary["отказов"] = summary["отказов"].fillna(0).astype(int)
+
+    _warn_identical(ok)
     return summary.sort_values("MAE")
+
+
+def _warn_identical(ok: pd.DataFrame) -> None:
+    """Кричит, если две модели дали совпадающие прогнозы на всех рядах.
+
+    На рядах длиной 24 модель с порогом вида «нужно не меньше 24 точек» молча
+    вырождается в соседнюю: условие никогда не выполняется, ветка не включается,
+    в таблице появляются две одинаковые строки под разными именами. Поймано
+    трижды — на seasonal_drift, на ets_seasonal и едва не на третьей. Глазами
+    такое замечать ненадёжно, поэтому проверка живёт в каркасе.
+    """
+    wide = ok.pivot_table(index=["mo", "fold"], columns="model", values="mae")
+    models = list(wide.columns)
+    for i, a in enumerate(models):
+        for b in models[i + 1 :]:
+            pair = wide[[a, b]].dropna()
+            if len(pair) and np.allclose(pair[a], pair[b], rtol=1e-9, atol=1e-9):
+                print(
+                    f"  ВНИМАНИЕ: {a} и {b} дали идентичные прогнозы на всех {len(pair)} парах "
+                    f"ряд-фолд. Скорее всего одна из моделей вырождается в другую."
+                )
 
 
 def main() -> int:
