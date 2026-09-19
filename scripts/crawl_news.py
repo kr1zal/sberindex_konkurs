@@ -62,13 +62,19 @@ class Outlet:
         return cls(**{k: v for k, v in data.items() if k in known})
 
 
-STATE_LOCK = threading.Lock()
+# У SQLite соединение не потокобезопасно даже с check_same_thread=False:
+# одновременные execute из разных потоков ломают его состояние и дают
+# InterfaceError. Поэтому у каждого потока своё соединение, а не замок вокруг
+# общего. WAL позволяет им писать параллельно, не блокируя друг друга.
+_LOCAL = threading.local()
+_STATE_PATH: Path | None = None
 
 
-def open_state(path: Path) -> sqlite3.Connection:
-    # check_same_thread=False + WAL: издания обходятся параллельно, но пишут в одну
-    # таблицу состояния. Запись под общим замком, чтения конкурентны.
-    conn = sqlite3.connect(path, check_same_thread=False)
+def init_state(path: Path) -> None:
+    """Создаёт таблицу состояния и запоминает путь для потоковых соединений."""
+    global _STATE_PATH
+    _STATE_PATH = path
+    conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS visited (
@@ -77,24 +83,34 @@ def open_state(path: Path) -> sqlite3.Connection:
                PRIMARY KEY (domain, year, month, page))"""
     )
     conn.commit()
+    conn.close()
+
+
+def state() -> sqlite3.Connection:
+    """Соединение текущего потока, создаётся при первом обращении."""
+    conn = getattr(_LOCAL, "conn", None)
+    if conn is None:
+        conn = sqlite3.connect(_STATE_PATH, timeout=30)
+        conn.execute("PRAGMA busy_timeout=30000")
+        _LOCAL.conn = conn
     return conn
 
 
-def already_done(conn: sqlite3.Connection, domain: str, year: int, month: int, page: int) -> bool:
-    row = conn.execute(
+def already_done(domain: str, year: int, month: int, page: int) -> bool:
+    row = state().execute(
         "SELECT 1 FROM visited WHERE domain=? AND year=? AND month=? AND page=?",
         (domain, year, month, page),
     ).fetchone()
     return row is not None
 
 
-def mark(conn, domain, year, month, page, status, found) -> None:
-    with STATE_LOCK:
-        conn.execute(
-            "INSERT OR REPLACE INTO visited VALUES (?,?,?,?,?,?,datetime('now'))",
-            (domain, year, month, page, status, found),
-        )
-        conn.commit()
+def mark(domain, year, month, page, status, found) -> None:
+    conn = state()
+    conn.execute(
+        "INSERT OR REPLACE INTO visited VALUES (?,?,?,?,?,?,datetime('now'))",
+        (domain, year, month, page, status, found),
+    )
+    conn.commit()
 
 
 def robots_allows(domain: str, cache: dict) -> bool:
@@ -144,33 +160,42 @@ def extract_sitemap(xml: str, domain: str, year: int, month: int) -> list[dict]:
         if int(y) != year or int(m) != month:
             continue
         seen.add(url)
-        slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
-        title = re.sub(r"[-_]+", " ", re.sub(r"\d+$", "", slug)).strip()
-        out.append({"url": url, "title": title, "date": f"{y}-{m}-{d}"})
+        out.append({"url": url, "title": _title_from_slug(url), "date": f"{y}-{m}-{d}"})
     return out
 
 
-def extract(html: str, domain: str, year: int, month: int) -> list[dict]:
-    """Заголовок и дата берутся прямо со страницы архива — за статьёй ходить не нужно.
+def _title_from_slug(url: str) -> str:
+    slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+    return re.sub(r"[-_]+", " ", re.sub(r"\d+$", "", slug)).strip()
 
-    Обязательна фильтрация по запрошенному месяцу: страницы архива содержат боковые
-    блоки «последние новости» и «популярное», и без фильтра в выдачу за август 2024
-    попадают статьи за сентябрь 2026. Корпус молча наполнялся бы неверными датами,
-    а ошибка проявилась бы только на стыковке с панелью — то есть поздно.
+
+def extract(html: str, domain: str, year: int, month: int) -> list[dict]:
+    """Заголовки и даты со страницы архива — за статьёй ходить не нужно.
+
+    Разбор расцеплён на два шага намеренно. Сначала находятся датированные адреса,
+    и только потом для каждого ищется заголовок. Единая регулярка вида
+    `<a href="...">Заголовок</a>` работала лишь там, где текст лежит прямым узлом
+    внутри ссылки; у изданий с разметкой `<a href="..."><h3>Заголовок</h3></a>`
+    она молча давала ноль при том, что датированных ссылок на странице были десятки.
+    Когда заголовок достать не удалось, он восстанавливается из слага адреса.
+
+    Фильтр по запрошенному месяцу обязателен: страницы архива содержат боковые
+    блоки «последние новости», и без него в выдачу за август 2024 попадают статьи
+    за сентябрь 2026.
     """
-    seen, out = set(), []
+    titles = {}
     for match in TITLE_RE.finditer(html):
-        url, title = match.group("url"), match.group("title").strip()
-        date = ARTICLE_RE.search(f'href="{url}"')
-        if not date or url in seen or domain not in urlparse(url).netloc:
+        titles.setdefault(match.group("url"), match.group("title").strip())
+
+    seen, out = set(), []
+    for url, y, m, d in ARTICLE_RE.findall(html):
+        if url in seen or domain not in urlparse(url).netloc:
             continue
-        if int(date.group(2)) != year or int(date.group(3)) != month:
+        if int(y) != year or int(m) != month:
             continue
         seen.add(url)
-        out.append(
-            {"url": url, "title": title,
-             "date": f"{date.group(2)}-{date.group(3)}-{date.group(4)}"}
-        )
+        out.append({"url": url, "title": titles.get(url) or _title_from_slug(url),
+                    "date": f"{y}-{m}-{d}"})
     return out
 
 
@@ -201,7 +226,7 @@ def main() -> int:
 
     out_dir = ROOT / args.out
     (out_dir / "raw").mkdir(parents=True, exist_ok=True)
-    conn = open_state(out_dir / "state.db")
+    init_state(out_dir / "state.db")
     session = requests.Session()
     session.headers["User-Agent"] = UA
     robots_cache: dict = {}
@@ -223,7 +248,7 @@ def main() -> int:
         try:
             for year, month in months(args.start, args.end):
                 for page in range(1, args.max_pages + 1):
-                    if already_done(conn, outlet.domain, year, month, page):
+                    if already_done(outlet.domain, year, month, page):
                         continue
                     template = outlet.month_url_template if page == 1 else outlet.page_url_template
                     url = template.format(year=year, month=f"{month:02d}", page=page)
@@ -246,7 +271,7 @@ def main() -> int:
                         sink.write(json.dumps(item, ensure_ascii=False) + "\n")
                     sink.flush()
 
-                    mark(conn, outlet.domain, year, month, page, status, len(items))
+                    mark(outlet.domain, year, month, page, status, len(items))
                     collected += len(items)
                     counter["total"] += len(items)
                     time.sleep(args.delay)

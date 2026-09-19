@@ -101,14 +101,6 @@
     "note": "Региональный филиал ВГТРК (ГТРК «Воронеж») — государственный холдинг, не независимое коммерческое СМИ."
   },
   {
-    "region_name": "Липецкая область",
-    "domain": "dobvesti.ru",
-    "month_url_template": "https://dobvesti.ru/{year}/{month}",
-    "page_url_template": "https://dobvesti.ru/{year}/{month}/page/{page}",
-    "economy_type": "аграрные юг и чернозёмная полоса",
-    "note": "Формально районное издание (Добринский район), но контент и заголовки — по всей Липецкой области; областных порталов с рабочим архивом не найдено."
-  },
-  {
     "region_name": "Курская область",
     "domain": "kpravda.ru",
     "month_url_template": "https://kpravda.ru/{year}/{month}/",
