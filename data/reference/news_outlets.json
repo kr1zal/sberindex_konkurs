@@ -58,22 +58,6 @@
     "note": "Бонусный регион, не входил в исходный список 36 кандидатов; найден как часть той же сети городских порталов."
   },
   {
-    "region_name": "Удмуртская Республика",
-    "domain": "ud18.ru",
-    "month_url_template": "https://ud18.ru/{year}/{month}/",
-    "page_url_template": "https://ud18.ru/{year}/{month}/page/{page}/",
-    "economy_type": "промышленные Урал и Поволжье",
-    "note": "Даты в URL отдельной статьи нет; дата подтверждена по заголовку и содержимому страницы архива."
-  },
-  {
-    "region_name": "Республика Башкортостан",
-    "domain": "sterlegrad.ru",
-    "month_url_template": "https://sterlegrad.ru/{year}/{month}/",
-    "page_url_template": "https://sterlegrad.ru/{year}/{month}/page/{page}/",
-    "economy_type": "промышленные Урал и Поволжье",
-    "note": "Движок DataLife Engine. Даты в URL статьи нет (числовой ID), дата подтверждена по заголовку страницы архива и нулевому пересечению ID статей между контрольными месяцами."
-  },
-  {
     "region_name": "Ульяновская область",
     "domain": "ulpressa.ru",
     "month_url_template": "https://ulpressa.ru/{year}/{month}/",
