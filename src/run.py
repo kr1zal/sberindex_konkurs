@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.metrics import mae, mase, r2, smape  # noqa: E402
 from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
+from src.models.foundation import Chronos  # noqa: E402
 from src.models.global_model import GlobalGBM  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
@@ -32,6 +33,9 @@ REGISTRY = {
     "theta": lambda: Theta(),
     "arima111": lambda: ARIMA(order=(1, 1, 1)),
     "arima011": lambda: ARIMA(order=(0, 1, 1)),
+    "chronos_tiny": lambda: Chronos(size="tiny"),
+    "chronos_small": lambda: Chronos(size="small"),
+    "chronos_base": lambda: Chronos(size="base"),
 }
 
 # Prophet в канонической конфигурации стоит 3.5 с на подгонку против 0.08 с без
