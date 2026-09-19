@@ -20,7 +20,11 @@ models:
   - seasonal_naive
   - drift
   - seasonal_drift
+  - prophet_no_yearly
   - prophet
 
 output:
   dir: results
+
+compute:
+  workers: 0          # 0 = все ядра минус одно

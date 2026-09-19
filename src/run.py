@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -25,52 +27,82 @@ REGISTRY = {
     "seasonal_drift": lambda: SeasonalDrift(season=12),
 }
 
+# Prophet в канонической конфигурации стоит 3.5 с на подгонку против 0.08 с без
+# годовой сезонности — разница в 47 раз. На 24 точках Фурье-компоненты годового
+# цикла оставляют оптимизатору почти вырожденную задачу, и это та же
+# недоопределённость, о которой Prophet сам предупреждает в логе.
+# Обе конфигурации считаются как отдельные модели: выключить сезонность и
+# назвать результат базовой моделью значило бы подогнать эталон под себя.
+PROPHET_VARIANTS = {
+    "prophet": {"yearly_seasonality": True},
+    "prophet_no_yearly": {"yearly_seasonality": False, "uncertainty_samples": 0},
+}
+
 
 def _build_model(name: str):
-    if name == "prophet":
+    if name in PROPHET_VARIANTS:
         from src.models.prophet_model import ProphetModel
 
-        return ProphetModel()
+        return ProphetModel(**PROPHET_VARIANTS[name])
     if name not in REGISTRY:
         raise KeyError(f"модель не зарегистрирована: {name}")
     return REGISTRY[name]()
 
 
-def evaluate(wide: pd.DataFrame, model_name: str, horizon: int, n_folds: int) -> pd.DataFrame:
-    """Гоняет одну модель по всем рядам и фолдам. Возвращает результат по каждой паре."""
+def _score_series(task: tuple) -> list[dict]:
+    """Считает одну пару ряд-модель по всем фолдам. Верхнего уровня — чтобы пиклилось."""
+    model_name, col, series, index, folds, horizon = task
+    out = []
+    for fold in folds:
+        y_train = series[: fold.train_end]
+        y_test = series[fold.test_start : fold.test_end]
+
+        model = _build_model(model_name)
+        if hasattr(model, "set_index"):
+            model.set_index(index)
+        try:
+            y_pred = model.fit(y_train).predict(horizon)
+        except Exception as exc:  # одна упавшая подгонка не должна ронять прогон
+            out.append(
+                {"model": model_name, "fold": fold.index, "mo": col, "error": str(exc)[:120]}
+            )
+            continue
+
+        out.append(
+            {
+                "model": model_name,
+                "fold": fold.index,
+                "mo": col,
+                "mae": mae(y_test, y_pred),
+                "r2": r2(y_test, y_pred),
+                "smape": smape(y_test, y_pred),
+                "mase": mase(y_test, y_pred, y_train, season=1),
+                "error": None,
+            }
+        )
+    return out
+
+
+def evaluate(
+    wide: pd.DataFrame, model_name: str, horizon: int, n_folds: int, workers: int = 1
+) -> pd.DataFrame:
+    """Гоняет одну модель по всем рядам и фолдам.
+
+    Параллелится по рядам, а не по фолдам: ряды независимы, а фолды внутри ряда
+    делят обучающую историю и дробить их смысла нет.
+    """
     folds = rolling_origin(n_obs=wide.shape[0], horizon=horizon, n_folds=n_folds)
     index = wide.index
-    rows = []
+    tasks = [
+        (model_name, col, wide[col].to_numpy(dtype=float), index, folds, horizon)
+        for col in wide.columns
+    ]
 
-    for fold in folds:
-        for col in wide.columns:
-            series = wide[col].to_numpy(dtype=float)
-            y_train = series[: fold.train_end]
-            y_test = series[fold.test_start : fold.test_end]
-
-            model = _build_model(model_name)
-            if hasattr(model, "set_index"):
-                model.set_index(index)
-            try:
-                y_pred = model.fit(y_train).predict(horizon)
-            except Exception as exc:  # одна упавшая модель не должна ронять прогон
-                rows.append(
-                    {"model": model_name, "fold": fold.index, "mo": col, "error": str(exc)[:120]}
-                )
-                continue
-
-            rows.append(
-                {
-                    "model": model_name,
-                    "fold": fold.index,
-                    "mo": col,
-                    "mae": mae(y_test, y_pred),
-                    "r2": r2(y_test, y_pred),
-                    "smape": smape(y_test, y_pred),
-                    "mase": mase(y_test, y_pred, y_train, season=1),
-                    "error": None,
-                }
-            )
+    if workers <= 1:
+        rows = [row for task in tasks for row in _score_series(task)]
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            rows = [row for chunk in pool.map(_score_series, tasks, chunksize=8) for row in chunk]
     return pd.DataFrame(rows)
 
 
@@ -111,11 +143,14 @@ def main() -> int:
         print(f"  фолд {f.index}: обучение 1..{f.train_end}, тест {f.test_start + 1}..{f.test_end}")
     print()
 
+    workers = int(cfg.get("compute", {}).get("workers", 0)) or max(1, (os.cpu_count() or 2) - 1)
+    print(f"параллельно процессов: {workers}\n")
+
     names = args.models if args.models else cfg["models"]
     parts = []
     for name in names:
         started = time.perf_counter()
-        part = evaluate(wide, name, cfg["split"]["horizon"], cfg["split"]["n_folds"])
+        part = evaluate(wide, name, cfg["split"]["horizon"], cfg["split"]["n_folds"], workers)
         parts.append(part)
         print(f"{name}: {time.perf_counter() - started:.1f} с")
 
