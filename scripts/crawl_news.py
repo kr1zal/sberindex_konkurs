@@ -49,6 +49,13 @@ class Outlet:
     page_url_template: str
     economy_type: str = ""
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "Outlet":
+        """Лишние поля в списке изданий игнорируются: список ведётся руками
+        и обрастает пометками, ронять из-за этого многочасовой обход глупо."""
+        known = {f for f in cls.__dataclass_fields__}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
 
 def open_state(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
@@ -139,7 +146,7 @@ def main() -> int:
     if not outlets_path.exists():
         print(f"нет файла со списком изданий: {outlets_path}", file=sys.stderr)
         return 1
-    outlets = [Outlet(**o) for o in json.loads(outlets_path.read_text(encoding="utf-8"))]
+    outlets = [Outlet.from_dict(o) for o in json.loads(outlets_path.read_text(encoding="utf-8"))]
 
     out_dir = ROOT / args.out
     (out_dir / "raw").mkdir(parents=True, exist_ok=True)
