@@ -15,13 +15,6 @@
     "note": "Архив не постраничный HTML, а XML sitemap за месяц одним файлом (7-9 тыс. записей); пагинация не нужна. Дата в <lastmod>. Лента включает не только областные материалы."
   },
   {
-    "region_name": "Свердловская область",
-    "domain": "e1.ru",
-    "month_url_template": "https://e1.ru/text/{year}/{month}/",
-    "page_url_template": "https://e1.ru/text/{year}/{month}/page-{page}/",
-    "economy_type": "столичные и крупные агломерации"
-  },
-  {
     "region_name": "Новосибирская область",
     "domain": "ngs.ru",
     "month_url_template": "https://ngs.ru/text/{year}/{month}/",

@@ -27,8 +27,10 @@ import json
 import re
 import sqlite3
 import sys
+import threading
 import time
 import urllib.robotparser
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -39,6 +41,9 @@ ROOT = Path(__file__).resolve().parents[1]
 UA = "SberIndexContestBot/1.0 (research project; contact kr1zal@yandex.ru)"
 ARTICLE_RE = re.compile(r'href="(https?://[^"]*?/(\d{4})/(\d{2})/(\d{2})/[^"]+?)"')
 TITLE_RE = re.compile(r'<a[^>]+href="(?P<url>[^"]+)"[^>]*>(?P<title>[^<]{15,300})</a>')
+URL_BLOCK_RE = re.compile(r"<url>(.*?)</url>", re.S)
+LOC_RE = re.compile(r"<loc>\s*(https?://[^<\s]+)\s*</loc>")
+LASTMOD_RE = re.compile(r"<lastmod>\s*(\d{4})-(\d{2})-(\d{2})")
 
 
 @dataclass
@@ -57,8 +62,14 @@ class Outlet:
         return cls(**{k: v for k, v in data.items() if k in known})
 
 
+STATE_LOCK = threading.Lock()
+
+
 def open_state(path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+    # check_same_thread=False + WAL: издания обходятся параллельно, но пишут в одну
+    # таблицу состояния. Запись под общим замком, чтения конкурентны.
+    conn = sqlite3.connect(path, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS visited (
                domain TEXT, year INTEGER, month INTEGER, page INTEGER,
@@ -78,11 +89,12 @@ def already_done(conn: sqlite3.Connection, domain: str, year: int, month: int, p
 
 
 def mark(conn, domain, year, month, page, status, found) -> None:
-    conn.execute(
-        "INSERT OR REPLACE INTO visited VALUES (?,?,?,?,?,?,datetime('now'))",
-        (domain, year, month, page, status, found),
-    )
-    conn.commit()
+    with STATE_LOCK:
+        conn.execute(
+            "INSERT OR REPLACE INTO visited VALUES (?,?,?,?,?,?,datetime('now'))",
+            (domain, year, month, page, status, found),
+        )
+        conn.commit()
 
 
 def robots_allows(domain: str, cache: dict) -> bool:
@@ -98,6 +110,44 @@ def robots_allows(domain: str, cache: dict) -> bool:
         cache[domain] = parser
     parser = cache[domain]
     return True if parser is None else parser.can_fetch(UA, f"https://{domain}/2024/01/")
+
+
+def extract_sitemap(xml: str, domain: str, year: int, month: int) -> list[dict]:
+    """Разбор XML-карты сайта.
+
+    Здесь две тонкости против HTML-архива. Ссылки лежат в <loc>, атрибута href нет
+    вовсе. И дата у большинства изданий не в адресе статьи, а в соседнем теге
+    <lastmod> — искать её в URL, как в HTML-архивах, бесполезно.
+
+    Заголовка карта не содержит, поэтому он восстанавливается из слага адреса:
+    для сигнала интенсивности освещения и разбора по ключевым словам этого хватает,
+    а для дословных цитат карта и не предназначена.
+    """
+    out, seen = [], set()
+    for block in URL_BLOCK_RE.findall(xml):
+        loc = LOC_RE.search(block)
+        mod = LASTMOD_RE.search(block)
+        if not loc:
+            continue
+        url = loc.group(1)
+        if url in seen or domain not in urlparse(url).netloc:
+            continue
+
+        if mod:
+            y, m, d = mod.group(1), mod.group(2), mod.group(3)
+        else:
+            from_url = ARTICLE_RE.search(f'href="{url}"')
+            if not from_url:
+                continue
+            y, m, d = from_url.group(2), from_url.group(3), from_url.group(4)
+
+        if int(y) != year or int(m) != month:
+            continue
+        seen.add(url)
+        slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+        title = re.sub(r"[-_]+", " ", re.sub(r"\d+$", "", slug)).strip()
+        out.append({"url": url, "title": title, "date": f"{y}-{m}-{d}"})
+    return out
 
 
 def extract(html: str, domain: str, year: int, month: int) -> list[dict]:
@@ -140,6 +190,7 @@ def main() -> int:
     ap.add_argument("--delay", type=float, default=1.0, help="пауза между запросами, секунд")
     ap.add_argument("--max-pages", type=int, default=60)
     ap.add_argument("--out", default="data/news")
+    ap.add_argument("--workers", type=int, default=8, help="изданий параллельно")
     args = ap.parse_args()
 
     outlets_path = ROOT / args.outlets
@@ -155,41 +206,63 @@ def main() -> int:
     session.headers["User-Agent"] = UA
     robots_cache: dict = {}
 
-    total_new = 0
-    for outlet in outlets:
+    # Пауза в секунду нужна ОДНОМУ домену, разные сайты друг другу не мешают.
+    # Поэтому издания обходятся параллельно, а вежливость к каждому сохраняется:
+    # внутри потока запросы к его домену идут последовательно с паузой.
+    counter = {"total": 0}
+
+    def crawl_outlet(outlet: Outlet) -> None:
         if not robots_allows(outlet.domain, robots_cache):
             print(f"[{outlet.domain}] robots.txt запрещает архивы — пропускаю")
-            continue
+            return
 
+        local = requests.Session()
+        local.headers["User-Agent"] = UA
         sink = (out_dir / "raw" / f"{outlet.domain}.jsonl").open("a", encoding="utf-8")
-        for year, month in months(args.start, args.end):
-            for page in range(1, args.max_pages + 1):
-                if already_done(conn, outlet.domain, year, month, page):
-                    continue
-                template = outlet.month_url_template if page == 1 else outlet.page_url_template
-                url = template.format(year=year, month=f"{month:02d}", page=page)
+        collected = 0
+        try:
+            for year, month in months(args.start, args.end):
+                for page in range(1, args.max_pages + 1):
+                    if already_done(conn, outlet.domain, year, month, page):
+                        continue
+                    template = outlet.month_url_template if page == 1 else outlet.page_url_template
+                    url = template.format(year=year, month=f"{month:02d}", page=page)
 
-                try:
-                    response = session.get(url, timeout=30)
-                    status = response.status_code
-                    items = extract(response.text, outlet.domain, year, month) if status == 200 else []
-                except Exception as exc:
-                    print(f"  {url} -> ошибка: {str(exc)[:60]}")
-                    status, items = 0, []
+                    try:
+                        response = local.get(url, timeout=30)
+                        status = response.status_code
+                        if status != 200:
+                            items = []
+                        elif "xml" in response.headers.get("Content-Type", "") or url.endswith(".xml") or "sitemap" in url:
+                            items = extract_sitemap(response.text, outlet.domain, year, month)
+                        else:
+                            items = extract(response.text, outlet.domain, year, month)
+                    except Exception as exc:
+                        print(f"  [{outlet.domain}] {url} -> ошибка: {str(exc)[:60]}")
+                        status, items = 0, []
 
-                for item in items:
-                    item |= {"region_name": outlet.region_name, "domain": outlet.domain}
-                    sink.write(json.dumps(item, ensure_ascii=False) + "\n")
-                sink.flush()
+                    for item in items:
+                        item |= {"region_name": outlet.region_name, "domain": outlet.domain}
+                        sink.write(json.dumps(item, ensure_ascii=False) + "\n")
+                    sink.flush()
 
-                mark(conn, outlet.domain, year, month, page, status, len(items))
-                total_new += len(items)
-                time.sleep(args.delay)
+                    mark(conn, outlet.domain, year, month, page, status, len(items))
+                    collected += len(items)
+                    counter["total"] += len(items)
+                    time.sleep(args.delay)
 
-                if status != 200 or not items:
-                    break  # страницы кончились — дальше в этом месяце смысла нет
-            print(f"[{outlet.domain}] {year}-{month:02d} готов, всего собрано {total_new}")
-        sink.close()
+                    if status != 200 or not items:
+                        break
+        finally:
+            sink.close()
+        if collected == 0:
+            print(f"[{outlet.domain}] ВНИМАНИЕ: собрано 0 статей — шаблон URL или разбор не подходят")
+        else:
+            print(f"[{outlet.domain}] завершено, собрано {collected}")
+
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        list(pool.map(crawl_outlet, outlets))
+    total_new = counter["total"]
 
     print(f"\nновых записей за прогон: {total_new}")
     return 0
