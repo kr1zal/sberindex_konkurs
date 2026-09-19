@@ -4,6 +4,169 @@
     "domain": "orelgrad.ru",
     "month_url_template": "https://orelgrad.ru/{year}/{month}/",
     "page_url_template": "https://orelgrad.ru/{year}/{month}/page/{page}/",
-    "economy_type": "аграрно-промышленная средняя полоса"
+    "economy_type": "аграрные юг и чернозёмная полоса"
+  },
+  {
+    "region_name": "Московская область",
+    "domain": "riamo.ru",
+    "month_url_template": "https://riamo.ru/sitemap-allnews.xml?p={year}-{month}",
+    "page_url_template": null,
+    "economy_type": "столичные и крупные агломерации",
+    "note": "Архив не постраничный HTML, а XML sitemap за месяц одним файлом (7-9 тыс. записей); пагинация не нужна. Дата в <lastmod>. Лента включает не только областные материалы."
+  },
+  {
+    "region_name": "Свердловская область",
+    "domain": "e1.ru",
+    "month_url_template": "https://e1.ru/text/{year}/{month}/",
+    "page_url_template": "https://e1.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "столичные и крупные агломерации"
+  },
+  {
+    "region_name": "Новосибирская область",
+    "domain": "ngs.ru",
+    "month_url_template": "https://ngs.ru/text/{year}/{month}/",
+    "page_url_template": "https://ngs.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "столичные и крупные агломерации"
+  },
+  {
+    "region_name": "Республика Татарстан",
+    "domain": "116.ru",
+    "month_url_template": "https://116.ru/text/{year}/{month}/",
+    "page_url_template": "https://116.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "столичные и крупные агломерации"
+  },
+  {
+    "region_name": "Челябинская область",
+    "domain": "74.ru",
+    "month_url_template": "https://74.ru/text/{year}/{month}/",
+    "page_url_template": "https://74.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "промышленные Урал и Поволжье"
+  },
+  {
+    "region_name": "Пермский край",
+    "domain": "59.ru",
+    "month_url_template": "https://59.ru/text/{year}/{month}/",
+    "page_url_template": "https://59.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "промышленные Урал и Поволжье"
+  },
+  {
+    "region_name": "Самарская область",
+    "domain": "63.ru",
+    "month_url_template": "https://63.ru/text/{year}/{month}/",
+    "page_url_template": "https://63.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "промышленные Урал и Поволжье"
+  },
+  {
+    "region_name": "Волгоградская область",
+    "domain": "v1.ru",
+    "month_url_template": "https://v1.ru/text/{year}/{month}/",
+    "page_url_template": "https://v1.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "промышленные Урал и Поволжье",
+    "note": "Бонусный регион, не входил в исходный список 36 кандидатов; найден как часть той же сети городских порталов."
+  },
+  {
+    "region_name": "Удмуртская Республика",
+    "domain": "ud18.ru",
+    "month_url_template": "https://ud18.ru/{year}/{month}/",
+    "page_url_template": "https://ud18.ru/{year}/{month}/page/{page}/",
+    "economy_type": "промышленные Урал и Поволжье",
+    "note": "Даты в URL отдельной статьи нет; дата подтверждена по заголовку и содержимому страницы архива."
+  },
+  {
+    "region_name": "Республика Башкортостан",
+    "domain": "sterlegrad.ru",
+    "month_url_template": "https://sterlegrad.ru/{year}/{month}/",
+    "page_url_template": "https://sterlegrad.ru/{year}/{month}/page/{page}/",
+    "economy_type": "промышленные Урал и Поволжье",
+    "note": "Движок DataLife Engine. Даты в URL статьи нет (числовой ID), дата подтверждена по заголовку страницы архива и нулевому пересечению ID статей между контрольными месяцами."
+  },
+  {
+    "region_name": "Ульяновская область",
+    "domain": "ulpressa.ru",
+    "month_url_template": "https://ulpressa.ru/{year}/{month}/",
+    "page_url_template": "https://ulpressa.ru/{year}/{month}/page/{page}/",
+    "economy_type": "промышленные Урал и Поволжье"
+  },
+  {
+    "region_name": "Тюменская область",
+    "domain": "72.ru",
+    "month_url_template": "https://72.ru/text/{year}/{month}/",
+    "page_url_template": "https://72.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "сырьевые (нефть, газ, металлы)"
+  },
+  {
+    "region_name": "Кемеровская область",
+    "domain": "ngs42.ru",
+    "month_url_template": "https://ngs42.ru/text/{year}/{month}/",
+    "page_url_template": "https://ngs42.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "сырьевые (нефть, газ, металлы)"
+  },
+  {
+    "region_name": "Краснодарский край",
+    "domain": "93.ru",
+    "month_url_template": "https://93.ru/text/{year}/{month}/",
+    "page_url_template": "https://93.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "аграрные юг и чернозёмная полоса"
+  },
+  {
+    "region_name": "Ростовская область",
+    "domain": "161.ru",
+    "month_url_template": "https://161.ru/text/{year}/{month}/",
+    "page_url_template": "https://161.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "аграрные юг и чернозёмная полоса"
+  },
+  {
+    "region_name": "Воронежская область",
+    "domain": "vestivrn.ru",
+    "month_url_template": "https://vestivrn.ru/news/{year}/{month}/",
+    "page_url_template": "https://vestivrn.ru/news/{year}/{month}/page/{page}/",
+    "economy_type": "аграрные юг и чернозёмная полоса",
+    "note": "Региональный филиал ВГТРК (ГТРК «Воронеж») — государственный холдинг, не независимое коммерческое СМИ."
+  },
+  {
+    "region_name": "Липецкая область",
+    "domain": "dobvesti.ru",
+    "month_url_template": "https://dobvesti.ru/{year}/{month}",
+    "page_url_template": "https://dobvesti.ru/{year}/{month}/page/{page}",
+    "economy_type": "аграрные юг и чернозёмная полоса",
+    "note": "Формально районное издание (Добринский район), но контент и заголовки — по всей Липецкой области; областных порталов с рабочим архивом не найдено."
+  },
+  {
+    "region_name": "Курская область",
+    "domain": "kpravda.ru",
+    "month_url_template": "https://kpravda.ru/{year}/{month}/",
+    "page_url_template": "https://kpravda.ru/{year}/{month}/page/{page}/",
+    "economy_type": "аграрные юг и чернозёмная полоса",
+    "note": "robots.txt закрывает Disallow: */page — пагинация архива формально запрещена, при уважении robots.txt доступна только первая страница месяца (~12 статей) плюс дневные URL /{year}/{month}/{day}/."
+  },
+  {
+    "region_name": "Ставропольский край",
+    "domain": "pravda-kmv.ru",
+    "month_url_template": "https://pravda-kmv.ru/{year}/{month}/{day}/",
+    "page_url_template": "https://pravda-kmv.ru/{year}/{month}/page/{page}/",
+    "economy_type": "аграрные юг и чернозёмная полоса",
+    "note": "Гранулярность подневная (~5 статей/день), /{year}/{month}/ без дня — это календарь-хаб, не список статей. Издание территориально ориентировано на агломерацию Кавминвод, а не на весь край."
+  },
+  {
+    "region_name": "Архангельская область",
+    "domain": "29.ru",
+    "month_url_template": "https://29.ru/text/{year}/{month}/",
+    "page_url_template": "https://29.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "северные и дальневосточные"
+  },
+  {
+    "region_name": "Мурманская область",
+    "domain": "51.ru",
+    "month_url_template": "https://51.ru/text/{year}/{month}/",
+    "page_url_template": "https://51.ru/text/{year}/{month}/page-{page}/",
+    "economy_type": "северные и дальневосточные"
+  },
+  {
+    "region_name": "Амурская область",
+    "domain": "ampravda.ru",
+    "month_url_template": "https://ampravda.ru/{year}/{month}/",
+    "page_url_template": "https://ampravda.ru/{year}/{month}?page={page}",
+    "economy_type": "приграничные и курортные",
+    "note": "Формат слага статьи менялся со временем: числовой ID + .html в 2023 году, словесный слаг в 2024-м — оба подтверждены отдельно."
   }
 ]

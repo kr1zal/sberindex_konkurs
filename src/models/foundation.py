@@ -36,12 +36,19 @@ class Chronos:
     нас и оценивают.
     """
 
-    def __init__(self, size: str = "small") -> None:
+    def __init__(self, size: str = "small", transform: str = "none") -> None:
         self.model_id = f"amazon/chronos-bolt-{size}"
-        self.name = f"chronos_bolt_{size}"
+        self.transform = transform
+        self.name = f"chronos_{size}" + ("" if transform == "none" else f"_{transform}")
 
     def fit(self, y: np.ndarray) -> "Chronos":
-        self._context = np.asarray(y, dtype=float)
+        y = np.asarray(y, dtype=float)
+        # Из коробки Chronos проигрывает наивной модели: он инвариантен к масштабу и
+        # не воспроизводит инфляционный рост в 15-17% годовых - на Орле предсказал
+        # плавное снижение там, где факт рос. Логарифм превращает мультипликативный
+        # тренд в аддитивный, который модель переносит куда увереннее.
+        self._logged = self.transform == "log" and np.all(y > 0)
+        self._context = np.log(y) if self._logged else y
         return self
 
     def predict(self, horizon: int) -> np.ndarray:
@@ -52,4 +59,5 @@ class Chronos:
         quantiles, _mean = pipeline.predict_quantiles(
             context, prediction_length=horizon, quantile_levels=[0.5]
         )
-        return quantiles[0, :, 0].numpy().astype(float)
+        out = quantiles[0, :, 0].numpy().astype(float)
+        return np.exp(out) if self._logged else out

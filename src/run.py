@@ -36,6 +36,8 @@ REGISTRY = {
     "chronos_tiny": lambda: Chronos(size="tiny"),
     "chronos_small": lambda: Chronos(size="small"),
     "chronos_base": lambda: Chronos(size="base"),
+    "chronos_small_log": lambda: Chronos(size="small", transform="log"),
+    "chronos_base_log": lambda: Chronos(size="base", transform="log"),
 }
 
 # Prophet в канонической конфигурации стоит 3.5 с на подгонку против 0.08 с без
