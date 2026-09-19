@@ -8,5 +8,7 @@ venv/
 results/*.csv
 results/*.json
 !results/.gitkeep
-data/news/state.db
+# SQLite в режиме WAL создаёт рядом -wal и -shm: правило на голое имя
+# их не ловит, и они уезжают в коммит
+data/news/state.db*
 data/news/raw/
