@@ -1,0 +1,9 @@
+[
+  {
+    "region_name": "Орловская область",
+    "domain": "orelgrad.ru",
+    "month_url_template": "https://orelgrad.ru/{year}/{month}/",
+    "page_url_template": "https://orelgrad.ru/{year}/{month}/page/{page}/",
+    "economy_type": "аграрно-промышленная средняя полоса"
+  }
+]

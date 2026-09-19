@@ -8,3 +8,5 @@ venv/
 results/*.csv
 results/*.json
 !results/.gitkeep
+data/news/state.db
+data/news/raw/
