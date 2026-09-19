@@ -20,6 +20,7 @@ models:
   - seasonal_naive
   - drift
   - seasonal_drift
+  - global_gbm
   - prophet_no_yearly
   - prophet
 
