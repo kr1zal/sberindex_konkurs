@@ -158,6 +158,17 @@ out["факт"] = np.round(y[15:18])
 pd.DataFrame(out, index=["месяц +1", "месяц +2", "месяц +3"])
 ```
 
+```{python}
+#| echo: false
+#| fig-cap: "Один флаг конфигурации: зелёная линия почти совпадает с фактом, оранжевая уходит в минус."
+from src import charts
+_can = ProphetModel(yearly_seasonality=True).set_index(wide.index).fit(y[:15]).predict(3)
+_fix = ProphetModel(yearly_seasonality=False, uncertainty_samples=0).set_index(wide.index).fit(y[:15]).predict(3)
+_fig = charts.prophet_failure(wide, "городской округ город Орёл", _can, _fix)
+import matplotlib.pyplot as plt
+plt.show()
+```
+
 Канонический Prophet предсказывает **отрицательные потребительские расходы**.
 Годовая сезонность на пятнадцати точках не идентифицируется, и компоненты Фурье
 расходятся. Prophet предупреждает об этом сам: «Yearly seasonality is enabled with less
@@ -180,6 +191,15 @@ decomposition can be unstable **and dependent on the Prophet/Stan version**» �
 ```{python}
 summary = table("../results/summary.csv", index_col=0)
 summary.sort_values("MAE") if "MAE" in summary else summary
+```
+
+```{python}
+#| echo: false
+#| fig-cap: "Планка — исправленный Prophet. Классические модели сбиты в плотную группу справа от неё."
+if "MAE" in summary:
+    _fig = charts.model_comparison(summary)
+    import matplotlib.pyplot as plt
+    plt.show()
 ```
 
 ### Что из этого следует
@@ -270,6 +290,35 @@ share = pd.Series(counts / wide.shape[1] * 100, index=wide.index.strftime("%Y-%m
 share[share > 5].round(1).to_frame()
 ```
 
+
+```{python}
+#| echo: false
+from src import charts
+from src.changepoints import detect_pelt
+from src.cp_bench import preprocess
+
+_counts = np.zeros(len(wide.index), int)
+for _c in wide.columns:
+    for _b in detect_pelt(preprocess(wide[_c].to_numpy(float), "ratio"), penalty=1.0).breakpoints:
+        if 0 <= _b + 1 < len(wide.index):
+            _counts[_b + 1] += 1
+break_share = pd.Series(_counts / wide.shape[1] * 100, index=wide.index.strftime("%Y-%m"))
+
+_r = pd.read_parquet("../data/reference/key_rate.parquet")
+_r["period"] = pd.to_datetime(_r["period"])
+_r = _r[(_r.key_rate_categories == "Ключевая ставка в реальном выражении")
+        & (_r.period >= "2023-01-01") & (_r.period <= "2024-12-31")].sort_values("period")
+real_rate = pd.Series(_r.value.values, index=break_share.index)
+```
+
+```{python}
+#| echo: false
+#| fig-cap: "Две панели с общей осью времени. Пунктиры отмечают месяцы массового согласия."
+_fig = charts.breaks_vs_rate(break_share, real_rate)
+import matplotlib.pyplot as plt
+plt.show()
+```
+
 Три месяца массового согласия: в остальные месяцы доля не превышает двенадцати процентов.
 Сигнал резкий, а не размазанный, — значит это общие шоки, а не шум отдельных рядов.
 
@@ -286,6 +335,16 @@ share[share > 5].round(1).to_frame()
 Январь 2024 — месяц с сильнейшим изменением реальной ставки за весь период.
 Октябрь 2023 по величине изменения лишь одиннадцатый, но это точка разворота:
 ставка достигла минимума и пошла вверх.
+
+```{python}
+#| echo: false
+#| fig-cap: "Метод на одном реальном ряду: найденные разладки отмечены пунктиром."
+_y = wide["городской округ город Орёл"].to_numpy(float)
+_br = [b + 1 for b in detect_pelt(preprocess(_y, "ratio"), penalty=1.0).breakpoints]
+_fig = charts.series_with_breaks(_y, wide.index, _br, "Орёл: расходы и найденные разладки")
+import matplotlib.pyplot as plt
+plt.show()
+```
 
 **Два ограничения, без которых этот результат нельзя читать.**
 

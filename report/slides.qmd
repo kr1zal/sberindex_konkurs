@@ -57,7 +57,10 @@ for label, kw in [("Prophet канонический", dict(yearly_seasonality=T
                   ("Prophet без годовой сезонности", dict(yearly_seasonality=False, uncertainty_samples=0))]:
     rows[label] = np.round(ProphetModel(**kw).set_index(wide.index).fit(y[:15]).predict(3))
 rows["факт"] = np.round(y[15:18])
-md_table(pd.DataFrame(rows, index=["+1 мес", "+2 мес", "+3 мес"]))
+from src import charts
+_fig = charts.prophet_failure(wide, "городской округ город Орёл", rows["Prophet канонический"], rows["Prophet без годовой сезонности"])
+import matplotlib.pyplot as plt
+plt.show()
 ```
 
 Годовая сезонность на 15 точках не идентифицируется — **прогноз уходит
@@ -91,9 +94,10 @@ flowchart LR
 ## Сравнение моделей прогнозирования
 
 ```{python}
-s = pd.read_csv("../results/summary.csv", index_col=0).sort_values("MAE")
-s = s[["MAE","MASE","sMAPE"]].round({"MAE":0,"MASE":3,"sMAPE":2})
-md_table(s)
+s = pd.read_csv("../results/summary.csv", index_col=0)
+_fig = charts.model_comparison(s)
+import matplotlib.pyplot as plt
+plt.show()
 ```
 
 Классические модели сбиты в плотную группу — это **потолок подхода
@@ -135,7 +139,11 @@ for col in wide.columns:
     for b in detect_pelt(preprocess(wide[col].to_numpy(float), "ratio"), penalty=1.0).breakpoints:
         if 0 <= b+1 < len(wide.index): counts[b+1] += 1
 sh = pd.Series(counts/wide.shape[1]*100, index=wide.index.strftime("%Y-%m"))
-md_table(sh[sh>20].round(1).to_frame("доля МО с разладкой, %"))
+_r = pd.read_parquet("../data/reference/key_rate.parquet"); _r["period"]=pd.to_datetime(_r["period"])
+_r = _r[(_r.key_rate_categories=="Ключевая ставка в реальном выражении")&(_r.period>="2023-01-01")&(_r.period<="2024-12-31")].sort_values("period")
+_fig = charts.breaks_vs_rate(sh, pd.Series(_r.value.values, index=sh.index))
+import matplotlib.pyplot as plt
+plt.show()
 ```
 
 Сверка с реальной ключевой ставкой (тот же источник — СберИндекс):
