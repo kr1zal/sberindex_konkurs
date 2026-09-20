@@ -10,6 +10,9 @@ format:
     code-summary: "Показать код"
     embed-resources: true
     theme: cosmo
+    fig-width: 8
+    fig-dpi: 140
+    css: styles.css
 execute:
   echo: true
   warning: false

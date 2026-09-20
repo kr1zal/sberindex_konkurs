@@ -50,7 +50,7 @@ def prophet_failure(wide: pd.DataFrame, column: str, canonical, fixed) -> plt.Fi
     """История обучения, два прогноза и факт. Отрицательный прогноз виден глазом."""
     y = wide[column].to_numpy(float)
     months = wide.index
-    fig, ax = plt.subplots(figsize=(9, 4.2), facecolor=SURFACE)
+    fig, ax = plt.subplots(figsize=(8, 3.9), facecolor=SURFACE)
 
     ax.plot(months[:15], y[:15], color=INK_SOFT, linewidth=2, label="история обучения")
     # Факт и починенный Prophet почти совпадают — в этом и результат, но одна линия
@@ -82,7 +82,7 @@ def model_comparison(summary: pd.DataFrame, baseline: str = "prophet_no_yearly")
     подсветка строки цветом кодировала бы место в рейтинге, а не сущность."""
     s = summary.sort_values("MAE", ascending=True)
     bar = float(s.loc[baseline, "MAE"])
-    fig, ax = plt.subplots(figsize=(9, 5.2), facecolor=SURFACE)
+    fig, ax = plt.subplots(figsize=(8, 4.8), facecolor=SURFACE)
 
     ax.barh(s.index, s["MAE"], color=SERIES[0], height=0.62, zorder=2)
     ax.axvline(bar, color=INK_SOFT, linewidth=1.5, linestyle="--", zorder=3)
@@ -110,7 +110,7 @@ def breaks_vs_rate(share: pd.Series, rate: pd.Series) -> plt.Figure:
     «связь» выбором пределов, и читатель не может это проверить. Разнесённые панели
     показывают ровно то, что есть: совпадение моментов, а не форму зависимости.
     """
-    fig, (top, bottom) = plt.subplots(2, 1, figsize=(9, 5.6), sharex=True,
+    fig, (top, bottom) = plt.subplots(2, 1, figsize=(8, 5.0), sharex=True,
                                       facecolor=SURFACE, height_ratios=[1, 1])
     x = np.arange(len(share))
     top.bar(x, share.values, color=SERIES[0], width=0.62, zorder=2)
@@ -135,7 +135,7 @@ def breaks_vs_rate(share: pd.Series, rate: pd.Series) -> plt.Figure:
 
 def series_with_breaks(values: np.ndarray, months, breaks, title: str) -> plt.Figure:
     """Один реальный ряд с отмеченными разладками — метод на настоящих данных."""
-    fig, ax = plt.subplots(figsize=(9, 3.6), facecolor=SURFACE)
+    fig, ax = plt.subplots(figsize=(8, 3.3), facecolor=SURFACE)
     ax.plot(months, values, color=SERIES[0], linewidth=2, marker="o", markersize=5)
     for b in breaks:
         if 0 <= b < len(months):

@@ -1,0 +1,12 @@
+/* Графики шире колонки с текстом распирали страницу и вызывали горизонтальную
+   прокрутку: ширина колонки в Quarto фиксирована и от размера экрана не зависит,
+   поэтому проблема воспроизводилась бы и у проверяющего. */
+.cell-output-display img,
+figure img,
+.quarto-figure img {
+  max-width: 100%;
+  height: auto;
+}
+.cell-output-display {
+  overflow-x: visible;
+}
