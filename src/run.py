@@ -249,7 +249,18 @@ def main() -> int:
 
     out_dir = ROOT / cfg["output"]["dir"]
     out_dir.mkdir(parents=True, exist_ok=True)
-    per_series.to_csv(out_dir / "per_series.csv", index=False)
+    # Результаты предыдущих прогонов не затираются, а дополняются: модели часто
+    # гоняются частями (дорогие отдельно от дешёвых), и перезапись молча оставляла
+    # бы в итоговой таблице только последнюю партию. Строки одной и той же модели
+    # заменяются новыми — повторный прогон обновляет, а не дублирует.
+    per_path = out_dir / "per_series.csv"
+    if per_path.exists():
+        previous = pd.read_csv(per_path)
+        previous = previous[~previous["model"].isin(per_series["model"].unique())]
+        per_series = pd.concat([previous, per_series], ignore_index=True)
+
+    per_series.to_csv(per_path, index=False)
+    summary = summarise(per_series)
     summary.to_csv(out_dir / "summary.csv")
 
     print("\n" + summary.to_string(float_format=lambda v: f"{v:,.2f}"))

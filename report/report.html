@@ -2299,7 +2299,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 <section id="источник" class="level3">
 <h3 class="anchored" data-anchor-id="источник">Источник</h3>
 <p>Потребительские безналичные расходы на уровне муниципальных образований, <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>. Помесячно, январь 2023 — декабрь 2024, шесть категорий трат.</p>
-<div id="391d9f7c" class="cell" data-execution_count="2">
+<div id="c5064466" class="cell" data-execution_count="2">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.data <span class="im">import</span> load_panel, build_matrix</span>
@@ -2372,7 +2372,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 <section id="базовая-модель-конкурса" class="level2">
 <h2 class="anchored" data-anchor-id="базовая-модель-конкурса">Базовая модель конкурса</h2>
 <p>Условия требуют превзойти базовую модель по MAE и упоминают Prophet. Мы обнаружили, что в канонической конфигурации он на этих данных вырожден.</p>
-<div id="f58c0419" class="cell" data-execution_count="3">
+<div id="7619c2ac" class="cell" data-execution_count="3">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> logging</span>
@@ -2433,7 +2433,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </section>
 <section id="сравнение-моделей-прогнозирования" class="level2">
 <h2 class="anchored" data-anchor-id="сравнение-моделей-прогнозирования">Сравнение моделей прогнозирования</h2>
-<div id="57d14640" class="cell" data-execution_count="4">
+<div id="b8325a9c" class="cell" data-execution_count="4">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>summary <span class="op">=</span> table(<span class="st">&quot;../results/summary.csv&quot;</span>, index_col<span class="op">=</span><span class="dv">0</span>)</span>
@@ -2465,50 +2465,106 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 <tbody>
 <tr class="odd">
 <th data-quarto-table-cell-role="th">global_gbm</th>
-<td>1,491.81</td>
-<td>0.72</td>
-<td>4.72</td>
-<td>300</td>
+<td>1,466.10</td>
+<td>0.73</td>
+<td>4.69</td>
+<td>2028</td>
 <td>0</td>
 </tr>
 <tr class="even">
 <th data-quarto-table-cell-role="th">prophet_no_yearly</th>
-<td>1,632.85</td>
+<td>1,580.78</td>
 <td>0.84</td>
-<td>5.23</td>
-<td>300</td>
+<td>5.11</td>
+<td>2028</td>
+<td>0</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">ets_damped</th>
+<td>1,675.34</td>
+<td>0.89</td>
+<td>5.47</td>
+<td>2028</td>
+<td>0</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">ets_seasonal</th>
+<td>1,690.10</td>
+<td>0.89</td>
+<td>5.58</td>
+<td>2028</td>
 <td>0</td>
 </tr>
 <tr class="odd">
 <th data-quarto-table-cell-role="th">naive_last</th>
-<td>1,908.53</td>
+<td>1,852.39</td>
 <td>1.01</td>
-<td>6.11</td>
-<td>300</td>
+<td>5.96</td>
+<td>2028</td>
 <td>0</td>
 </tr>
 <tr class="even">
-<th data-quarto-table-cell-role="th">chronos_base_log</th>
-<td>2,511.15</td>
-<td>1.31</td>
-<td>8.33</td>
-<td>300</td>
+<th data-quarto-table-cell-role="th">arima011</th>
+<td>1,895.77</td>
+<td>1.03</td>
+<td>6.16</td>
+<td>2028</td>
 <td>0</td>
 </tr>
 <tr class="odd">
-<th data-quarto-table-cell-role="th">chronos_small_log</th>
-<td>2,653.82</td>
-<td>1.39</td>
-<td>8.72</td>
-<td>300</td>
+<th data-quarto-table-cell-role="th">drift</th>
+<td>1,901.21</td>
+<td>1.02</td>
+<td>6.06</td>
+<td>2028</td>
 <td>0</td>
 </tr>
 <tr class="even">
+<th data-quarto-table-cell-role="th">arima111</th>
+<td>1,904.71</td>
+<td>1.02</td>
+<td>6.05</td>
+<td>2028</td>
+<td>0</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">theta</th>
+<td>1,948.82</td>
+<td>1.03</td>
+<td>6.46</td>
+<td>2028</td>
+<td>0</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">chronos_base</th>
+<td>2,462.46</td>
+<td>1.31</td>
+<td>8.19</td>
+<td>2028</td>
+<td>0</td>
+</tr>
+<tr class="odd">
 <th data-quarto-table-cell-role="th">chronos_small</th>
-<td>2,673.81</td>
+<td>2,619.80</td>
 <td>1.40</td>
-<td>8.77</td>
-<td>300</td>
+<td>8.63</td>
+<td>2028</td>
+<td>0</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">seasonal_drift</th>
+<td>3,817.41</td>
+<td>2.01</td>
+<td>13.02</td>
+<td>2028</td>
+<td>0</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">seasonal_naive</th>
+<td>4,403.87</td>
+<td>2.31</td>
+<td>14.99</td>
+<td>2028</td>
 <td>0</td>
 </tr>
 </tbody>
@@ -2583,7 +2639,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </section>
 <section id="разладки-на-реальных-данных" class="level3">
 <h3 class="anchored" data-anchor-id="разладки-на-реальных-данных">Разладки на реальных данных</h3>
-<div id="69c279ba" class="cell" data-execution_count="5">
+<div id="1a13cd95" class="cell" data-execution_count="5">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.changepoints <span class="im">import</span> detect_pelt</span>
