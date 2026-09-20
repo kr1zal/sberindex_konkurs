@@ -6,3 +6,4 @@ scikit-learn>=1.4
 prophet>=1.1.5
 ruptures>=1.1.9
 statsmodels>=0.14
+tabulate>=0.9

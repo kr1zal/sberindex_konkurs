@@ -16,10 +16,18 @@ sample:
   seed: 20260919      # null = вся панель, для финального прогона
 
 models:
+  # Порядок не важен, но список должен покрывать всё, что зарегистрировано
+  # в src/run.py::REGISTRY: модель, оставшаяся вне конфига, тихо выпадает
+  # из итоговой таблицы сравнения, и заметить это можно только по её отсутствию.
   - naive_last
   - seasonal_naive
   - drift
   - seasonal_drift
+  - ets_damped
+  - ets_seasonal
+  - theta
+  - arima111
+  - arima011
   - chronos_small
   - chronos_base
   - global_gbm

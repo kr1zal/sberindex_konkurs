@@ -223,6 +223,16 @@ def main() -> int:
     workers = int(cfg.get("compute", {}).get("workers", 0)) or max(1, (os.cpu_count() or 2) - 1)
     print(f"параллельно процессов: {workers}\n")
 
+    known = set(REGISTRY) | set(PROPHET_VARIANTS) | set(GLOBAL_MODELS)
+    configured = set(cfg["models"])
+    if unknown := configured - known:
+        raise KeyError(f"в конфиге есть незарегистрированные модели: {sorted(unknown)}")
+    if missing := known - configured:
+        # Модель, зарегистрированная в коде, но забытая в конфиге, тихо выпадает
+        # из итоговой таблицы сравнения — заметить это можно только по её отсутствию,
+        # а отсутствие в глаза не бросается. Уже случилось однажды с классическими моделями.
+        print(f"  вне конфига (в прогон не войдут): {', '.join(sorted(missing))}\n")
+
     names = args.models if args.models else cfg["models"]
     parts = []
     for name in names:
