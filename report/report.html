@@ -2372,7 +2372,7 @@ overflow-x: visible;
 </section>
 <section id="четыре-находки-полезные-независимо-от-нашей-модели" class="level3">
 <h3 class="anchored" data-anchor-id="четыре-находки-полезные-независимо-от-нашей-модели">Четыре находки, полезные независимо от нашей модели</h3>
-<p><strong>Базовая модель конкурса непригодна на его собственных данных.</strong> Задача построена вокруг «превзойти Prophet», а Prophet здесь выдаёт отрицательное потребление, и его обходит простейший прогноз. Воспроизводится тремя строками кода.</p>
+<p><strong>Сравнение с базовой моделью в текущем виде ничего не различает.</strong> Базовую модель, как показано выше, обходит прогноз «оставить как в прошлом месяце», причём в 99,6% случаев. Значит превзойти её может любая модель независимо от качества, и такое сравнение не отделяет сильное решение от слабого. Чтобы оно заработало, достаточно зафиксировать конфигурацию эталона; мы приводим воспроизводимый пример на трёх строках кода.</p>
 <p><strong>Выбор протокола проверки влияет сильнее выбора модели.</strong> Три дополнительных месяца истории дают больший прирост точности, чем переход от наивного прогноза к градиентному бустингу. Значит при сравнении моделей фиксировать надо в первую очередь протокол.</p>
 <p><strong>В обнаружении структурных изменений решает преобразование ряда, а не алгоритм.</strong> Шесть разных методов на сырых данных дают 77–100% ложных тревог и неразличимы между собой. Тот же метод на темпах роста — 5% при не упавшем обнаружении.</p>
 <p><strong>Мы измерили, что не работает.</strong> Фундаментальные модели временных рядов в режиме без дообучения проигрывают наивным. Новостные данные не улучшают прогноз: эффект +4,7 ₽ при интервале [−3,9; +13,2], помогли ровно половине рядов. Оба результата с доверительными интервалами — следующий, кто возьмётся, не потратит на это неделю.</p>
@@ -2460,7 +2460,7 @@ overflow-x: visible;
 <section id="источник" class="level3">
 <h3 class="anchored" data-anchor-id="источник">Источник</h3>
 <p>Потребительские безналичные расходы на уровне муниципальных образований, <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>. Помесячно, январь 2023 — декабрь 2024, шесть категорий трат.</p>
-<div id="99764f0e" class="cell" data-execution_count="2">
+<div id="ad41b253" class="cell" data-execution_count="2">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.data <span class="im">import</span> load_panel, build_matrix</span>
@@ -2532,8 +2532,8 @@ overflow-x: visible;
 </section>
 <section id="базовая-модель-конкурса" class="level2">
 <h2 class="anchored" data-anchor-id="базовая-модель-конкурса">Базовая модель конкурса</h2>
-<p>Условия требуют превзойти базовую модель по MAE и упоминают Prophet. Мы обнаружили, что в канонической конфигурации он на этих данных вырожден.</p>
-<div id="02585935" class="cell" data-execution_count="3">
+<p>Сравнение с ней приведено в разделе <a href="#результаты">Результаты</a>. Здесь — воспроизводимое доказательство того, что канонический Prophet на этих данных вырожден.</p>
+<div id="9fc89717" class="cell" data-execution_count="3">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> logging</span>
@@ -2588,7 +2588,7 @@ overflow-x: visible;
 </div>
 </div>
 </div>
-<div id="d2c45c42" class="cell" data-execution_count="4">
+<div id="acb604c9" class="cell" data-execution_count="4">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2598,13 +2598,13 @@ overflow-x: visible;
 </div>
 </div>
 </div>
-<p>Канонический Prophet предсказывает <strong>отрицательные потребительские расходы</strong>. Годовая сезонность на пятнадцати точках не идентифицируется, и компоненты Фурье расходятся. Prophet предупреждает об этом сам: «Yearly seasonality is enabled with less than 730 days of history. The model may be under-identified, and the trend/seasonality decomposition can be unstable <strong>and dependent on the Prophet/Stan version</strong>» — то есть результат ещё и невоспроизводим между машинами.</p>
+<p>Prophet предупреждает об этом сам: «Yearly seasonality is enabled with less than 730 days of history. The model may be under-identified, and the trend/seasonality decomposition can be unstable <strong>and dependent on the Prophet/Stan version</strong>» — то есть результат ещё и невоспроизводим между машинами.</p>
 <p>Недоопределённость проявляется дважды. Статистически — приведённым прогнозом. Вычислительно — стоимостью подгонки: 3,56 секунды против 0,08 без годовой сезонности, разница в сорок семь раз.</p>
-<p><strong>Как мы с этим поступили.</strong> Выключить сезонность и назвать результат базовой моделью значило бы подогнать эталон под себя. Обе конфигурации считаются как две отдельные модели, и целевой планкой мы считаем исправленную. Формально требование конкурса выполняется любой наивной моделью — «наивной» в прогнозировании называют не плохую модель, а простейшую, без настраиваемых параметров, и такая обходит канонический Prophet в 99,6% пар ряд-фолд, — но заявлять победу над сломанным эталоном бессмысленно.</p>
+<p><strong>Как мы с этим поступили.</strong> Выключить сезонность и назвать результат базовой моделью значило бы подогнать эталон под себя. Обе конфигурации считаются как две отдельные модели, и целевой планкой мы считаем исправленную.</p>
 </section>
 <section id="сравнение-моделей-прогнозирования" class="level2">
 <h2 class="anchored" data-anchor-id="сравнение-моделей-прогнозирования">Сравнение моделей прогнозирования</h2>
-<div id="a015875c" class="cell" data-execution_count="5">
+<div id="3a0af370" class="cell" data-execution_count="5">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>summary <span class="op">=</span> table(<span class="st">&quot;../results/summary.csv&quot;</span>, index_col<span class="op">=</span><span class="dv">0</span>)</span>
@@ -2744,7 +2744,7 @@ overflow-x: visible;
 </div>
 </div>
 </div>
-<div id="5c3a7900" class="cell" data-execution_count="6">
+<div id="58736bef" class="cell" data-execution_count="6">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2761,9 +2761,10 @@ overflow-x: visible;
 </section>
 <section id="глобальная-модель" class="level3">
 <h3 class="anchored" data-anchor-id="глобальная-модель">Глобальная модель</h3>
-<p>Две тысячи муниципалитетов переживают общие шоки и общий сезонный ритм; различается масштаб. Конструкция опирается на это прямо:</p>
-<p><strong>Целевая переменная — отношение, а не уровень.</strong> Модель предсказывает отношение будущего значения к последнему известному. Магадан с семьюдесятью четырьмя тысячами рублей на человека и сельский район с десятью становятся сопоставимы: модель учится на форме динамики, а не на масштабе. Побочно это снимает вопрос о смещении абсолютного уровня показателя, который обсуждается ниже, — в отношении постоянный множитель сокращается.</p>
+<p>Почему она выигрывает — разобрано в разделе <a href="#результаты">Результаты</a>. Здесь то, как она устроена.</p>
+<p><strong>Целевая переменная — отношение будущего значения к последнему известному.</strong> Не уровень. Это ставит территории разного масштаба в одинаковые условия и заодно снимает вопрос о смещении абсолютного уровня показателя: постоянный множитель в отношении сокращается.</p>
 <p><strong>Прямой прогноз на каждый горизонт.</strong> Для каждого шага обучается своя модель, а не одна с рекурсивной подстановкой собственных прогнозов: на горизонте в три шага прямой подход точнее и не накапливает ошибку.</p>
+<p><strong>Признаки.</strong> Отношения к лагам за 2–6 месяцев, логарифм текущего уровня, скользящие среднее и разброс за 3 и 6 месяцев, месяц года. Лаг 12 намеренно отсутствует: он требует одиннадцати точек истории, и при обучении в 15 точек на горизонт 3 не остаётся ни одного обучающего примера.</p>
 <p><strong>Почему не LightGBM.</strong> Он требует системной библиотеки OpenMP, которой на чистой macOS нет, и запуск у проверяющего упирается в установку пакета через менеджер системы. Для воспроизводимости такая зависимость того не стоит. Взят гистограммный бустинг из scikit-learn: алгоритм тот же, зависимость уже есть.</p>
 </section>
 </section>
@@ -2820,7 +2821,7 @@ overflow-x: visible;
 </section>
 <section id="точки-структурных-изменений-на-реальных-данных" class="level3">
 <h3 class="anchored" data-anchor-id="точки-структурных-изменений-на-реальных-данных">Точки структурных изменений на реальных данных</h3>
-<div id="a58e4710" class="cell" data-execution_count="7">
+<div id="13dea3a9" class="cell" data-execution_count="7">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.changepoints <span class="im">import</span> detect_pelt</span>
@@ -2877,7 +2878,7 @@ overflow-x: visible;
 </div>
 </div>
 </div>
-<div id="5b493b29" class="cell" data-execution_count="9">
+<div id="e8fe7b13" class="cell" data-execution_count="9">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2920,7 +2921,7 @@ overflow-x: visible;
 </tbody>
 </table>
 <p>Январь 2024 — месяц с сильнейшим изменением реальной ставки за весь период. Октябрь 2023 по величине изменения лишь одиннадцатый, но это точка разворота: ставка достигла минимума и пошла вверх.</p>
-<div id="fc6f663c" class="cell" data-execution_count="10">
+<div id="f2b53be7" class="cell" data-execution_count="10">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
