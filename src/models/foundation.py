@@ -61,3 +61,271 @@ class Chronos:
         )
         out = quantiles[0, :, 0].numpy().astype(float)
         return np.exp(out) if self._logged else out
+
+
+# ---------------------------------------------------------------------------
+# Панельный Chronos: zero-shot и дообучение
+# ---------------------------------------------------------------------------
+
+
+class ChronosPanel:
+    """Chronos-Bolt, применённый ко всей панели сразу, с необязательным дообучением.
+
+    Zero-shot Chronos проигрывает наивной модели (2 462 против 1 852). Очевидный
+    следующий шаг — дообучить его на наших рядах, и именно его сделала бы сильная
+    команда, поэтому отрицательный вывод без этой проверки был бы преждевременным.
+
+    Почему отдельный класс, а не флаг у `Chronos`. Дообученная модель одна на весь
+    фолд, а не своя на каждый ряд: 2 028 отдельных дообучений на пятнадцати точках
+    каждое — это не дообучение, а переобучение. Значит модель панельная и живёт
+    в `GLOBAL_MODELS`, как `GlobalGBM`.
+
+    **Дисциплина.** Дообучение видит только обучающую часть фолда: контекст
+    обрывается на `train_end`, целевые окна целиком лежат внутри него. По тестовым
+    месяцам не подбирается ничего.
+
+    **Валидация только по времени.** Сначала ранняя остановка была сделана по
+    отложенным рядам: муниципалитетов две тысячи, десятой части не жалко, а каждый
+    из пятнадцати месяцев на счету. Это оказалось неверно. Потеря на отложенных
+    рядах уверенно падала, а MAE на тестовых месяцах росла — потому что сдвиг
+    здесь во времени, а не в сечении. Отложенные ряды живут в тех же месяцах,
+    что и обучающие, и распределение у них то же самое; увидеть, что модель
+    заучивает декабрьско-январские переходы и потащит их в апрель, они не могут
+    в принципе. Валидация отрезается по времени: последние `horizon` месяцев
+    обучающей части, то есть ровно та задача, которую предстоит решать.
+    """
+
+    name = "chronos_panel"
+
+    def __init__(
+        self, size: str = "small", finetune: bool = False,
+        learning_rates: tuple[float, ...] = (3e-5, 1e-4), max_steps: int = 600,
+        batch_size: int = 64, patience: int = 3, seed: int = 20260920,
+    ) -> None:
+        self.model_id = f"amazon/chronos-bolt-{size}"
+        self.finetune = finetune
+        self.learning_rates = learning_rates
+        self.max_steps = max_steps
+        self.batch_size = batch_size
+        self.patience = patience
+        self.seed = seed
+        self.notes: list[str] = []
+        self._pipeline = None
+
+    # -- служебное ---------------------------------------------------------
+
+    @staticmethod
+    def _device():
+        import torch
+
+        # MPS на Apple Silicon даёт ускорение в разы, но не везде есть; молча
+        # падать на CPU нельзя — время прогона отличается на порядок, и это надо
+        # видеть в логе.
+        return "mps" if torch.backends.mps.is_available() else "cpu"
+
+    def _samples(self, wide, train_end: int, horizon: int):
+        """Пары (контекст, цель) из обучающей части и момент origin для каждой.
+
+        Контекст растущий, как при прогнозе: модель должна привыкнуть к тому,
+        что истории мало, а не к тому, что её всегда пятнадцать месяцев.
+        """
+        import torch
+
+        values = wide.to_numpy(dtype=float).T
+        contexts, targets, origins = [], [], []
+        for series in values:
+            if not np.isfinite(series[:train_end]).all():
+                continue
+            for t in range(horizon, train_end - horizon):
+                contexts.append(series[: t + 1])
+                targets.append(series[t + 1 : t + 1 + horizon])
+                origins.append(t)
+        width = max(len(c) for c in contexts)
+        padded = np.full((len(contexts), width), np.nan)
+        for i, c in enumerate(contexts):
+            padded[i, width - len(c) :] = c  # Chronos ждёт выравнивание вправо
+        return (
+            torch.tensor(padded, dtype=torch.float32),
+            torch.tensor(np.asarray(targets), dtype=torch.float32),
+            np.asarray(origins),
+        )
+
+    # -- обучение и прогноз ------------------------------------------------
+
+    def fit(self, wide, train_end: int, horizon: int) -> "ChronosPanel":
+        self.notes = []
+        self._pipeline = _pipeline(self.model_id)
+        if not self.finetune:
+            return self
+
+        import numpy as _np
+
+        context, target, origins = self._samples(wide, train_end, horizon)
+        # Валидация — последние horizon месяцев обучающей части. Ровно та задача,
+        # что и на тесте: спрогнозировать месяцы, которых модель ещё не видела.
+        cutoff = origins.max() - horizon + 1
+        train_idx = _np.flatnonzero(origins < cutoff)
+        valid_idx = _np.flatnonzero(origins >= cutoff)
+        if len(train_idx) == 0 or len(valid_idx) == 0:
+            self.notes.append("дообучение пропущено: не хватает месяцев на валидацию по времени")
+            return self
+
+        best = None
+        for learning_rate in self.learning_rates:
+            state, loss, steps = self._train_one(context, target, train_idx, valid_idx, learning_rate)
+            self.notes.append(
+                f"дообучение chronos, скорость {learning_rate:g}: {steps} шагов, "
+                f"потеря на отложенных месяцах {loss:.4f}"
+            )
+            if best is None or loss < best[1]:
+                best = (state, loss, learning_rate)
+
+        import copy
+
+        pipeline = copy.deepcopy(self._pipeline)
+        if best[0] is not None:
+            pipeline.model.load_state_dict(best[0])
+        pipeline.model.eval()
+        self._pipeline = pipeline
+        self.notes.append(
+            f"выбрана скорость {best[2]:g}, {len(train_idx)} обучающих примеров, "
+            f"{len(valid_idx)} проверочных, устройство {self._device()}"
+        )
+        return self
+
+    def _train_one(self, context, target, train_idx, valid_idx, learning_rate):
+        """Одна скорость обучения. Возвращает лучшее состояние, его потерю и число шагов."""
+        import copy
+
+        import torch
+
+        device = self._device()
+        model = copy.deepcopy(self._pipeline).model.to(device)
+        optimiser = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+        generator = torch.Generator().manual_seed(self.seed)
+
+        def validation_loss() -> float:
+            model.eval()
+            losses = []
+            with torch.no_grad():
+                for start in range(0, len(valid_idx), 256):
+                    chunk = valid_idx[start : start + 256]
+                    losses.append(float(model(
+                        context=context[chunk].to(device),
+                        mask=(~torch.isnan(context[chunk])).to(device),
+                        target=target[chunk].to(device),
+                    ).loss))
+            model.train()
+            return float(np.mean(losses))
+
+        # Нулевой шаг — это zero-shot. Если дообучение ничего не даёт, ранняя
+        # остановка обязана вернуть исходную модель, а не худшую из обученных.
+        best_loss = validation_loss()
+        best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        bad_rounds, step, check_every = 0, 0, 25
+
+        model.train()
+        while step < self.max_steps:
+            batch = train_idx[
+                torch.randint(len(train_idx), (self.batch_size,), generator=generator).numpy()
+            ]
+            model(
+                context=context[batch].to(device),
+                mask=(~torch.isnan(context[batch])).to(device),
+                target=target[batch].to(device),
+            ).loss.backward()
+            optimiser.step()
+            optimiser.zero_grad()
+            step += 1
+            if step % check_every:
+                continue
+            current = validation_loss()
+            if current < best_loss - 1e-5:
+                best_loss, bad_rounds = current, 0
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            else:
+                bad_rounds += 1
+                if bad_rounds >= self.patience:
+                    break
+        return best_state, best_loss, step
+
+    def predict(self, wide, train_end: int, horizon: int) -> np.ndarray:
+        import torch
+
+        values = wide.to_numpy(dtype=float).T
+        contexts = [torch.tensor(s[:train_end], dtype=torch.float32) for s in values]
+        out = np.full((len(contexts), horizon), np.nan)
+        device = self._pipeline.model.device
+
+        for start in range(0, len(contexts), 256):
+            chunk = contexts[start : start + 256]
+            with torch.no_grad():
+                quantiles, _mean = self._pipeline.predict_quantiles(
+                    [c.to(device) for c in chunk],
+                    prediction_length=horizon,
+                    quantile_levels=[0.5],
+                )
+            out[start : start + len(chunk)] = quantiles[:, :, 0].cpu().numpy()
+        return out
+
+
+class TimesFM:
+    """TimesFM 2.5 от Google — второе семейство фундаментальных моделей.
+
+    Второе семейство нужно не для полноты списка. Chronos zero-shot проиграл
+    наивной модели, и по одному семейству нельзя отличить «фундаментальные модели
+    не годятся для таких рядов» от «не годится именно Chronos». Архитектуры разные:
+    Chronos-Bolt — энкодер-декодер на патчах поверх T5, TimesFM — декодер на патчах
+    с собственным квантильным выходом. Совпадение выводов у двух разных архитектур
+    гораздо убедительнее, чем у одной.
+
+    Берётся медиана, а не точечный прогноз модели: последний соответствует среднему,
+    а под MAE оптимальна медиана. Выход `forecast` отдаёт десять колонок — среднее
+    и девять децилей, медиана среди них пятая.
+
+    Дообучения нет намеренно: публичный интерфейс TimesFM 2.5 его не предоставляет,
+    и самодельный цикл поверх приватных внутренностей сравнивался бы не с той
+    моделью, которую может воспроизвести проверяющий.
+    """
+
+    name = "timesfm"
+    REPO = "google/timesfm-2.5-200m-pytorch"
+    _MODEL = None
+    _COMPILED_FOR: tuple[int, int] | None = None
+
+    def __init__(self, max_context: int = 64) -> None:
+        self.max_context = max_context
+
+    @classmethod
+    def _model(cls, max_context: int, horizon: int):
+        """Модель грузится и компилируется один раз на процесс: веса 200M параметров."""
+        import timesfm as _timesfm
+
+        if cls._MODEL is None:
+            cls._MODEL = _timesfm.TimesFM_2p5_200M_torch.from_pretrained(cls.REPO)
+        if cls._COMPILED_FOR != (max_context, horizon):
+            cls._MODEL.compile(
+                _timesfm.ForecastConfig(
+                    max_context=max_context, max_horizon=max(horizon, 8), normalize_inputs=True
+                )
+            )
+            cls._COMPILED_FOR = (max_context, horizon)
+        return cls._MODEL
+
+    def fit(self, wide, train_end: int, horizon: int) -> "TimesFM":
+        self._model(self.max_context, horizon)
+        self.notes = [f"timesfm {self.REPO}, контекст до {self.max_context}, без дообучения"]
+        return self
+
+    def predict(self, wide, train_end: int, horizon: int) -> np.ndarray:
+        model = self._model(self.max_context, horizon)
+        values = wide.to_numpy(dtype=float).T
+        contexts = [np.asarray(s[:train_end], dtype=float) for s in values]
+        out = np.full((len(contexts), horizon), np.nan)
+
+        for start in range(0, len(contexts), 256):
+            chunk = contexts[start : start + 256]
+            _point, quantiles = model.forecast(horizon=horizon, inputs=chunk)
+            # Колонка 0 — среднее, дальше девять децилей; медиана пятая по счёту.
+            out[start : start + len(chunk)] = np.asarray(quantiles)[:, :horizon, 5]
+        return out
