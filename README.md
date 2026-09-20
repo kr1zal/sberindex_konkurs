@@ -61,6 +61,13 @@ python -m venv .venv
 .venv/bin/python src/run.py --config configs/baseline.yaml
 ```
 
+Модели, переносящие сезонность с длинных рядов, дополнительно требуют выгрузки
+федеральных и отраслевых рядов из каталога СберИндекса:
+
+```bash
+.venv/bin/python -u scripts/fetch_sberindex.py
+```
+
 Отдельные модели:
 
 ```bash
@@ -77,12 +84,19 @@ configs/baseline.yaml   протокол: данные, разбиение, вы
 src/data.py             загрузка панели, восстановление сущностей, пропуски
 src/split.py            скользящий origin
 src/metrics.py          MAE, R², sMAPE, MASE
+src/external.py         длинные ряды СберИндекса, перенос общего фактора
 src/models/             модели за единым интерфейсом fit/predict
 src/run.py              прогон и сводка
+scripts/                выгрузка длинных рядов, проверка на утечку будущего
 ```
 
 Новая модель подключается реализацией `fit(y) -> self` и `predict(horizon) -> np.ndarray`
-и регистрацией в `src/run.py::REGISTRY`.
+и регистрацией в `src/run.py::REGISTRY`. Панельные модели работают с матрицей целиком,
+живут в `src/run.py::GLOBAL_MODELS` и получают внешние данные через `PanelContext`.
+
+Длинные ряды СберИндекса идут до августа 2026 года, а панель кончается декабрём 2024.
+Обращение к ним обрезается по origin каждого фолда; что обрезка действительно работает,
+проверяет `scripts/check_no_leakage.py`.
 
 ## Лицензия
 

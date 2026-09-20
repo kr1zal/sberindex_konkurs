@@ -82,7 +82,9 @@ def model_comparison(summary: pd.DataFrame, baseline: str = "prophet_no_yearly")
     подсветка строки цветом кодировала бы место в рейтинге, а не сущность."""
     s = summary.sort_values("MAE", ascending=True)
     bar = float(s.loc[baseline, "MAE"])
-    fig, ax = plt.subplots(figsize=(8, 4.8), facecolor=SURFACE)
+    # Высота под число строк: моделей стало вдвое больше, и фиксированная высота
+    # схлопывала подписи в нечитаемую кашу.
+    fig, ax = plt.subplots(figsize=(8, max(4.8, 0.34 * len(s))), facecolor=SURFACE)
 
     ax.barh(s.index, s["MAE"], color=SERIES[0], height=0.62, zorder=2)
     ax.axvline(bar, color=INK_SOFT, linewidth=1.5, linestyle="--", zorder=3)

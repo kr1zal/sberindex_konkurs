@@ -17,8 +17,26 @@
 2. **Прямой прогноз на каждый горизонт.** Для h = 1, 2, 3 обучаются отдельные модели,
    а не одна с рекурсивной подстановкой собственных прогнозов. На горизонте в три шага
    прямой подход и точнее, и не накапливает ошибку.
+
+## Источники признаков сверх собственной истории ряда
+
+Четыре, и каждый включается отдельно, чтобы вклад каждого был виден в таблице.
+
+| источник | что добавляет | различает ли муниципалитеты |
+|---|---|---|
+| `external` | темпы роста длинных федеральных рядов | нет, в месяце t одинаков для всех |
+| `common_factor` | нормировка цели на общее движение панели | нет, но снимает то, чего модель знать не может |
+| `categories` | доли пяти категорий трат и их динамика | **да** |
+| `pretrain` | предобучение на длинных отраслевых рядах | нет |
+
+Первые два и четвёртый переносят **историю**: длинные ряды знают апрельскую
+сезонность, которой в пятнадцати месяцах панели нет ни одного раза. Третий
+переносит **сечение**: структура трат отличает районы друг от друга, и этого
+не умеет ни один федеральный ряд.
 """
 from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -27,6 +45,26 @@ import pandas as pd
 # в 15 точек на горизонт 3 не остаётся ни одного обучающего примера. Годовой цикл на
 # этих рядах всё равно не идентифицируется — это уже показано на Prophet.
 LAGS = (1, 2, 3, 4, 5, 6)
+
+# Сдвиг, на котором считается изменение доли категории. Шесть месяцев, а не один:
+# помесячная доля шумная, а нас интересует, куда структура трат едет, а не дрожит.
+SHARE_SHIFT = 6
+
+
+@dataclass
+class PanelContext:
+    """Всё, что глобальная модель знает сверх матрицы самих рядов.
+
+    Собирается один раз в ``run.py`` и передаётся модели через ``set_context``:
+    иначе каждая модель на каждом фолде заново читала бы одни и те же файлы.
+    """
+
+    index: pd.PeriodIndex
+    categories: dict[str, pd.DataFrame] = field(default_factory=dict)
+    external: object | None = None
+    aggregate: pd.Series | None = None
+    long_series: dict[str, pd.Series] = field(default_factory=dict)
+    regions: dict[str, str] = field(default_factory=dict)
 
 
 def _news_row(news: dict | None, region: str | None, month_index: int) -> dict:
@@ -60,26 +98,41 @@ def _features(series: np.ndarray, t: int) -> dict | None:
     return row
 
 
-def _build_training(
-    wide: pd.DataFrame, train_end: int, horizon_step: int,
-    news: dict | None = None, regions: dict | None = None,
-) -> tuple[pd.DataFrame, np.ndarray]:
-    """Все пары (ряд, момент) из обучающей части, где известен и признак, и ответ."""
-    rows, targets = [], []
-    values = wide.to_numpy(dtype=float).T  # ряды по строкам
-    for col, series in zip(wide.columns, values):
-        region = (regions or {}).get(col)
-        for t in range(max(LAGS) - 1, train_end - horizon_step):
-            row = _features(series, t)
-            if row is None:
+class _CategoryShares:
+    """Доли пяти категорий трат в общих расходах муниципалитета и их динамика.
+
+    Доли, а не уровни, и это не стилистика. «Все категории» включает остальные пять
+    по определению, поэтому уровень категории почти линейно связан с уровнем итога,
+    и в отношениях он выродился бы в копию уже имеющегося признака. Доля же говорит
+    о структуре трат: где половина расходов идёт на продовольствие, динамика другая,
+    чем там, где столько же приходится на маркетплейсы. Пять категорий покрывают
+    около 72% итога, остаток на долю прочего — он и различает районы дальше.
+    """
+
+    def __init__(self, categories: dict[str, pd.DataFrame], columns: pd.Index) -> None:
+        self.names = sorted(categories)
+        self.shares: dict[str, np.ndarray] = {}
+        for name in self.names:
+            frame = categories[name].reindex(columns=columns)
+            self.shares[name] = frame.to_numpy(dtype=float).T  # ряды по строкам
+
+    def row(self, series_pos: int, series: np.ndarray, t: int) -> dict[str, float]:
+        total = series[t]
+        if total <= 0:
+            return {}
+        out: dict[str, float] = {}
+        for name in self.names:
+            values = self.shares[name][series_pos]
+            share = values[t] / total
+            if not np.isfinite(share):
                 continue
-            row |= _news_row(news, region, t)
-            target = series[t + horizon_step]
-            if not np.isfinite(target) or series[t] <= 0:
-                continue
-            rows.append(row)
-            targets.append(target / series[t])
-    return pd.DataFrame(rows), np.asarray(targets, dtype=float)
+            out[f"share_{name}"] = share
+            past_total = series[t - SHARE_SHIFT] if t >= SHARE_SHIFT else np.nan
+            if t >= SHARE_SHIFT and past_total > 0:
+                past = values[t - SHARE_SHIFT] / past_total
+                if np.isfinite(past) and past > 0:
+                    out[f"dshare_{name}"] = share / past - 1.0
+        return out
 
 
 class GlobalGBM:
@@ -97,9 +150,17 @@ class GlobalGBM:
     def __init__(
         self, max_iter: int = 300, learning_rate: float = 0.05, max_leaf_nodes: int = 31,
         news: dict | None = None, regions: dict | None = None,
+        external: bool = False, common_factor: bool = False,
+        categories: bool = False, pretrain: bool = False,
+        regional_factor: bool = False,
     ) -> None:
         self.news = news
         self.regions = regions
+        self.use_external = external
+        self.use_factor = common_factor
+        self.use_categories = categories
+        self.use_pretrain = pretrain
+        self.use_regional = regional_factor
         self.params = dict(
             max_iter=max_iter,
             learning_rate=learning_rate,
@@ -109,21 +170,153 @@ class GlobalGBM:
             early_stopping=False,
             random_state=20260920,
         )
+        self.context: PanelContext | None = None
+        self.notes: list[str] = []
         self._models: dict[int, object] = {}
         self._columns: list[str] = []
+        self._factor = None
+        self._shares: _CategoryShares | None = None
+
+    def set_context(self, context: PanelContext) -> None:
+        self.context = context
+
+    # -- служебное ---------------------------------------------------------
+
+    def _require_context(self) -> PanelContext:
+        if self.context is None:
+            raise RuntimeError(
+                "модели нужен PanelContext: внешние признаки, категории и общий "
+                "фактор берутся из него, а без него они молча отключились бы"
+            )
+        return self.context
+
+    def _extra_row(self, series_pos: int, series: np.ndarray, col: str, t: int) -> dict:
+        """Признаки сверх собственной истории ряда."""
+        out = _news_row(self.news, (self.regions or {}).get(col), t)
+        if self.use_external:
+            context = self._require_context()
+            if context.external is not None:
+                out |= context.external.row(context.index, t)
+        if self._shares is not None:
+            out |= self._shares.row(series_pos, series, t)
+        return out
+
+    def _multiplier(self, t: int, step: int, col: str) -> float:
+        """Общий фактор, которым нормируется цель. Единица, если фактор не используется."""
+        if self._factor is None:
+            return 1.0
+        return self._factor.realised(t, step, col)
+
+    # -- обучение и прогноз ------------------------------------------------
 
     def fit(self, wide: pd.DataFrame, train_end: int, horizon: int) -> "GlobalGBM":
         from sklearn.ensemble import HistGradientBoostingRegressor
 
+        self.notes = []
+        if self.use_categories:
+            context = self._require_context()
+            self._shares = _CategoryShares(context.categories, wide.columns)
+        if self.use_factor or self.use_regional:
+            from src.external import CommonFactor
+
+            context = self._require_context()
+            self._factor = CommonFactor(
+                aggregate=context.aggregate,
+                regions=context.regions if self.use_regional else None,
+            ).fit(wide, train_end, horizon)
+            self.notes.append(self._factor.fit_report.as_text())
+
+        pretrain_rows = (
+            self._pretrain_set(wide, train_end, horizon) if self.use_pretrain else {}
+        )
+
         for step in range(1, horizon + 1):
-            features, target = _build_training(wide, train_end, step, self.news, self.regions)
+            features, target = self._training_set(wide, train_end, step)
             if features.empty:
                 raise ValueError(f"нет обучающих примеров для шага {step}")
-            self._columns = list(features.columns)
+
             model = HistGradientBoostingRegressor(**self.params)
+            if step in pretrain_rows:
+                # Предобучение: сначала длинные отраслевые ряды, потом панель.
+                # warm_start продолжает тот же ансамбль на новых данных, то есть
+                # деревья, выученные на длинной истории, остаются, а следующие
+                # правят их под муниципальные ряды. Это и есть дообучение.
+                long_features, long_target = pretrain_rows[step]
+                long_features = long_features.reindex(columns=features.columns)
+                model.set_params(warm_start=True, max_iter=self.params["max_iter"] // 2)
+                model.fit(long_features.to_numpy(dtype=float), long_target)
+                model.set_params(max_iter=self.params["max_iter"])
+                self.notes.append(
+                    f"шаг {step}: предобучение на {len(long_target)} примерах длинных рядов"
+                )
+            self._columns = list(features.columns)
             model.fit(features.to_numpy(dtype=float), target)
             self._models[step] = model
         return self
+
+    def _training_set(
+        self, wide: pd.DataFrame, train_end: int, horizon_step: int
+    ) -> tuple[pd.DataFrame, np.ndarray]:
+        """Все пары (ряд, момент) из обучающей части, где известен и признак, и ответ."""
+        rows, targets = [], []
+        values = wide.to_numpy(dtype=float).T  # ряды по строкам
+        for position, (col, series) in enumerate(zip(wide.columns, values)):
+            for t in range(max(LAGS) - 1, train_end - horizon_step):
+                row = _features(series, t)
+                if row is None:
+                    continue
+                target = series[t + horizon_step]
+                if not np.isfinite(target) or series[t] <= 0:
+                    continue
+                row |= self._extra_row(position, series, col, t)
+                rows.append(row)
+                targets.append(target / series[t] / self._multiplier(t, horizon_step, col))
+        return pd.DataFrame(rows), np.asarray(targets, dtype=float)
+
+    def _pretrain_set(
+        self, wide: pd.DataFrame, train_end: int, horizon: int
+    ) -> dict[int, tuple[pd.DataFrame, np.ndarray]]:
+        """Обучающие примеры из длинных отраслевых рядов — та же конструкция признаков.
+
+        Ряды обрезаются по origin. Это главная ловушка всего подхода: отраслевые
+        данные идут до 2026 года, а прогнозируем мы 2024-й, и необрезанный ряд
+        рассказал бы модели, чем кончилась та самая динамика, которую она учится
+        предсказывать. Ошибка была бы тихой: метрики улучшились бы, а результат
+        не значил бы ничего.
+
+        Набор признаков ровно тот же, что у панели, и это условие сравнения:
+        отличаться `global_gbm_pretrain` от `global_gbm` должен предобучением,
+        а не другим набором колонок. Смысл переносится не у всех признаков —
+        `level_log` у отраслевого ряда это логарифм миллиардов рублей, а у панели
+        логарифм рублей на человека, — но деревья первой стадии просто разрежут
+        его в своём диапазоне, и на панельных строках эти разрезы окажутся
+        нерабочими. Это честнее, чем подменять колонку и сравнивать разное.
+
+        Календарный месяц берётся из самого ряда: формула `(t % 12) + 1` верна
+        только для панели, которая начинается с января, а отраслевые ряды
+        начинаются кто с января 2017-го, кто с декабря 2018-го.
+        """
+        context = self._require_context()
+        if not context.long_series:
+            return {}
+
+        origin = pd.to_datetime(wide.index).to_period("M")[train_end - 1]
+        out: dict[int, tuple[pd.DataFrame, np.ndarray]] = {}
+        for step in range(1, horizon + 1):
+            rows, targets = [], []
+            for full_series in context.long_series.values():
+                series = full_series.loc[:origin]
+                values = series.to_numpy(dtype=float)
+                for t in range(max(LAGS) - 1, len(values) - step):
+                    row = _features(values, t)
+                    if row is None:
+                        continue
+                    row["month"] = series.index[t].month
+                    rows.append(row)
+                    targets.append(values[t + step] / values[t])
+            if rows:
+                out[step] = (pd.DataFrame(rows), np.asarray(targets, dtype=float))
+        return out
 
     def predict(self, wide: pd.DataFrame, train_end: int, horizon: int) -> np.ndarray:
         """Прогноз для всех рядов панели. Возвращает матрицу (рядов × горизонт)."""
@@ -131,19 +324,26 @@ class GlobalGBM:
         t = train_end - 1
         out = np.full((values.shape[0], horizon), np.nan)
 
+        if self._shares is not None:
+            self._shares = _CategoryShares(self._require_context().categories, wide.columns)
+
         rows, index = [], []
-        for i, (col, series) in enumerate(zip(wide.columns, values)):
+        for position, (col, series) in enumerate(zip(wide.columns, values)):
             row = _features(series, t)
             if row is not None:
-                row |= _news_row(self.news, (self.regions or {}).get(col), t)
+                row |= self._extra_row(position, series, col, t)
                 rows.append(row)
-                index.append(i)
+                index.append(position)
         if not rows:
             return out
 
         features = pd.DataFrame(rows).reindex(columns=self._columns)
         base = values[index, t]
+        if self._factor is not None:
+            multipliers = self._factor.multipliers_for(wide.columns)[index]
+        else:
+            multipliers = np.ones((len(index), horizon))
         for step in range(1, horizon + 1):
             ratio = self._models[step].predict(features.to_numpy(dtype=float))
-            out[index, step - 1] = base * ratio
+            out[index, step - 1] = base * ratio * multipliers[:, step - 1]
         return out

@@ -31,6 +31,12 @@ models:
   - chronos_small
   - chronos_base
   - global_gbm
+  - global_gbm_ext
+  - global_gbm_factor
+  - global_gbm_pretrain
+  - global_gbm_cat
+  - global_gbm_all
+  - global_gbm_region
   - prophet_no_yearly
   - prophet
 

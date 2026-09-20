@@ -16,10 +16,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
+from src.external import ExternalFeatures, load_aggregate, load_industry  # noqa: E402
+from src.regions import attach_regions, load_dictionary  # noqa: E402
 from src.metrics import mae, mase, r2, smape  # noqa: E402
 from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
 from src.models.foundation import Chronos  # noqa: E402
-from src.models.global_model import GlobalGBM  # noqa: E402
+from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
@@ -50,7 +52,18 @@ REGISTRY = {
 # fit(y)/predict(h), рассчитанный на один ряд. Обучение идёт на ПОЛНОЙ панели,
 # оценка - на той же выборке рядов, что и у остальных моделей: иначе сравнение
 # считалось бы на разных множествах.
-GLOBAL_MODELS = {"global_gbm": GlobalGBM}
+#
+# Варианты различаются ровно одним источником признаков каждый — чтобы в итоговой
+# таблице было видно, что именно дало выигрыш, а не «добавили всё сразу, стало лучше».
+GLOBAL_MODELS = {
+    "global_gbm": lambda: GlobalGBM(),
+    "global_gbm_ext": lambda: GlobalGBM(external=True),
+    "global_gbm_factor": lambda: GlobalGBM(common_factor=True),
+    "global_gbm_pretrain": lambda: GlobalGBM(pretrain=True),
+    "global_gbm_cat": lambda: GlobalGBM(categories=True),
+    "global_gbm_all": lambda: GlobalGBM(common_factor=True, categories=True),
+    "global_gbm_region": lambda: GlobalGBM(common_factor=True, regional_factor=True),
+}
 
 PROPHET_VARIANTS = {
     "prophet": {"yearly_seasonality": True},
@@ -103,7 +116,8 @@ def _score_series(task: tuple) -> list[dict]:
 
 
 def evaluate_global(
-    full: pd.DataFrame, subset: pd.DataFrame, model_name: str, horizon: int, n_folds: int
+    full: pd.DataFrame, subset: pd.DataFrame, model_name: str, horizon: int, n_folds: int,
+    context: PanelContext | None = None,
 ) -> pd.DataFrame:
     """Панельная модель: одна подгонка на фолд, прогноз сразу для всех рядов выборки."""
     folds = rolling_origin(n_obs=full.shape[0], horizon=horizon, n_folds=n_folds)
@@ -111,7 +125,14 @@ def evaluate_global(
     rows = []
 
     for fold in folds:
-        model = GLOBAL_MODELS[model_name]().fit(full, fold.train_end, horizon)
+        model = GLOBAL_MODELS[model_name]()
+        if context is not None and hasattr(model, "set_context"):
+            model.set_context(context)
+        model.fit(full, fold.train_end, horizon)
+        # Как именно подогнан общий фактор, надо видеть в логе: множитель, уехавший
+        # не туда, портит прогноз тихо и одинаково на всех рядах сразу.
+        for note in getattr(model, "notes", []):
+            print(f"  фолд {fold.index}: {note}")
         predicted = model.predict(subset, fold.train_end, horizon)
 
         for i, col in enumerate(subset.columns):
@@ -200,6 +221,66 @@ def _warn_identical(ok: pd.DataFrame) -> None:
                 )
 
 
+def build_context(panel: pd.DataFrame, wide: pd.DataFrame, cfg: dict) -> PanelContext:
+    """Данные, общие для всех панельных моделей: категории трат и длинные ряды.
+
+    Собирается один раз на прогон. Категории раскладываются тем же ``build_matrix``
+    и с тем же правилом пропусков, что и основная матрица, иначе доли считались бы
+    по разным множествам рядов.
+    """
+    reference = ROOT / "data" / "reference" / "sberindex"
+    categories: dict[str, pd.DataFrame] = {}
+    for name in sorted(panel["category_15"].unique()):
+        if name == cfg["data"]["category"]:
+            continue
+        part, _ = build_matrix(panel, name, max_gap=cfg["data"]["max_gap"])
+        categories[name] = part.reindex(index=wide.index)
+
+    regions = _series_regions(wide)
+    external, aggregate, long_series = None, None, {}
+    if reference.exists():
+        external = ExternalFeatures(reference)
+        aggregate = load_aggregate(reference)
+        long_series = load_industry(reference)
+        print(
+            f"длинные ряды: агрегат {len(aggregate)} мес "
+            f"({aggregate.index.min()}..{aggregate.index.max()}), "
+            f"отраслевых рядов {len(long_series)}"
+        )
+    else:
+        # Молчаливое отключение источника — ровно тот класс ошибки, от которого
+        # в этом проекте уже пострадали трижды. Пусть видно будет в логе.
+        print(f"  ВНИМАНИЕ: нет {reference}, модели с длинными рядами работать не смогут")
+    print(f"категории трат: {', '.join(categories)}\n")
+
+    return PanelContext(
+        index=pd.to_datetime(wide.index).to_period("M"),
+        categories=categories,
+        external=external,
+        aggregate=aggregate,
+        long_series=long_series,
+        regions=regions,
+    )
+
+
+def _series_regions(wide: pd.DataFrame) -> dict[str, str]:
+    """Регион каждого ряда. Омонимы остаются без региона — так решено и не меняется.
+
+    Идентификатор ряда для омонимичных названий выглядит как «Сергиевский #2»:
+    суффикс добавлен при восстановлении сущностей, а в справочнике его нет.
+    """
+    entities = pd.DataFrame(
+        {"series_id": wide.columns, "mo": [str(c).split(" #")[0] for c in wide.columns]}
+    )
+    joined, report = attach_regions(entities, load_dictionary())
+    print(report.as_text())
+    return {
+        row.series_id: row.region_name
+        for row in joined.itertuples()
+        if isinstance(row.region_name, str) and row.region_name
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Прогон моделей по единому протоколу")
     parser.add_argument("--config", default="configs/baseline.yaml")
@@ -213,6 +294,7 @@ def main() -> int:
     print(report.as_text(), end="\n\n")
 
     full_panel = wide
+    context = build_context(panel, full_panel, cfg)
     wide = sample_series(wide, cfg["sample"]["n_series"], seed=cfg["sample"]["seed"])
     folds = rolling_origin(wide.shape[0], cfg["split"]["horizon"], cfg["split"]["n_folds"])
     print(f"рядов в прогоне: {wide.shape[1]} | периодов: {wide.shape[0]}")
@@ -238,7 +320,10 @@ def main() -> int:
     for name in names:
         started = time.perf_counter()
         if name in GLOBAL_MODELS:
-            part = evaluate_global(full_panel, wide, name, cfg["split"]["horizon"], cfg["split"]["n_folds"])
+            part = evaluate_global(
+                full_panel, wide, name,
+                cfg["split"]["horizon"], cfg["split"]["n_folds"], context,
+            )
         else:
             part = evaluate(wide, name, cfg["split"]["horizon"], cfg["split"]["n_folds"], workers)
         parts.append(part)
