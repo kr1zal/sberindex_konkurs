@@ -138,3 +138,16 @@ def monthly_features(headlines: pd.DataFrame) -> pd.DataFrame:
         **{c: (c, "mean") for c in topic_cols},
     )
     return out.reset_index()
+
+
+def save_datasets(headlines: pd.DataFrame, features: pd.DataFrame, out_dir: str | Path) -> None:
+    """Сохраняет оба слоя. Сжатие zstd выбрано не из вкуса: без него файл заголовков
+    весит 56 МБ и GitHub предупреждает о превышении рекомендуемого порога.
+    Колонка с адресом оставлена намеренно — она даёт прослеживаемость каждого
+    заголовка до первоисточника, а это прямо работает на воспроизводимость."""
+    out = Path(out_dir)
+    frame = headlines.copy()
+    for col in ("region_name", "domain"):
+        frame[col] = frame[col].astype("category")
+    frame.to_parquet(out / "headlines.parquet", compression="zstd", index=False)
+    features.to_parquet(out / "monthly.parquet", index=False)
