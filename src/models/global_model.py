@@ -27,6 +27,7 @@
 | `external` | темпы роста длинных федеральных рядов | нет, в месяце t одинаков для всех |
 | `common_factor` | нормировка цели на общее движение панели | нет, но снимает то, чего модель знать не может |
 | `categories` | доли пяти категорий трат и их динамика | **да** |
+| `stack_categories` | шесть категорий как отдельные обучающие ряды | **да** |
 | `pretrain` | предобучение на длинных отраслевых рядах | нет |
 
 Первые два и четвёртый переносят **историю**: длинные ряды знают апрельскую
@@ -152,7 +153,7 @@ class GlobalGBM:
         news: dict | None = None, regions: dict | None = None,
         external: bool = False, common_factor: bool = False,
         categories: bool = False, pretrain: bool = False,
-        regional_factor: bool = False,
+        regional_factor: bool = False, stack_categories: bool = False,
     ) -> None:
         self.news = news
         self.regions = regions
@@ -161,6 +162,7 @@ class GlobalGBM:
         self.use_categories = categories
         self.use_pretrain = pretrain
         self.use_regional = regional_factor
+        self.use_stack = stack_categories
         self.params = dict(
             max_iter=max_iter,
             learning_rate=learning_rate,
@@ -269,9 +271,59 @@ class GlobalGBM:
                 if not np.isfinite(target) or series[t] <= 0:
                     continue
                 row |= self._extra_row(position, series, col, t)
+                if self.use_stack:
+                    row["is_total"] = 1.0
                 rows.append(row)
                 targets.append(target / series[t] / self._multiplier(t, horizon_step, col))
+
+        if self.use_stack:
+            extra_rows, extra_targets = self._category_rows(wide, train_end, horizon_step)
+            rows.extend(extra_rows)
+            targets.extend(extra_targets)
         return pd.DataFrame(rows), np.asarray(targets, dtype=float)
+
+    def _category_rows(
+        self, wide: pd.DataFrame, train_end: int, horizon_step: int
+    ) -> tuple[list[dict], list[float]]:
+        """Пять категорий трат как отдельные обучающие ряды, а не как признаки.
+
+        Ход другой, чем у `categories`, и бьёт в другое место. Признаки описывают
+        ряд, но число обучающих пар не меняют, а здесь пар становится вшестеро
+        больше: 12 168 рядов вместо 2 028. Покрытие календарных месяцев то же —
+        апреля в обучении фолда 0 по-прежнему нет, — но примеров на каждый
+        переход в шесть раз больше, и главное, формы динамики у категорий разные.
+        Общепит живёт летом, продовольствие — декабрём. Модель, которой показали
+        только итог, заучивает конкретные переходы этого одного ряда; модель,
+        которой показали шесть разных сезонных рисунков, вынуждена опираться
+        на признаки, а не на то, каким был прошлый декабрь.
+
+        Признак `is_total` отличает строки итога от строк категорий. Он безопасен:
+        при прогнозе принимает значение 1, которое в обучении есть.
+        """
+        context = self._require_context()
+        rows, targets = [], []
+        for name in sorted(context.categories):
+            frame = context.categories[name].reindex(columns=wide.columns)
+            values = frame.to_numpy(dtype=float).T
+            for position, (col, series) in enumerate(zip(wide.columns, values)):
+                if not np.isfinite(series).all():
+                    continue
+                for t in range(max(LAGS) - 1, train_end - horizon_step):
+                    row = _features(series, t)
+                    if row is None:
+                        continue
+                    target = series[t + horizon_step]
+                    if not np.isfinite(target) or series[t] <= 0:
+                        continue
+                    # Доли категорий и новости описывают муниципалитет целиком,
+                    # а строка здесь — одна его категория. Подставлять их значило бы
+                    # приписать части свойства целого, поэтому остаются пропуском.
+                    row["is_total"] = 0.0
+                    rows.append(row)
+                    targets.append(
+                        target / series[t] / self._multiplier(t, horizon_step, col)
+                    )
+        return rows, targets
 
     def _pretrain_set(
         self, wide: pd.DataFrame, train_end: int, horizon: int

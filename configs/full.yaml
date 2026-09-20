@@ -37,6 +37,12 @@ models:
   - global_gbm_cat
   - global_gbm_all
   - global_gbm_region
+  - global_gbm_stack
+  - global_gbm_stack_factor
+  - chronos_panel
+  - chronos_ft
+  - chronos_ft_base
+  - timesfm
   - prophet_no_yearly
 
 output:

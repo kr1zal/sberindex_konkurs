@@ -20,7 +20,7 @@ from src.external import ExternalFeatures, load_aggregate, load_industry  # noqa
 from src.regions import attach_regions, load_dictionary  # noqa: E402
 from src.metrics import mae, mase, r2, smape  # noqa: E402
 from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
-from src.models.foundation import Chronos  # noqa: E402
+from src.models.foundation import Chronos, ChronosPanel, TimesFM  # noqa: E402
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
@@ -63,6 +63,14 @@ GLOBAL_MODELS = {
     "global_gbm_cat": lambda: GlobalGBM(categories=True),
     "global_gbm_all": lambda: GlobalGBM(common_factor=True, categories=True),
     "global_gbm_region": lambda: GlobalGBM(common_factor=True, regional_factor=True),
+    "global_gbm_stack": lambda: GlobalGBM(stack_categories=True),
+    "global_gbm_stack_factor": lambda: GlobalGBM(stack_categories=True, common_factor=True),
+    # Фундаментальные модели тоже панельные: дообучение одно на фолд, а не своё
+    # на каждый из 2028 рядов по пятнадцати точкам.
+    "chronos_panel": lambda: ChronosPanel(size="small"),
+    "chronos_ft": lambda: ChronosPanel(size="small", finetune=True),
+    "chronos_ft_base": lambda: ChronosPanel(size="base", finetune=True),
+    "timesfm": lambda: TimesFM(),
 }
 
 PROPHET_VARIANTS = {
