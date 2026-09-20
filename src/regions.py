@@ -93,10 +93,18 @@ def attach_regions(entities: pd.DataFrame, dictionary: pd.DataFrame) -> tuple[pd
         alt_keys = ent.loc[retyped, "_key"].str.replace(
             "муниципальный округ", "муниципальный район", regex=False
         )
-        alt = alt_keys.map(lambda k: lookup.loc[k] if k in lookup.index else None)
-        for column in lookup.columns:
-            filled = alt.map(lambda row, c=column: None if row is None else row[c])
-            ent.loc[retyped, column] = ent.loc[retyped, column].fillna(filled)
+        # Подставляем только те строки, для которых замена действительно нашла
+        # запись. Раньше правило строило колонку из None и для всех остальных,
+        # а присваивание None в числовую колонку (region_code, territory_id)
+        # в pandas 2 — ошибка, так что привязка падала целиком ровно в том
+        # случае, когда запасное правило не находило ничего. На нашей панели
+        # оно не находит ничего, то есть не работало никогда.
+        found = alt_keys[alt_keys.isin(lookup.index)]
+        if not found.empty:
+            replacement = lookup.loc[found.to_numpy()]
+            replacement.index = found.index
+            for column in lookup.columns:
+                ent.loc[found.index, column] = replacement[column]
 
     ent["n_candidates"] = ent["_key"].map(counts).fillna(0).astype(int)
     ent["region_resolved"] = ent["region_name"].notna()
