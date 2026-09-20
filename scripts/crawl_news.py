@@ -251,10 +251,26 @@ def main() -> int:
                     if already_done(outlet.domain, year, month, page):
                         continue
                     template = outlet.month_url_template if page == 1 else outlet.page_url_template
+                    if template and "{day}" in template:
+                        # Посуточный шаблон потребовал бы 730 запросов на издание
+                        # вместо 24 месячных. Такие издания отсекаются на входе,
+                        # а не роняют общий прогон на середине.
+                        print(f"[{outlet.domain}] шаблон требует {{day}} — пропускаю издание")
+                        return
+                    if not template:
+                        # У части изданий архив месяца — одна страница или XML-карта,
+                        # пагинации нет вовсе, и шаблон в списке пустой. Это не ошибка.
+                        break
                     url = template.format(year=year, month=f"{month:02d}", page=page)
 
                     try:
                         response = local.get(url, timeout=30)
+                        # По спецификации HTTP requests откатывается на ISO-8859-1,
+                        # когда сервер не объявил charset. Российские порталы отдают
+                        # UTF-8 и часто charset не указывают - в результате весь
+                        # кириллический текст приходит искажённым, причём молча.
+                        if (response.encoding or "").lower() in ("iso-8859-1", "latin-1"):
+                            response.encoding = response.apparent_encoding or "utf-8"
                         status = response.status_code
                         if status != 200:
                             items = []
@@ -280,10 +296,15 @@ def main() -> int:
                         break
         finally:
             sink.close()
-        if collected == 0:
-            print(f"[{outlet.domain}] ВНИМАНИЕ: собрано 0 статей — шаблон URL или разбор не подходят")
+        # Ноль НОВЫХ за проход — норма при возобновлении: страницы уже обработаны.
+        # Тревожно, когда у издания ноль за всё время, — тогда сломан разбор.
+        total = state().execute(
+            "SELECT COALESCE(SUM(found), 0) FROM visited WHERE domain=?", (outlet.domain,)
+        ).fetchone()[0]
+        if total == 0:
+            print(f"[{outlet.domain}] ВНИМАНИЕ: за всё время 0 статей — шаблон URL или разбор не подходят")
         else:
-            print(f"[{outlet.domain}] завершено, собрано {collected}")
+            print(f"[{outlet.domain}] завершено: +{collected} за проход, всего {total}")
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         list(pool.map(crawl_outlet, outlets))
