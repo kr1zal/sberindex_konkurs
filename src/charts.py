@@ -9,7 +9,7 @@
 
 Два правила, которые здесь соблюдаются намеренно:
 
-* **Никаких двух осей Y.** Доля муниципалитетов с разладкой и ключевая ставка —
+* **Никаких двух осей Y.** Доля МО со структурным изменением и ключевая ставка —
   величины разного масштаба, и совмещение их на одной картинке с двумя шкалами
   позволяет подогнать видимую «связь» выбором пределов. Рисуем две панели
   с общей осью времени.
@@ -117,7 +117,7 @@ def breaks_vs_rate(share: pd.Series, rate: pd.Series) -> plt.Figure:
     for i, v in enumerate(share.values):
         if v > 20:
             top.text(i, v + 2, f"{v:.0f}%", ha="center", color=INK, fontsize=9, fontweight="bold")
-    _style(top, "Доля муниципалитетов с обнаруженной разладкой", "%")
+    _style(top, "Доля МО со структурным изменением", "%")
 
     bottom.plot(x, rate.values, color=SERIES[1], linewidth=2, marker="o", markersize=5)
     for i, v in enumerate(share.values):
@@ -134,7 +134,7 @@ def breaks_vs_rate(share: pd.Series, rate: pd.Series) -> plt.Figure:
 
 
 def series_with_breaks(values: np.ndarray, months, breaks, title: str) -> plt.Figure:
-    """Один реальный ряд с отмеченными разладками — метод на настоящих данных."""
+    """Один реальный ряд с отмеченными структурными изменениями — метод на настоящих данных."""
     fig, ax = plt.subplots(figsize=(8, 3.3), facecolor=SURFACE)
     ax.plot(months, values, color=SERIES[0], linewidth=2, marker="o", markersize=5)
     for b in breaks:
