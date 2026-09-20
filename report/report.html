@@ -2293,13 +2293,76 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 <li><p><strong>Фундаментальные модели временных рядов и новостные данные прироста не дали.</strong> Оба результата измерены с доверительными интервалами и приведены как есть.</p></li>
 </ol>
 <p><strong>Почему отрицательные результаты в резюме, а не в приложении.</strong> Двадцать четыре месячные точки на ряд — это очень мало. На таком объёме почти любой метод можно заставить показать улучшение, если подбирать параметры по тем же данным, на которых меряешь. Мы дважды поймали себя на этом сами: ансамбль с фундаментальной моделью «улучшал» прогноз на 9,6%, пока вес подбирался по тесту, и терял 40% при честном подборе; новостные признаки «улучшали» MAE на 0,4%, что оказалось неотличимо от нуля. Поэтому каждый заявленный эффект здесь сопровождается тем, как он проверялся.</p>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center collapsed" data-bs-toggle="collapse" data-bs-target=".callout-1-contents" aria-controls="callout-1" aria-expanded="false" aria-label="Toggle callout">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Уведомление</span>Словарь терминов
+</div>
+<div class="callout-btn-toggle d-inline-block border-0 py-1 ps-1 pe-0 float-end"><i class="callout-toggle"></i></div>
+</div>
+<div id="callout-1" class="callout-1-contents callout-collapse collapse">
+<div class="callout-body-container callout-body">
+<p>Раскройте, если какой-то термин в тексте окажется незнакомым. Всё по-русски и по существу, без отсылок к учебникам.</p>
+<section id="про-данные" class="level3">
+<h3 class="anchored" data-anchor-id="про-данные">Про данные</h3>
+<p><strong>Временной ряд</strong> — последовательность значений одной величины по месяцам. У нас это расходы одного муниципалитета: 24 числа подряд.</p>
+<p><strong>Панель</strong> — много рядов сразу, наблюдаемых за один и тот же период. У нас 2190 муниципалитетов × 24 месяца.</p>
+<p><strong>Лаг</strong> — значение того же ряда несколько месяцев назад. «Лаг 3» — то, что было три месяца назад.</p>
+<p><strong>ОКТМО</strong> — общероссийский классификатор территорий муниципальных образований, официальный код территории. Нужен потому, что названия муниципалитетов неуникальны.</p>
+</section>
+<section id="про-то-как-мы-проверяем-модели" class="level3">
+<h3 class="anchored" data-anchor-id="про-то-как-мы-проверяем-модели">Про то, как мы проверяем модели</h3>
+<p><strong>Горизонт прогнозирования</strong> — на сколько месяцев вперёд предсказываем. У нас три.</p>
+<p><strong>Обучающая и тестовая выборка</strong> — первая часть ряда, по которой модель учится, и следующая за ней, по которой проверяется. Модель тестовую часть не видит.</p>
+<p><strong>Фолд</strong> — одно такое разбиение. Мы делаем три, каждый раз сдвигая границу вперёд.</p>
+<p><strong>Скользящий origin с расширяющимся окном</strong> — способ разбиения, при котором граница между обучением и тестом последовательно сдвигается, а обучающая часть растёт. Нужен потому, что единственное разбиение на 24 точках дало бы три тестовых значения на ряд — слишком мало, чтобы отличить качество модели от случайности.</p>
+<p><strong>Подгонка под тест</strong> — ошибка, при которой параметр подбирается по тем же данным, на которых потом измеряется качество. Результат выглядит лучше, чем есть, и на новых данных не воспроизводится. Мы дважды поймали себя на ней и оба раза пересчитали честно.</p>
+</section>
+<section id="про-метрики" class="level3">
+<h3 class="anchored" data-anchor-id="про-метрики">Про метрики</h3>
+<p><strong>MAE</strong> — средняя абсолютная ошибка: насколько в среднем прогноз промахивается, в рублях. Обязательна по условиям конкурса.</p>
+<p><strong>MASE</strong> — та же ошибка, поделённая на ошибку простейшего прогноза внутри обучающей части. Значение 1 означает «не лучше простейшего», 0,7 — «на 30% точнее». Нужна потому, что расходы по муниципалитетам различаются на порядок, и средний по панели MAE без неё перекошен в сторону крупных территорий.</p>
+<p><strong>sMAPE</strong> — ошибка в процентах от величины, не зависит от масштаба.</p>
+<p><strong>R²</strong> — доля разброса значений, которую модель объясняет.</p>
+<p><strong>Доверительный интервал</strong> — диапазон, в котором находится истинная величина эффекта. Если он накрывает ноль, эффект от нуля неотличим.</p>
+<p><strong>Поправка на множественность (Бонферрони)</strong> — ужесточение порога значимости, когда проверяется несколько гипотез сразу. Без неё из семи проверок одна пройдёт порог случайно, и её легко принять за находку.</p>
+</section>
+<section id="про-модели-прогнозирования" class="level3">
+<h3 class="anchored" data-anchor-id="про-модели-прогнозирования">Про модели прогнозирования</h3>
+<p><strong>Наивная модель</strong> — не оценка качества, а название класса: простейший прогноз без настройки параметров. «Оставить как в прошлом месяце» — наивная модель. Нужны как ориентир: модель, не бьющая наивную, бесполезна независимо от своей сложности.</p>
+<p><strong>Сезонная наивная модель</strong> — «повторить то, что было в этом месяце год назад».</p>
+<p><strong>Дрейф</strong> — продолжение прямой, проведённой через первое и последнее наблюдение.</p>
+<p><strong>Экспоненциальное сглаживание (ETS)</strong> — прогноз как взвешенное среднее прошлых значений, где недавние весят больше. <strong>Затухающий тренд</strong> — поправка, при которой рост со временем выдыхается, а не продолжается бесконечно.</p>
+<p><strong>ARIMA</strong> — классическая модель, описывающая ряд через его собственные прошлые значения и прошлые ошибки.</p>
+<p><strong>Метод Тета</strong> — простой метод, выигравший международное соревнование прогнозистов M3 и до сих пор остающийся крепким ориентиром на коротких рядах.</p>
+<p><strong>Prophet</strong> — модель от Meta, раскладывающая ряд на тренд, сезонность и праздники. В условиях конкурса упомянута как базовая.</p>
+<p><strong>Градиентный бустинг</strong> — ансамбль решающих деревьев, где каждое следующее исправляет ошибки предыдущих. <strong>Гистограммный</strong> — его быстрая разновидность.</p>
+<p><strong>Глобальная модель</strong> — одна модель, обученная на всех рядах панели сразу, вместо отдельной модели на каждый ряд. Идея в том, что похожие территории помогают друг другу.</p>
+<p><strong>Фундаментальная модель временных рядов</strong> — модель, заранее обученная на миллионах чужих рядов и применяемая без дообучения. <strong>Zero-shot</strong> — как раз режим «без дообучения».</p>
+<p><strong>Ансамбль</strong> — смесь прогнозов нескольких моделей.</p>
+</section>
+<section id="про-обнаружение-структурных-изменений" class="level3">
+<h3 class="anchored" data-anchor-id="про-обнаружение-структурных-изменений">Про обнаружение структурных изменений</h3>
+<p><strong>Точка структурного изменения (разладка)</strong> — момент, после которого ряд ведёт себя иначе: сменился уровень, наклон или разброс.</p>
+<p><strong>PELT, BinSeg, BottomUp, ядровой метод</strong> — алгоритмы поиска таких точек. Первые работают с изменением среднего, ядровой — с изменением всего распределения.</p>
+<p><strong>CUSUM</strong> — накопленная сумма отклонений от базового уровня; срабатывает, когда накопилось достаточно.</p>
+<p><strong>Офлайновый и онлайновый режим</strong> — метод видит ряд целиком и ищет разладку задним числом, либо идёт по ряду слева направо, зная только прошлое. Задача конкурса требует обнаруживать шоки «как можно раньше», а это свойство онлайнового режима.</p>
+<p><strong>Полнота обнаружения</strong> — доля настоящих разладок, которые метод нашёл. <strong>Ложная тревога</strong> — срабатывание там, где разладки не было. <strong>Запаздывание</strong> — на сколько месяцев позже настоящего момента метод поднял флаг.</p>
+<p><strong>Темп роста</strong> — отношение значения к предыдущему. Переход к темпам роста убирает из ряда и тренд, и разницу масштабов между территориями.</p>
+</section>
+</div>
+</div>
+</div>
 </section>
 <section id="данные" class="level2">
 <h2 class="anchored" data-anchor-id="данные">Данные</h2>
 <section id="источник" class="level3">
 <h3 class="anchored" data-anchor-id="источник">Источник</h3>
 <p>Потребительские безналичные расходы на уровне муниципальных образований, <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>. Помесячно, январь 2023 — декабрь 2024, шесть категорий трат.</p>
-<div id="26584c8b" class="cell" data-execution_count="2">
+<div id="7f01ef64" class="cell" data-execution_count="2">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.data <span class="im">import</span> load_panel, build_matrix</span>
@@ -2372,7 +2435,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 <section id="базовая-модель-конкурса" class="level2">
 <h2 class="anchored" data-anchor-id="базовая-модель-конкурса">Базовая модель конкурса</h2>
 <p>Условия требуют превзойти базовую модель по MAE и упоминают Prophet. Мы обнаружили, что в канонической конфигурации он на этих данных вырожден.</p>
-<div id="97e84adb" class="cell" data-execution_count="3">
+<div id="60ac4849" class="cell" data-execution_count="3">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> logging</span>
@@ -2427,7 +2490,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </div>
 </div>
 </div>
-<div id="4197b2f3" class="cell" data-execution_count="4">
+<div id="1f71318a" class="cell" data-execution_count="4">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2439,11 +2502,11 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </div>
 <p>Канонический Prophet предсказывает <strong>отрицательные потребительские расходы</strong>. Годовая сезонность на пятнадцати точках не идентифицируется, и компоненты Фурье расходятся. Prophet предупреждает об этом сам: «Yearly seasonality is enabled with less than 730 days of history. The model may be under-identified, and the trend/seasonality decomposition can be unstable <strong>and dependent on the Prophet/Stan version</strong>» — то есть результат ещё и невоспроизводим между машинами.</p>
 <p>Недоопределённость проявляется дважды. Статистически — приведённым прогнозом. Вычислительно — стоимостью подгонки: 3,56 секунды против 0,08 без годовой сезонности, разница в сорок семь раз.</p>
-<p><strong>Как мы с этим поступили.</strong> Выключить сезонность и назвать результат базовой моделью значило бы подогнать эталон под себя. Обе конфигурации считаются как две отдельные модели, и целевой планкой мы считаем исправленную. Формально требование конкурса выполняется любой наивной моделью — она обходит канонический Prophet в 99,6% пар ряд-фолд, — но заявлять победу над сломанным эталоном бессмысленно.</p>
+<p><strong>Как мы с этим поступили.</strong> Выключить сезонность и назвать результат базовой моделью значило бы подогнать эталон под себя. Обе конфигурации считаются как две отдельные модели, и целевой планкой мы считаем исправленную. Формально требование конкурса выполняется любой наивной моделью — «наивной» в прогнозировании называют не плохую модель, а простейшую, без настраиваемых параметров, и такая обходит канонический Prophet в 99,6% пар ряд-фолд, — но заявлять победу над сломанным эталоном бессмысленно.</p>
 </section>
 <section id="сравнение-моделей-прогнозирования" class="level2">
 <h2 class="anchored" data-anchor-id="сравнение-моделей-прогнозирования">Сравнение моделей прогнозирования</h2>
-<div id="c7a85a0c" class="cell" data-execution_count="5">
+<div id="1a6948f2" class="cell" data-execution_count="5">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>summary <span class="op">=</span> table(<span class="st">&quot;../results/summary.csv&quot;</span>, index_col<span class="op">=</span><span class="dv">0</span>)</span>
@@ -2583,7 +2646,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </div>
 </div>
 </div>
-<div id="29200e16" class="cell" data-execution_count="6">
+<div id="ac204436" class="cell" data-execution_count="6">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2659,7 +2722,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </section>
 <section id="разладки-на-реальных-данных" class="level3">
 <h3 class="anchored" data-anchor-id="разладки-на-реальных-данных">Разладки на реальных данных</h3>
-<div id="253f40a9" class="cell" data-execution_count="7">
+<div id="ad7883b9" class="cell" data-execution_count="7">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.changepoints <span class="im">import</span> detect_pelt</span>
@@ -2716,7 +2779,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </div>
 </div>
 </div>
-<div id="363e2852" class="cell" data-execution_count="9">
+<div id="a296d434" class="cell" data-execution_count="9">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2759,7 +2822,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </tbody>
 </table>
 <p>Январь 2024 — месяц с сильнейшим изменением реальной ставки за весь период. Октябрь 2023 по величине изменения лишь одиннадцатый, но это точка разворота: ставка достигла минимума и пошла вверх.</p>
-<div id="86d5ec5c" class="cell" data-execution_count="10">
+<div id="9156156a" class="cell" data-execution_count="10">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
