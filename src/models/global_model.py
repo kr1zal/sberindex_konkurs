@@ -29,6 +29,18 @@ import pandas as pd
 LAGS = (1, 2, 3, 4, 5, 6)
 
 
+def _news_row(news: dict | None, region: str | None, month_index: int) -> dict:
+    """Новостные признаки региона за месяц. Отсутствие новостей — не ноль, а NaN.
+
+    Ноль означал бы «ничего не писали», а у нас нет издания по этому региону вовсе.
+    Гистограммный бустинг sklearn работает с пропусками штатно и учится обходиться
+    без признака там, где его нет, — подменять их нулями значило бы врать модели.
+    """
+    if not news or region is None:
+        return {}
+    return news.get((region, month_index), {})
+
+
 def _features(series: np.ndarray, t: int) -> dict | None:
     """Признаки, доступные в момент t. Всё считается только по прошлому."""
     if t < max(LAGS) - 1:
@@ -48,15 +60,20 @@ def _features(series: np.ndarray, t: int) -> dict | None:
     return row
 
 
-def _build_training(wide: pd.DataFrame, train_end: int, horizon_step: int) -> tuple[pd.DataFrame, np.ndarray]:
+def _build_training(
+    wide: pd.DataFrame, train_end: int, horizon_step: int,
+    news: dict | None = None, regions: dict | None = None,
+) -> tuple[pd.DataFrame, np.ndarray]:
     """Все пары (ряд, момент) из обучающей части, где известен и признак, и ответ."""
     rows, targets = [], []
     values = wide.to_numpy(dtype=float).T  # ряды по строкам
-    for series in values:
+    for col, series in zip(wide.columns, values):
+        region = (regions or {}).get(col)
         for t in range(max(LAGS) - 1, train_end - horizon_step):
             row = _features(series, t)
             if row is None:
                 continue
+            row |= _news_row(news, region, t)
             target = series[t + horizon_step]
             if not np.isfinite(target) or series[t] <= 0:
                 continue
@@ -77,7 +94,12 @@ class GlobalGBM:
 
     name = "global_gbm"
 
-    def __init__(self, max_iter: int = 300, learning_rate: float = 0.05, max_leaf_nodes: int = 31) -> None:
+    def __init__(
+        self, max_iter: int = 300, learning_rate: float = 0.05, max_leaf_nodes: int = 31,
+        news: dict | None = None, regions: dict | None = None,
+    ) -> None:
+        self.news = news
+        self.regions = regions
         self.params = dict(
             max_iter=max_iter,
             learning_rate=learning_rate,
@@ -94,7 +116,7 @@ class GlobalGBM:
         from sklearn.ensemble import HistGradientBoostingRegressor
 
         for step in range(1, horizon + 1):
-            features, target = _build_training(wide, train_end, step)
+            features, target = _build_training(wide, train_end, step, self.news, self.regions)
             if features.empty:
                 raise ValueError(f"нет обучающих примеров для шага {step}")
             self._columns = list(features.columns)
@@ -110,9 +132,10 @@ class GlobalGBM:
         out = np.full((values.shape[0], horizon), np.nan)
 
         rows, index = [], []
-        for i, series in enumerate(values):
+        for i, (col, series) in enumerate(zip(wide.columns, values)):
             row = _features(series, t)
             if row is not None:
+                row |= _news_row(self.news, (self.regions or {}).get(col), t)
                 rows.append(row)
                 index.append(i)
         if not rows:

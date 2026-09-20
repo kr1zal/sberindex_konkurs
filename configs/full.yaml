@@ -1,0 +1,32 @@
+# Протокол оценки. Меняется здесь и больше нигде — все модели считаются одинаково.
+# Если организаторы опубликуют свою постановку, правится только этот файл.
+
+data:
+  path: data/raw/mo_spending_2023-2024.parquet
+  category: "Все категории"
+  max_gap: 2          # внутренний разрыв до 2 месяцев чиним интерполяцией, длиннее — ряд вон
+
+split:
+  horizon: 3          # месяцев вперёд
+  n_folds: 3          # скользящий origin с расширяющимся окном
+                      # 24 точки: обучение 15/18/21, тест 16-18/19-21/22-24
+
+sample:
+  n_series: null      # ФИНАЛЬНЫЙ прогон: вся панель, 2190 рядов
+  seed: 20260919      # null = вся панель, для финального прогона
+
+models:
+  - naive_last
+  - seasonal_naive
+  - drift
+  - seasonal_drift
+  - chronos_small
+  - chronos_base
+  - global_gbm
+  - prophet_no_yearly
+
+output:
+  dir: results
+
+compute:
+  workers: 0          # 0 = все ядра минус одно

@@ -12,3 +12,5 @@ results/*.json
 # их не ловит, и они уезжают в коммит
 data/news/state.db*
 data/news/raw/
+report/report_files/
+report/.quarto/
