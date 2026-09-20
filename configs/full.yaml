@@ -43,6 +43,7 @@ models:
   - chronos_ft
   - chronos_ft_base
   - timesfm
+  - moirai
   - prophet_no_yearly
 
 output:

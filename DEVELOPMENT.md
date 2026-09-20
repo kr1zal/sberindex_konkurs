@@ -19,6 +19,7 @@ scripts/fetch_sberindex.py  выгрузка длинных рядов из ка
 scripts/check_no_leakage.py проверка, что модели не читают данные после origin
 scripts/training_length_sweep.py  как ценность переноса зависит от длины обучения
 scripts/news_event_study.py       новостной фон в месяцы массовых изломов
+scripts/error_decomposition.py    смещение против разброса между рядами
 data/raw/               панель СберИндекса (parquet)
 data/reference/         справочник МО, ключевая ставка
 data/reference/sberindex/  длинные федеральные и отраслевые ряды

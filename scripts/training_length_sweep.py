@@ -35,6 +35,7 @@ FIRST_ORIGIN = 12  # раньше на горизонт 3 остаётся сл�
 
 VARIANTS = {
     "базовая": {},
+    "доли категорий": {"categories": True},
     "общий фактор": {"common_factor": True},
     "стек категорий": {"stack_categories": True},
     "стек + фактор": {"stack_categories": True, "common_factor": True},
@@ -94,6 +95,15 @@ def main() -> int:
     gain = table[[c for c in VARIANTS if c != "базовая"]].sub(table["базовая"], axis=0)
     print(gain.round(0).to_string())
     print("\nотрицательное число = источник помогает")
+
+    # Рекомендация для практики держится на этой строке: какая конструкция
+    # выигрывает при каждой длине обучения. Судить по среднему нельзя —
+    # прогнозировать предстоит с самой длинной историей, какая есть.
+    print("\n\nЛУЧШАЯ КОНСТРУКЦИЯ НА КАЖДОЙ ДЛИНЕ ОБУЧЕНИЯ")
+    best = table[list(VARIANTS)].idxmin(axis=1)
+    for length, name in best.items():
+        print(f"  {length:2d} мес: {name:18s} MAE {table.loc[length, name]:6.0f} "
+              f"(базовая {table.loc[length, 'базовая']:.0f})")
 
     out = ROOT / "results" / "training_length_sweep.csv"
     table.to_csv(out)

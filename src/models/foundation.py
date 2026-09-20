@@ -329,3 +329,110 @@ class TimesFM:
             # Колонка 0 — среднее, дальше девять децилей; медиана пятая по счёту.
             out[start : start + len(chunk)] = np.asarray(quantiles)[:, :horizon, 5]
         return out
+
+
+class Moirai:
+    """Moirai 1.1-R от Salesforce — третье семейство фундаментальных моделей.
+
+    Два семейства уже показали одно и то же: без дообучения фундаментальная
+    модель проигрывает наивной. Третье нужно ровно для того, чтобы этот вывод
+    перестал зависеть от выбора двух конкретных архитектур. Moirai отличается
+    от обоих: это маскированный энкодер, обученный сразу на многих разрешениях,
+    с вероятностным выходом в виде выборки, а не квантилей.
+
+    Точечная оценка — медиана выборки: под MAE оптимальна именно она.
+
+    Размер патча выбирается по **отложенным месяцам обучающей части**: origin
+    сдвигается на горизонт назад, кандидаты сравниваются на последних месяцах,
+    которые модель при этом не видит. На контексте в пятнадцать точек выбор
+    между патчами в 8 и в 32 точки решает многое, а подбирать его по тесту
+    нельзя. Встроенный режим `patch_size="auto"` на наших формах падает
+    на несовпадении размерностей внутри модуля.
+
+    Установка отдельная и неприятная: `uni2ts` тянет старые numpy и scipy,
+    которые на Python 3.14 собираются из исходников и падают на cython. Ставится
+    через `--no-deps` плюс gluonts, einops, jaxtyping, hydra-core, lightning и jax
+    по отдельности; jax нужен не сам по себе, а из-за `PyTree` в jaxtyping.
+    """
+
+    name = "moirai"
+    REPO = "Salesforce/moirai-1.1-R-small"
+    _MODULE = None
+
+    PATCH_SIZES = (8, 16, 32)
+
+    def __init__(self, num_samples: int = 100, batch_size: int = 256, probe: int = 300) -> None:
+        self.num_samples = num_samples
+        self.batch_size = batch_size
+        self.probe = probe  # на скольких рядах сравниваются размеры патча
+        self.patch_size = self.PATCH_SIZES[0]
+        self.notes: list[str] = []
+
+    @classmethod
+    def _module(cls):
+        if cls._MODULE is None:
+            from uni2ts.model.moirai import MoiraiModule
+
+            cls._MODULE = MoiraiModule.from_pretrained(cls.REPO)
+        return cls._MODULE
+
+    def fit(self, wide, train_end: int, horizon: int) -> "Moirai":
+        self._module()
+        self.notes = []
+
+        inner_end = train_end - horizon
+        values = wide.to_numpy(dtype=float).T
+        probe = values[: self.probe]
+        scores = {}
+        if inner_end > horizon:
+            actual = probe[:, inner_end : inner_end + horizon]
+            for patch in self.PATCH_SIZES:
+                try:
+                    predicted = self._forecast(probe, inner_end, horizon, patch)
+                except Exception as exc:  # неподходящий патч просто выбывает
+                    self.notes.append(f"патч {patch}: не сработал ({str(exc)[:60]})")
+                    continue
+                scores[patch] = float(np.nanmean(np.abs(predicted - actual)))
+        if scores:
+            self.patch_size = min(scores, key=scores.get)
+        self.notes.append(
+            f"moirai {self.REPO}, контекст {train_end}, без дообучения | "
+            f"патч {self.patch_size} из "
+            + ", ".join(f"{k}: {v:.0f}" for k, v in sorted(scores.items()))
+            + " (по отложенным месяцам обучения)"
+        )
+        return self
+
+    def _forecast(self, values: np.ndarray, context_length: int, horizon: int, patch: int):
+        """Прогноз для матрицы рядов при заданном размере патча."""
+        import torch
+        from uni2ts.model.moirai import MoiraiForecast
+
+        forecaster = MoiraiForecast(
+            module=self._module(),
+            prediction_length=horizon,
+            context_length=context_length,
+            patch_size=patch,
+            num_samples=self.num_samples,
+            target_dim=1,
+            feat_dynamic_real_dim=0,
+            past_feat_dynamic_real_dim=0,
+        )
+        window = values[:, :context_length]
+        out = np.full((window.shape[0], horizon), np.nan)
+        for start in range(0, len(window), self.batch_size):
+            chunk = window[start : start + self.batch_size]
+            context = torch.tensor(chunk[:, :, None], dtype=torch.float32)
+            with torch.no_grad():
+                samples = forecaster(
+                    past_target=context,
+                    past_observed_target=torch.ones(context.shape, dtype=torch.bool),
+                    past_is_pad=torch.zeros(context.shape[:2], dtype=torch.bool),
+                )
+            # (ряды, выборки, горизонт) -> медиана по выборкам
+            out[start : start + len(chunk)] = np.median(np.asarray(samples), axis=1)[:, :horizon]
+        return out
+
+    def predict(self, wide, train_end: int, horizon: int) -> np.ndarray:
+        values = wide.to_numpy(dtype=float).T
+        return self._forecast(values, train_end, horizon, self.patch_size)

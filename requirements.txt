@@ -8,3 +8,17 @@ ruptures>=1.1.9
 statsmodels>=0.14
 tabulate>=0.9
 matplotlib>=3.8
+
+# Фундаментальные модели. Chronos и TimesFM ставятся обычным образом.
+chronos-forecasting>=2.3
+timesfm[torch]>=3.0
+
+# Moirai (третье семейство) в этот файл намеренно не вписан: uni2ts тянет
+# старые numpy и scipy, которые на Python 3.14 собираются из исходников
+# и падают на cython, а `pip install -r` из-за этого перестал бы работать
+# целиком. Ставится отдельно, и только если нужен именно Moirai:
+#
+#   pip install --no-deps uni2ts
+#   pip install gluonts einops jaxtyping hydra-core lightning jax
+#
+# jax нужен не сам по себе, а из-за PyTree в jaxtyping.

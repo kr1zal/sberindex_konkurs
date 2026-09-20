@@ -20,7 +20,7 @@ from src.external import ExternalFeatures, load_aggregate, load_industry  # noqa
 from src.regions import attach_regions, load_dictionary  # noqa: E402
 from src.metrics import mae, mase, r2, smape  # noqa: E402
 from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
-from src.models.foundation import Chronos, ChronosPanel, TimesFM  # noqa: E402
+from src.models.foundation import Chronos, ChronosPanel, Moirai, TimesFM  # noqa: E402
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
@@ -71,6 +71,7 @@ GLOBAL_MODELS = {
     "chronos_ft": lambda: ChronosPanel(size="small", finetune=True),
     "chronos_ft_base": lambda: ChronosPanel(size="base", finetune=True),
     "timesfm": lambda: TimesFM(),
+    "moirai": lambda: Moirai(),
 }
 
 PROPHET_VARIANTS = {
