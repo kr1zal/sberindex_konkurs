@@ -12,5 +12,9 @@ results/*.json
 # их не ловит, и они уезжают в коммит
 data/news/state.db*
 data/news/raw/
+# Тела статей — 93 МБ диагностической выборки. В репозиторий не идут:
+# воспроизводятся scripts/fetch_bodies.py, а выводы лежат в results/
+data/news/bodies_sample.jsonl
+data/news/bodies_state.db*
 report/report_files/
 report/.quarto/
