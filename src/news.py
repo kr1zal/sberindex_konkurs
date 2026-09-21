@@ -151,3 +151,72 @@ def save_datasets(headlines: pd.DataFrame, features: pd.DataFrame, out_dir: str 
         frame[col] = frame[col].astype("category")
     frame.to_parquet(out / "headlines.parquet", compression="zstd", index=False)
     features.to_parquet(out / "monthly.parquet", index=False)
+
+
+# ---------------------------------------------------------------------------
+# Национальный уровень
+# ---------------------------------------------------------------------------
+# Региональные признаки проверялись против муниципальных рядов и дали ноль
+# трижды. Но разложение ошибки показало, что весь выигрыш сидит в попадании
+# в общероссийское движение, а межрядовая составляющая не двигается ничем.
+# Значит проверять новости надо на том же разрешении, где живёт сигнал, —
+# на национальном, против федерального агрегата.
+#
+# Тема денежно-кредитной политики выделена отдельно от `kredit` и `ceny`:
+# три найденных излома совпали с разворотами ставки, и если новости вообще
+# на что-то реагируют, то на это. Корни даны в той же транслитерации, которой
+# движки сайтов строят слаги: «ЦБ» → czb, «Центробанк» → czentrobank,
+# «ключевая» → kljuchev, «инфляция» → infljacz.
+NATIONAL_TOPICS = dict(TOPICS) | {
+    "dkp": [
+        r"\bczb\b", "czentrobank", "kljuchev", "nabiullin", "reguljator",
+        "stavk", "infljacz", "proczentn",
+    ],
+}
+
+
+def national_features(headlines: pd.DataFrame) -> pd.DataFrame:
+    """Помесячный национальный ряд: интенсивность и доли тем по всему корпусу.
+
+    Интенсивность считается так же, как в региональной версии, — z-оценкой
+    числа публикаций внутри издания, усреднённой по изданиям. Нормировка внутри
+    издания нужна и здесь: восемнадцать изданий отличаются объёмом на порядок,
+    и без неё «интенсивность по стране» была бы интенсивностью самого крупного.
+
+    Доли тем считаются от всех публикаций месяца сразу, а не усреднением
+    региональных долей: усреднение дало бы каждому региону равный вес
+    независимо от числа публикаций, а нас интересует, о чём писали в стране.
+
+    Оговорка, которая идёт в отчёт: корпус покрывает восемнадцать регионов,
+    а не всю страну. «Национальный» здесь означает «сводный по собранному
+    корпусу», и федеральной репрезентативности у него нет.
+    """
+    if headlines.empty:
+        return pd.DataFrame()
+
+    frame = headlines.copy()
+    if "norm" not in frame:
+        frame["norm"] = frame["title"].map(repair_encoding).map(transliterate)
+    if "month" not in frame:
+        frame["month"] = pd.to_datetime(frame["date"]).dt.to_period("M")
+
+    topic_cols = []
+    for topic, roots in NATIONAL_TOPICS.items():
+        column = f"t_{topic}"
+        frame[column] = frame["norm"].str.contains("|".join(roots), regex=True, na=False)
+        topic_cols.append(column)
+
+    by_outlet = frame.groupby(["domain", "month"], observed=True).size().rename("n").reset_index()
+    stats = by_outlet.groupby("domain", observed=True)["n"].agg(["mean", "std"])
+    by_outlet = by_outlet.join(stats, on="domain")
+    by_outlet["z"] = (
+        (by_outlet["n"] - by_outlet["mean"]) / by_outlet["std"].replace(0, pd.NA)
+    ).fillna(0.0)
+
+    out = frame.groupby("month", observed=True).agg(
+        n_articles=("url", "size"),
+        n_outlets=("domain", "nunique"),
+        **{c: (c, "mean") for c in topic_cols},
+    )
+    out["intensity"] = by_outlet.groupby("month", observed=True)["z"].mean()
+    return out.reset_index()

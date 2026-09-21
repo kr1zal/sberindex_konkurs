@@ -23,7 +23,7 @@ from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
 from src.models.foundation import Chronos, ChronosPanel, Moirai, TimesFM  # noqa: E402
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
-from src.models.two_stage import TwoStage  # noqa: E402
+from src.models.two_stage import TwoStage, TwoStageNews  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 REGISTRY = {
@@ -79,6 +79,7 @@ GLOBAL_MODELS = {
     "two_stage_sa": lambda: TwoStage(
         slug="consumper-spending-index-sa", where={"type": "Всего"}
     ),
+    "two_stage_news": lambda: TwoStageNews(),
 }
 
 PROPHET_VARIANTS = {
