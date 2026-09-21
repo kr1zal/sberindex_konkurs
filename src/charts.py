@@ -53,16 +53,17 @@ def prophet_failure(wide: pd.DataFrame, column: str, canonical, fixed) -> plt.Fi
     fig, ax = plt.subplots(figsize=(8, 3.9), facecolor=SURFACE)
 
     ax.plot(months[:15], y[:15], color=INK_SOFT, linewidth=2, label="история обучения")
-    # Факт и починенный Prophet почти совпадают — в этом и результат, но одна линия
-    # полностью перекрывала другую, и «факт» пропадал с картинки. Факт рисуется шире
-    # и ниже по слою, починенный — тоньше поверх, с кольцом цвета фона на маркерах.
+    # Факт и Prophet по умолчанию почти совпадают — в этом и результат, но одна
+    # линия полностью перекрывала другую, и «факт» пропадал с картинки. Факт
+    # рисуется шире и ниже по слою, дефолтный — тоньше поверх, с кольцом цвета
+    # фона на маркерах.
     ax.plot(months[14:18], np.r_[y[14], y[15:18]], color=SERIES[0], linewidth=5,
             marker="o", markersize=11, label="факт", zorder=2, alpha=0.95)
     ax.plot(months[14:18], np.r_[y[14], canonical], color=SERIES[1], linewidth=2,
-            marker="o", markersize=8, linestyle="--", label="Prophet канонический", zorder=3)
+            marker="o", markersize=8, linestyle="--", label="годовая сезонность включена насильно", zorder=3)
     ax.plot(months[14:18], np.r_[y[14], fixed], color=SERIES[2], linewidth=2,
             marker="o", markersize=7, markeredgecolor=SURFACE, markeredgewidth=2,
-            label="Prophet без годовой сезонности", zorder=4)
+            label="Prophet по умолчанию", zorder=4)
 
     ax.axhline(0, color=INK_SOFT, linewidth=1)
     worst = int(np.argmin(canonical))
@@ -77,9 +78,13 @@ def prophet_failure(wide: pd.DataFrame, column: str, canonical, fixed) -> plt.Fi
     return fig
 
 
-def model_comparison(summary: pd.DataFrame, baseline: str = "prophet_no_yearly") -> plt.Figure:
+def model_comparison(summary: pd.DataFrame, baseline: str = "prophet") -> plt.Figure:
     """Горизонтальные столбцы MAE. Планка — опорная линия, а не другой цвет:
-    подсветка строки цветом кодировала бы место в рейтинге, а не сущность."""
+    подсветка строки цветом кодировала бы место в рейтинге, а не сущность.
+
+    Планка — `prophet`, то есть Prophet с его собственными настройками
+    по умолчанию: на пятнадцати месяцах он сам не включает годовую сезонность.
+    """
     s = summary.sort_values("MAE", ascending=True)
     bar = float(s.loc[baseline, "MAE"])
     # Высота под число строк: моделей стало вдвое больше, и фиксированная высота

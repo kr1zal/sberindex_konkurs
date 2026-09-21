@@ -47,7 +47,7 @@ models:
   - two_stage
   - two_stage_sa
   - two_stage_news
-  - prophet_no_yearly
+  - prophet
 
 output:
   dir: results
