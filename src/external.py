@@ -71,11 +71,21 @@ def _monthly(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def load_aggregate(directory: str | Path = DIR) -> pd.Series:
-    """Совокупные потребительские расходы России помесячно."""
-    slug, where = AGGREGATE
+def load_aggregate(
+    directory: str | Path = DIR,
+    slug: str | None = None,
+    where: dict[str, str] | None = None,
+) -> pd.Series:
+    """Совокупные потребительские расходы России помесячно.
+
+    По умолчанию — сырой ряд в рублях. Другой набор передаётся явно: это нужно,
+    чтобы сравнить сырой агрегат с сезонно сглаженным, а не рассуждать о том,
+    какой из них уместнее.
+    """
+    if slug is None:
+        slug, where = AGGREGATE
     frame = _monthly(pd.read_parquet(Path(directory) / f"{slug}.parquet"))
-    for column, value in where.items():
+    for column, value in (where or {}).items():
         frame = frame.loc[frame[column] == value]
     return frame.groupby("p")["value"].mean().sort_index()
 

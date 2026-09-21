@@ -33,18 +33,21 @@ sys.path.insert(0, str(ROOT))
 from src.data import build_matrix, load_panel  # noqa: E402
 from src.external import ExternalFeatures, load_aggregate, load_industry  # noqa: E402
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
+from src.models.two_stage import TwoStage  # noqa: E402
 from src.regions import attach_regions, load_dictionary  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 REFERENCE = ROOT / "data" / "reference" / "sberindex"
 HORIZON, N_FOLDS = 3, 3
 
+# Значение None означает наивный прогноз, который считается без модели.
 MODELS = {
-    "naive_last": None,  # считается без модели: прогноз равен последнему значению
-    "global_gbm": {},
-    "global_gbm_cat": {"categories": True},
-    "global_gbm_factor": {"common_factor": True},
-    "global_gbm_stack_factor": {"stack_categories": True, "common_factor": True},
+    "naive_last": None,
+    "two_stage": lambda: TwoStage(),
+    "global_gbm": lambda: GlobalGBM(),
+    "global_gbm_cat": lambda: GlobalGBM(categories=True),
+    "global_gbm_factor": lambda: GlobalGBM(common_factor=True),
+    "global_gbm_stack_factor": lambda: GlobalGBM(stack_categories=True, common_factor=True),
 }
 
 
@@ -86,11 +89,11 @@ def main() -> int:
             [np.nanmedian(actual[:, h] / base) for h in range(HORIZON)]
         )
 
-        for name, kwargs in MODELS.items():
-            if kwargs is None:
+        for name, build in MODELS.items():
+            if build is None:
                 predicted = np.repeat(base[:, None], HORIZON, axis=1)
             else:
-                model = GlobalGBM(**kwargs)
+                model = build()
                 model.set_context(context)
                 predicted = model.fit(wide, fold.train_end, HORIZON).predict(
                     wide, fold.train_end, HORIZON

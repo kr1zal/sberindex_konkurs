@@ -44,6 +44,8 @@ models:
   - chronos_ft_base
   - timesfm
   - moirai
+  - two_stage
+  - two_stage_sa
   - prophet_no_yearly
 
 output:

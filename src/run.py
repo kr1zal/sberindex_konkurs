@@ -23,6 +23,7 @@ from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
 from src.models.foundation import Chronos, ChronosPanel, Moirai, TimesFM  # noqa: E402
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
+from src.models.two_stage import TwoStage  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 REGISTRY = {
@@ -72,6 +73,12 @@ GLOBAL_MODELS = {
     "chronos_ft_base": lambda: ChronosPanel(size="base", finetune=True),
     "timesfm": lambda: TimesFM(),
     "moirai": lambda: Moirai(),
+    # Двухэтапный прогноз: тезис «одно число и разнос» в виде конструкции,
+    # а не только измерения. Две версии агрегата — сырой и сезонно сглаженный.
+    "two_stage": lambda: TwoStage(),
+    "two_stage_sa": lambda: TwoStage(
+        slug="consumper-spending-index-sa", where={"type": "Всего"}
+    ),
 }
 
 PROPHET_VARIANTS = {
