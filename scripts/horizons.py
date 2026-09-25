@@ -46,6 +46,7 @@ sys.path.insert(0, str(ROOT))
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.metrics import mae, mase, smape  # noqa: E402
 from src.models.two_stage import TwoStageKnownAggregate  # noqa: E402
+from src.results_guard import check_same_panel  # noqa: E402
 from src.run import GLOBAL_MODELS, _build_model, build_context  # noqa: E402
 from src.split import Fold, rolling_origin  # noqa: E402
 
@@ -54,8 +55,6 @@ from src.split import Fold, rolling_origin  # noqa: E402
 EXTRA_GLOBAL = {
     "two_stage_known": lambda: TwoStageKnownAggregate(),
 }
-
-KEYS = ["model", "horizon", "fold", "train_end", "mo"]
 
 
 def _record(
@@ -78,6 +77,12 @@ def _failure(model_name: str, horizon: int, fold: Fold, col: str, reason: str) -
     }
 
 
+def _reason(exc: Exception) -> str:
+    """Текст отказа с типом исключения. Голый `assert` в библиотеке падает без текста,
+    пустое поле уходит в CSV, читается обратно как NaN — и отказ выглядит успехом."""
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _score_series(task: tuple) -> tuple[list[dict], list[tuple]]:
     """Одна пара ряд-модель по всем фолдам одного горизонта. Верхнего уровня — чтобы пиклилось."""
     model_name, col, series, index, folds, horizon = task
@@ -91,7 +96,7 @@ def _score_series(task: tuple) -> tuple[list[dict], list[tuple]]:
         try:
             y_pred = np.asarray(model.fit(y_train).predict(horizon), dtype=float)
         except Exception as exc:  # одна упавшая подгонка не должна ронять прогон
-            rows.append(_failure(model_name, horizon, fold, col, str(exc)))
+            rows.append(_failure(model_name, horizon, fold, col, _reason(exc)))
             continue
         rows.append(_record(model_name, horizon, fold, col, y_train, y_test, y_pred))
         steps.append((fold.index, np.abs(y_test - y_pred)))
@@ -135,7 +140,7 @@ def evaluate_panel_model(
             model.fit(full, fold.train_end, horizon)
             predicted = model.predict(subset, fold.train_end, horizon)
         except Exception as exc:
-            reason = str(exc)
+            reason = _reason(exc)
             print(f"  h={horizon} фолд {fold.index} (обучение {fold.train_end}): ОТКАЗ — {reason[:100]}")
             rows.extend(_failure(model_name, horizon, fold, col, reason) for col in subset.columns)
             continue
@@ -172,29 +177,49 @@ def steps_frame(
     return pd.DataFrame(rows)
 
 
-def merge_into(path: Path, fresh: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
-    """Заменяет в файле строки прогнанных сочетаний модель × горизонт, остальное сохраняет.
+def merge_into(
+    path: Path, fresh: pd.DataFrame, replace: dict[str, object], *, same_panel: bool = False,
+) -> None:
+    """Заменяет в файле строки сочетания `replace` (модель × горизонт) строками `fresh`,
+    остальное сохраняет.
 
     Модели гоняются партиями, и перезапись файла оставляла бы только последнюю.
+    Заменяемое сочетание передаётся явно, а не выводится из `fresh`: у модели,
+    отказавшей на всех фолдах горизонта, кадр шагов пуст, и её старые шаги иначе
+    остались бы в файле рядом с одними отказами в файле по рядам.
+
+    `same_panel` — до записи сверить ряды и фолды партии со всем файлом
+    (`src.results_guard.check_same_panel`); при несовпадении файл не меняется.
+    Только для файла по рядам: в файле шагов колонки `mo` нет.
     """
-    if path.exists() and not fresh.empty:
-        previous = pd.read_csv(path)
-        done = set(map(tuple, fresh[keys].drop_duplicates().itertuples(index=False)))
-        mask = [tuple(row) in done for row in previous[keys].itertuples(index=False)]
-        previous = previous.loc[[not m for m in mask]]
-        fresh = pd.concat([previous, fresh], ignore_index=True)
-    elif path.exists():
-        fresh = pd.read_csv(path)
-    if fresh.empty:
-        return fresh  # пустой файл без заголовка потом не читается
-    fresh.to_csv(path, index=False)
-    return fresh
+    if not path.exists():
+        if not fresh.empty:
+            fresh.to_csv(path, index=False)
+        return  # пустой кадр без колонок записался бы файлом, который потом не читается
+    previous = pd.read_csv(path)
+    if same_panel:
+        check_same_panel(previous, fresh, path=path)
+    keys = list(replace)
+    replaced = {tuple(replace.values())}
+    if not fresh.empty:
+        # Сочетания, пришедшие в самой партии, заменяются тоже — иначе их строки задвоятся.
+        replaced |= set(fresh[keys].itertuples(index=False, name=None))
+    kept = previous.loc[~pd.MultiIndex.from_frame(previous[keys]).isin(list(replaced))]
+    # Пустые кадры в concat не передаются: pandas предупреждает о выводе типов по ним.
+    # Если не осталось ничего, файл всё равно переписывается — одним заголовком,
+    # иначе заменяемые строки в нём бы и остались.
+    frames = [frame for frame in (kept, fresh) if not frame.empty]
+    merged = pd.concat(frames, ignore_index=True) if frames else kept
+    merged.to_csv(path, index=False)
 
 
 def summarise(per_series: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Сводки по фолдам и по горизонтам. Отказ модели на фолде виден числом отказов."""
-    ok = per_series.loc[per_series["error"].isna()]
-    failed = per_series.loc[per_series["error"].notna()]
+    # Строка без MAE — отказ, даже если текст отказа пуст: по одной колонке `error`
+    # такой отказ после CSV неотличим от успеха (см. `_reason`).
+    refused = per_series["error"].notna() | per_series["mae"].isna()
+    ok = per_series.loc[~refused]
+    failed = per_series.loc[refused]
 
     def _summary(group_keys: list[str]) -> pd.DataFrame:
         grouped = ok.groupby(group_keys)
@@ -269,8 +294,11 @@ def main() -> int:
             else:
                 part, per_fold_steps = evaluate_series_models(wide, name, horizon, folds, workers)
             steps = steps_frame(name, horizon, folds, per_fold_steps)
-            per_series = merge_into(per_path, part, ["model", "horizon"])
-            merge_into(steps_path, steps, ["model", "horizon"])
+            # Файл по рядам сверяется с партией первым: при несовпадении исключение
+            # выходит до записи, и файл шагов тоже остаётся нетронутым.
+            pair = {"model": name, "horizon": horizon}
+            merge_into(per_path, part, pair, same_panel=True)
+            merge_into(steps_path, steps, pair)
             ok = part.loc[part["error"].isna()]
             by_fold = ok.groupby("fold")["mae"].mean()
             print(f"{name} h={horizon}: MAE {ok['mae'].mean():,.0f} | по фолдам "
