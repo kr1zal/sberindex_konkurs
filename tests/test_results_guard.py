@@ -14,7 +14,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.results_guard import check_same_panel, uneven_series  # noqa: E402
+from src.results_guard import check_plan, check_same_panel, uneven_series  # noqa: E402
 
 PATH = Path("results/per_series.csv")
 SERIES = ["мо_0", "мо_1", "мо_2", "мо_3", "мо_4"]
@@ -103,6 +103,50 @@ class CheckSamePanelTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_same_panel(previous, frame(["naive_last"], SERIES[:4], [0, 1, 2]), path=PATH)
         check_same_panel(previous, frame(["naive_last"], SERIES, [0, 1, 2]), path=PATH)
+
+
+class CheckPlanTest(unittest.TestCase):
+    """Та же сверка, что для партии, но до прогона: план — ряды матрицы и номера фолдов."""
+
+    def test_same_plan_passes(self):
+        check_plan(frame(["naive_last", "drift"], SERIES, [0, 1, 2]), SERIES, [0, 1, 2], path=PATH)
+
+    def test_plan_on_subset_of_series_is_rejected(self):
+        # 300 рядов пилота против 2 028 в файле — в миниатюре.
+        previous = frame(["naive_last", "drift"], SERIES, [0, 1, 2])
+        with self.assertRaises(ValueError) as caught:
+            check_plan(previous, SERIES[:3], [0, 1, 2], path=PATH)
+        message = str(caught.exception)
+        self.assertIn(str(PATH), message)
+        self.assertIn("рядов: в файле 5, в плане 3", message)
+        self.assertIn("фолды в плане: {0, 1, 2}", message)
+        self.assertIn("configs/baseline.yaml", message)
+        self.assertIn("модели не запускались", message)
+
+    def test_plan_with_other_folds_is_rejected(self):
+        with self.assertRaises(ValueError) as caught:
+            check_plan(frame(["naive_last"], SERIES, [0, 1, 2]), SERIES, [0, 1], path=PATH)
+        self.assertIn("фолды в плане: {0, 1}", str(caught.exception))
+
+    def test_plan_folds_are_compared_per_horizon(self):
+        previous = pd.concat(
+            [frame(["naive_last"], SERIES, [0, 1, 2, 3], horizon=1),
+             frame(["naive_last"], SERIES, [0, 1, 2], horizon=3)],
+            ignore_index=True,
+        )
+        with self.subTest("горизонта в файле ещё нет"):
+            check_plan(previous, SERIES, {12: [0]}, path=PATH)
+        with self.subTest("горизонты файла с теми же фолдами и новый горизонт"):
+            check_plan(previous, SERIES, {1: [0, 1, 2, 3], 3: [0, 1, 2], 12: [0]}, path=PATH)
+        with self.subTest("горизонт уже в файле, фолды другие"):
+            with self.assertRaises(ValueError) as caught:
+                check_plan(previous, SERIES, {3: [0, 1]}, path=PATH)
+            self.assertIn("другие фолды на горизонте 3", str(caught.exception))
+            self.assertIn("фолды в плане: h3 {0, 1}", str(caught.exception))
+
+    def test_empty_file_passes(self):
+        previous = frame(["naive_last"], SERIES, [0, 1, 2]).iloc[0:0]
+        check_plan(previous, SERIES[:3], [0, 1], path=PATH)
 
 
 class UnevenSeriesTest(unittest.TestCase):

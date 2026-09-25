@@ -10,10 +10,14 @@
 ошибки, заметили по числу.
 
 Проверка одна на `src/run.py` и `scripts/horizons.py`: правило «один файл — одна
-панель» не должно разъехаться между двумя копиями.
+панель» не должно разъехаться между двумя копиями. Сверяются дважды: план прогона —
+до расчёта (`check_plan`), чтобы не тратить часы счёта на партию, которую потом
+не слить, и сама партия — перед записью (`check_same_panel`). Сравнение у обеих
+общее (`_compare`).
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 import pandas as pd
@@ -21,6 +25,10 @@ import pandas as pd
 HINT = (
     "партия считана на другом протоколе или выборке (например, `configs/baseline.yaml` "
     "с 300 рядами); в файл ничего не записано"
+)
+PLAN_HINT = (
+    "прогон запущен с другим конфигом или выборкой (например, `configs/baseline.yaml` "
+    "с 300 рядами), и его результаты с этим файлом не слить; модели не запускались"
 )
 
 
@@ -39,27 +47,45 @@ def check_same_panel(previous: pd.DataFrame, fresh: pd.DataFrame, *, path: Path)
     if fresh.empty:
         # Партия без строк — аномалия сама по себе: слияние с ней ничего бы
         # не заменило, а прогон выглядел бы успешным.
+        details = _details(_series(previous), set(), _folds(previous, by_horizon), {}, "в партии")
         raise ValueError(
-            f"{path}: свежая партия пуста — прогон не дал ни одной строки.\n"
-            f"{_details(previous, fresh, by_horizon)}\n"
+            f"{path}: свежая партия пуста — прогон не дал ни одной строки.\n{details}\n"
             "Проверьте список моделей, выборку рядов и фолды в конфиге; в файл ничего не записано."
         )
     if previous.empty:
         return
+    _compare(
+        previous, _series(fresh), _folds(fresh, by_horizon), by_horizon,
+        path=path, subject="свежая партия", where="в партии", hint=f"Вероятно, {HINT}.",
+    )
 
-    problems = []
-    if set(previous["mo"]) != set(fresh["mo"]):
-        problems.append("другое множество рядов")
-    in_file, in_batch = _folds(previous, by_horizon), _folds(fresh, by_horizon)
-    for horizon in sorted(in_batch):
-        if horizon in in_file and in_batch[horizon] != in_file[horizon]:
-            problems.append("другие фолды" + (f" на горизонте {horizon}" if by_horizon else ""))
-    if problems:
-        raise ValueError(
-            f"{path}: свежая партия не сходится с файлом — {'; '.join(problems)}.\n"
-            f"{_details(previous, fresh, by_horizon)}\n"
-            f"Вероятно, {HINT}."
-        )
+
+def check_plan(
+    previous: pd.DataFrame, series: Iterable[str], folds: list[int] | dict[int, list[int]],
+    *, path: Path,
+) -> None:
+    """Падает с ValueError, если план прогона не сходится с файлом `path`, — до расчёта.
+    Ничего не возвращает и ничего не пишет.
+
+    `series` — ряды, которые пойдут в прогон (колонки матрицы после отбора выборки);
+    `folds` — номера фолдов списком, а для прогона по горизонтам — словарём
+    {горизонт: номера}. Правила те же, что в `check_same_panel`: ряды — всем файлом,
+    фолды — по горизонтам, которые в файле уже есть. Перед записью партия сверяется
+    ещё раз, но там несовпадение всплывает, когда часы счёта уже потрачены.
+    """
+    if previous.empty:
+        return
+    by_horizon = isinstance(folds, dict) and "horizon" in previous.columns
+    if by_horizon:
+        planned = {int(h): set(numbers) for h, numbers in folds.items()}
+    elif isinstance(folds, dict):
+        planned = {None: set().union(*folds.values())}
+    else:
+        planned = {None: set(folds)}
+    _compare(
+        previous, set(series), planned, by_horizon,
+        path=path, subject="план прогона", where="в плане", hint=f"Вероятно, {PLAN_HINT}.",
+    )
 
 
 def uneven_series(per_series: pd.DataFrame) -> pd.Series | None:
@@ -86,14 +112,37 @@ def _folds(frame: pd.DataFrame, by_horizon: bool) -> dict:
     return {int(h): set(folds.tolist()) for h, folds in frame.groupby("horizon")["fold"]}
 
 
-def _details(previous: pd.DataFrame, fresh: pd.DataFrame, by_horizon: bool) -> str:
-    in_file = set() if previous.empty else set(previous["mo"])
-    in_batch = set() if fresh.empty else set(fresh["mo"])
+def _compare(
+    previous: pd.DataFrame, series: set, folds: dict, by_horizon: bool,
+    *, path: Path, subject: str, where: str, hint: str,
+) -> None:
+    """Общая сверка файла с партией или с планом: ряды — всем файлом, фолды — там,
+    где горизонт в файле уже есть. `where` — «в партии» или «в плане» для сообщения."""
+    file_series, file_folds = _series(previous), _folds(previous, by_horizon)
+    problems = []
+    if file_series != series:
+        problems.append("другое множество рядов")
+    for horizon in sorted(folds):
+        if horizon in file_folds and folds[horizon] != file_folds[horizon]:
+            problems.append("другие фолды" + (f" на горизонте {horizon}" if by_horizon else ""))
+    if problems:
+        raise ValueError(
+            f"{path}: {subject} не сходится с файлом — {'; '.join(problems)}.\n"
+            f"{_details(file_series, series, file_folds, folds, where)}\n"
+            f"{hint}"
+        )
+
+
+def _series(frame: pd.DataFrame) -> set:
+    return set() if frame.empty else set(frame["mo"])
+
+
+def _details(file_series: set, series: set, file_folds: dict, folds: dict, where: str) -> str:
     return (
-        f"  рядов: в файле {len(in_file)}, в партии {len(in_batch)}; "
-        f"только в файле {len(in_file - in_batch)}, только в партии {len(in_batch - in_file)}\n"
-        f"  фолды в файле: {_folds_text(_folds(previous, by_horizon))}\n"
-        f"  фолды в партии: {_folds_text(_folds(fresh, by_horizon))}"
+        f"  рядов: в файле {len(file_series)}, {where} {len(series)}; "
+        f"только в файле {len(file_series - series)}, только {where} {len(series - file_series)}\n"
+        f"  фолды в файле: {_folds_text(file_folds)}\n"
+        f"  фолды {where}: {_folds_text(folds)}"
     )
 
 

@@ -11,11 +11,13 @@ import io
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 
 import numpy as np
 import pandas as pd
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -141,6 +143,55 @@ class SummariseTest(unittest.TestCase):
             self.assertEqual(row["отказов"], 1)
             self.assertEqual(row["серий"], 1)
             self.assertEqual(row["MAE"], 10.0)
+
+
+class _Report:
+    def as_text(self) -> str:
+        return ""
+
+
+def _model_started(*args, **kwargs):
+    raise AssertionError("модель запущена до сверки плана с файлом")
+
+
+class MainStopsBeforeModelsTest(unittest.TestCase):
+    """`main()` целиком: загрузка подменена, модели — ловушки, которые падают при вызове."""
+
+    def test_plan_on_other_series_stops_before_any_model(self):
+        five = [f"мо_{i}" for i in range(5)]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            per_path = root / "results" / "horizons_per_series.csv"
+            per_path.parent.mkdir()
+            per_series("m", 3, [0, 1, 2], series=five).to_csv(per_path, index=False)
+            before = per_path.read_bytes()
+            config = root / "config.yaml"
+            config.write_text(yaml.safe_dump({
+                "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
+                "horizons": [{"horizon": 3, "n_folds": 3}],
+                "sample": {"n_series": None, "seed": 1},
+                "models": ["naive_last"],
+                "output": {"dir": "results", "prefix": "horizons"},
+                "compute": {"workers": 1},
+            }, allow_unicode=True), encoding="utf-8")
+            wide = pd.DataFrame(np.ones((24, 3)), columns=five[:3])
+            with (
+                warnings.catch_warnings(),  # main() глушит предупреждения глобально
+                mock.patch.object(horizons, "ROOT", root),
+                mock.patch.object(horizons, "load_panel", return_value=None),
+                mock.patch.object(horizons, "build_matrix", return_value=(wide, _Report())),
+                mock.patch.object(horizons, "build_context", return_value=None),
+                mock.patch.object(horizons, "evaluate_series_models", side_effect=_model_started) as series,
+                mock.patch.object(horizons, "evaluate_panel_model", side_effect=_model_started) as panel,
+                mock.patch.object(sys, "argv", ["horizons.py", "--config", str(config)]),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                with self.assertRaises(ValueError) as caught:
+                    horizons.main()
+            self.assertIn("модели не запускались", str(caught.exception))
+            series.assert_not_called()
+            panel.assert_not_called()
+            self.assertEqual(per_path.read_bytes(), before)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ from src.models.foundation import Chronos, ChronosPanel, Moirai, TimesFM  # noqa
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.models.two_stage import TwoStage, TwoStageNews  # noqa: E402
-from src.results_guard import check_same_panel, uneven_series  # noqa: E402
+from src.results_guard import check_plan, check_same_panel, uneven_series  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 REGISTRY = {
@@ -338,6 +338,28 @@ def _series_regions(wide: pd.DataFrame) -> dict[str, str]:
     }
 
 
+def merge_results(per_path: Path, fresh: pd.DataFrame) -> pd.DataFrame:
+    """Дописывает партию в `per_path` и возвращает всё, что теперь лежит в файле.
+
+    Результаты предыдущих прогонов не затираются, а дополняются: модели часто
+    гоняются частями (дорогие отдельно от дешёвых), и перезапись молча оставляла
+    бы в итоговой таблице только последнюю партию. Строки моделей партии заменяются
+    новыми — повторный прогон обновляет, а не дублирует.
+
+    Замена честна, только если партия считана на тех же рядах и фолдах, что весь
+    файл: сверка идёт до отбрасывания строк и до записи, при несовпадении файл
+    не меняется (src/results_guard.py).
+    """
+    merged = fresh
+    if per_path.exists():
+        previous = pd.read_csv(per_path)
+        check_same_panel(previous, fresh, path=per_path)
+        kept = previous[~previous["model"].isin(fresh["model"].unique())]
+        merged = pd.concat([kept, fresh], ignore_index=True)
+    merged.to_csv(per_path, index=False)
+    return merged
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Прогон моделей по единому протоколу")
     parser.add_argument(
@@ -362,6 +384,13 @@ def main() -> int:
     for f in folds:
         print(f"  фолд {f.index}: обучение 1..{f.train_end}, тест {f.test_start + 1}..{f.test_end}")
     print()
+
+    out_dir = ROOT / cfg["output"]["dir"]
+    per_path = out_dir / "per_series.csv"
+    if per_path.exists():
+        # Перед записью партия сверяется с файлом ещё раз, но там несовпадение
+        # всплывает, когда часы счёта уже потрачены, а результаты некуда деть.
+        check_plan(pd.read_csv(per_path), wide.columns, [f.index for f in folds], path=per_path)
 
     workers = int(cfg.get("compute", {}).get("workers", 0)) or max(1, (os.cpu_count() or 2) - 1)
     print(f"параллельно процессов: {workers}\n")
@@ -393,22 +422,8 @@ def main() -> int:
     per_series = pd.concat(parts, ignore_index=True)
     summary = summarise(per_series)
 
-    out_dir = ROOT / cfg["output"]["dir"]
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Результаты предыдущих прогонов не затираются, а дополняются: модели часто
-    # гоняются частями (дорогие отдельно от дешёвых), и перезапись молча оставляла
-    # бы в итоговой таблице только последнюю партию. Строки одной и той же модели
-    # заменяются новыми — повторный прогон обновляет, а не дублирует.
-    # Замена честна, только если партия считана на тех же рядах и фолдах, что весь
-    # файл: сверка идёт до отбрасывания строк и до записи (src/results_guard.py).
-    per_path = out_dir / "per_series.csv"
-    if per_path.exists():
-        previous = pd.read_csv(per_path)
-        check_same_panel(previous, per_series, path=per_path)
-        previous = previous[~previous["model"].isin(per_series["model"].unique())]
-        per_series = pd.concat([previous, per_series], ignore_index=True)
-
-    per_series.to_csv(per_path, index=False)
+    per_series = merge_results(per_path, per_series)
     summary = summarise(per_series)
     _warn_uneven(per_series)
     summary.to_csv(out_dir / "summary.csv")

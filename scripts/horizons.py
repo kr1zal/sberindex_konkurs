@@ -46,7 +46,7 @@ sys.path.insert(0, str(ROOT))
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.metrics import mae, mase, smape  # noqa: E402
 from src.models.two_stage import TwoStageKnownAggregate  # noqa: E402
-from src.results_guard import check_same_panel  # noqa: E402
+from src.results_guard import check_plan, check_same_panel  # noqa: E402
 from src.run import (  # noqa: E402
     GLOBAL_MODELS, _build_model, build_context, failure_reason, refused,
 )
@@ -277,6 +277,11 @@ def main() -> int:
     prefix = cfg["output"].get("prefix", "horizons")
     per_path = out_dir / f"{prefix}_per_series.csv"
     steps_path = out_dir / f"{prefix}_steps.csv"
+    if per_path.exists():
+        # Перед каждой записью партия сверяется с файлом ещё раз (merge_into), но там
+        # несовпадение всплывает, когда первая пара модель × горизонт уже посчитана.
+        plan_folds = {horizon: [f.index for f in folds] for horizon, folds in plan}
+        check_plan(pd.read_csv(per_path), wide.columns, plan_folds, path=per_path)
 
     for name in names:
         for horizon, folds in plan:
