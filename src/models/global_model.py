@@ -175,7 +175,12 @@ class GlobalGBM:
         self.context: PanelContext | None = None
         self.notes: list[str] = []
         self._models: dict[int, object] = {}
-        self._columns: list[str] = []
+        # Колонки запоминаются на каждый шаг отдельно. На длинном обучении наборы
+        # совпадают, а на коротком нет: при двенадцати месяцах и шаге 6 обучающая
+        # пара всего одна, и в ней ещё нет сдвига долей категорий, — модель шага 6
+        # видит 16 признаков, а модель шага 1 — 21. Один общий список колонок
+        # здесь молча подсовывал бы одной из них чужую матрицу.
+        self._columns: dict[int, list[str]] = {}
         self._factor = None
         self._shares: _CategoryShares | None = None
 
@@ -251,7 +256,7 @@ class GlobalGBM:
                 self.notes.append(
                     f"шаг {step}: предобучение на {len(long_target)} примерах длинных рядов"
                 )
-            self._columns = list(features.columns)
+            self._columns[step] = list(features.columns)
             model.fit(features.to_numpy(dtype=float), target)
             self._models[step] = model
         return self
@@ -389,13 +394,14 @@ class GlobalGBM:
         if not rows:
             return out
 
-        features = pd.DataFrame(rows).reindex(columns=self._columns)
+        frame = pd.DataFrame(rows)
         base = values[index, t]
         if self._factor is not None:
             multipliers = self._factor.multipliers_for(wide.columns)[index]
         else:
             multipliers = np.ones((len(index), horizon))
         for step in range(1, horizon + 1):
+            features = frame.reindex(columns=self._columns[step])
             ratio = self._models[step].predict(features.to_numpy(dtype=float))
             out[index, step - 1] = base * ratio * multipliers[:, step - 1]
         return out

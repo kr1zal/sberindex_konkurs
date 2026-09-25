@@ -140,6 +140,14 @@ class ChronosPanel:
                 contexts.append(series[: t + 1])
                 targets.append(series[t + 1 : t + 1 + horizon])
                 origins.append(t)
+        if not contexts:
+            # Окно дообучения — горизонт контекста плюс горизонт цели, и обоим
+            # надо уместиться в обучающую часть. При обучении 12 и горизонте 6
+            # не остаётся ни одного примера; пусть отказ будет назван, а не
+            # выглядеть как ошибка max() на пустом списке.
+            raise ValueError(
+                f"нет обучающих окон: обучение {train_end} мес короче двух горизонтов по {horizon}"
+            )
         width = max(len(c) for c in contexts)
         padded = np.full((len(contexts), width), np.nan)
         for i, c in enumerate(contexts):
@@ -200,6 +208,13 @@ class ChronosPanel:
         import torch
 
         device = self._device()
+        # Сид нужен не только выборке батчей. В режиме обучения у T5 работает
+        # dropout, и он берёт глобальный генератор torch — без этой строки два
+        # прогона на одних данных давали 1 606 и 1 772 на трёх фолдах протокола,
+        # а на третьем фолде расходились на 555 рублей. Сидируется и MPS.
+        torch.manual_seed(self.seed)
+        if device == "mps" and hasattr(torch, "mps"):
+            torch.mps.manual_seed(self.seed)
         model = copy.deepcopy(self._pipeline).model.to(device)
         optimiser = torch.optim.AdamW(model.parameters(), lr=learning_rate)
         generator = torch.Generator().manual_seed(self.seed)

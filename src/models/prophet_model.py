@@ -24,7 +24,12 @@ import numpy as np
 import pandas as pd
 
 for _noisy in ("prophet", "cmdstanpy", "cmdstanpy.utils"):
-    logging.getLogger(_noisy).setLevel(logging.CRITICAL)
+    _logger = logging.getLogger(_noisy)
+    _logger.setLevel(logging.CRITICAL)
+    # cmdstanpy при первом обращении сам ставит обработчик и уровень DEBUG,
+    # если обработчиков нет, — и тогда каждая подгонка пишет две строки в лог.
+    # Пустой обработчик не даёт ему это сделать.
+    _logger.addHandler(logging.NullHandler())
 
 
 class ProphetModel:
