@@ -48,7 +48,9 @@ from src.metrics import (  # noqa: E402
     ROW_METRICS, SUMMARY_COLUMNS, r2_and_gains, row_metrics, warn_uneven_pairs,
 )
 from src.models.two_stage import TwoStageKnownAggregate  # noqa: E402
-from src.results_guard import check_plan, check_same_panel, read_results  # noqa: E402
+from src.results_guard import (  # noqa: E402
+    check_plan, check_same_panel, read_results, realization_stamp, save_realization,
+)
 from src.run import (  # noqa: E402
     GLOBAL_MODELS, _build_model, build_context, failure_reason, refused,
 )
@@ -176,7 +178,8 @@ def steps_frame(
 
 
 def merge_into(
-    path: Path, fresh: pd.DataFrame, replace: dict[str, object], *, same_panel: bool = False,
+    path: Path, fresh: pd.DataFrame, replace: dict[str, object], *,
+    same_panel: bool = False, stamp: str | None = None,
 ) -> None:
     """Заменяет в файле строки сочетания `replace` (модель × горизонт) строками `fresh`,
     остальное сохраняет.
@@ -192,6 +195,12 @@ def merge_into(
 
     Файл читается точно (`read_results`): строки остальных пар записываются обратно
     теми же числами до последнего разряда.
+
+    `stamp` — снять строки заменяемых пар, уже лежащие в файле, после сверки и до замены:
+    `realizations/<модель>__h<горизонт>__<stamp>.csv` рядом с файлом
+    (`src.results_guard.save_realization`). main передаёт штамп, один на весь вызов,
+    только для файла по рядам: реализации сравниваются по строкам ряд × фолд, и файл
+    шагов не снимается.
     """
     if not path.exists():
         if not fresh.empty:
@@ -205,7 +214,11 @@ def merge_into(
     if not fresh.empty:
         # Сочетания, пришедшие в самой партии, заменяются тоже — иначе их строки задвоятся.
         replaced |= set(fresh[keys].itertuples(index=False, name=None))
-    kept = previous.loc[~pd.MultiIndex.from_frame(previous[keys]).isin(list(replaced))]
+    is_replaced = pd.MultiIndex.from_frame(previous[keys]).isin(list(replaced))
+    if stamp is not None:
+        for (model, horizon), rows in previous.loc[is_replaced].groupby(["model", "horizon"]):
+            save_realization(rows, path.parent / "realizations", f"{model}__h{int(horizon)}", stamp)
+    kept = previous.loc[~is_replaced]
     # Пустые кадры в concat не передаются: pandas предупреждает о выводе типов по ним.
     # Если не осталось ничего, файл всё равно переписывается — одним заголовком,
     # иначе заменяемые строки в нём бы и остались.
@@ -295,6 +308,7 @@ def main() -> int:
     prefix = cfg["output"].get("prefix", "horizons")
     per_path = out_dir / f"{prefix}_per_series.csv"
     steps_path = out_dir / f"{prefix}_steps.csv"
+    stamp = realization_stamp()  # один на вызов main: снимки всех пар партии — под одним именем
     if per_path.exists():
         # Перед каждой записью партия сверяется с файлом ещё раз (merge_into), но там
         # несовпадение всплывает, когда первая пара модель × горизонт уже посчитана.
@@ -314,7 +328,7 @@ def main() -> int:
             # Файл по рядам сверяется с партией первым: при несовпадении исключение
             # выходит до записи, и файл шагов тоже остаётся нетронутым.
             pair = {"model": name, "horizon": horizon}
-            merge_into(per_path, part, pair, same_panel=True)
+            merge_into(per_path, part, pair, same_panel=True, stamp=stamp)
             merge_into(steps_path, steps, pair)
             is_refusal = refused(part)  # то же правило, что в сводке
             ok = part.loc[~is_refusal]

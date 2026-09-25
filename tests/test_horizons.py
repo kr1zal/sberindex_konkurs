@@ -22,6 +22,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src.results_guard import read_results  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 # scripts/ — не пакет: скрипт грузится по пути, без правки sys.path под все тесты.
@@ -31,6 +32,7 @@ _spec.loader.exec_module(horizons)
 
 SERIES = ["мо_0", "мо_1", "мо_2"]
 PAIR = {"model": "m", "horizon": 3}
+STAMP = "20260925T200000"
 # Метрики строки в порядке файла: четыре прежние и слагаемые R² пула.
 METRICS = ["mae", "r2", "smape", "mase", "sse", "sst", "n", "y_sum", "y_sq"]
 SUMMARY = ["MAE", "MASE", "sMAPE", "R² пул", "R² медиана", "к Prophet, %", "к наивной, %",
@@ -128,8 +130,31 @@ class MergeIntoTest(unittest.TestCase):
         before = path.read_bytes()
         fresh = per_series("m", 3, [0, 1, 2], series=SERIES[:2], mae=2.0)
         with self.assertRaises(ValueError):
-            horizons.merge_into(path, fresh, PAIR, same_panel=True)
+            horizons.merge_into(path, fresh, PAIR, same_panel=True, stamp=STAMP)
         self.assertEqual(path.read_bytes(), before)
+        self.assertFalse((self.dir / "realizations").exists())  # сверка идёт раньше снимка
+
+    def test_replaced_pair_is_snapshotted_exactly(self):
+        path = self.dir / "horizons_per_series.csv"
+        old = per_series("m", 3, [0, 1, 2])
+        old["mae"] = awkward(len(old), seed=30)
+        pd.concat([old, per_series("m", 1, [0, 1]), per_series("other", 3, [0, 1, 2])],
+                  ignore_index=True).to_csv(path, index=False)
+        before = read_results(path)
+        with contextlib.redirect_stdout(io.StringIO()):
+            horizons.merge_into(path, per_series("m", 3, [0, 1, 2], mae=2.0), PAIR,
+                                same_panel=True, stamp=STAMP)
+        snapshots = self.dir / "realizations"
+        self.assertEqual(sorted(p.name for p in snapshots.iterdir()), [f"m__h3__{STAMP}.csv"])
+        # Ровно старые строки пары, все колонки файла, числа до последнего разряда.
+        expected = before.loc[(before["model"] == "m") & (before["horizon"] == 3)].reset_index(drop=True)
+        pd.testing.assert_frame_equal(read_results(snapshots / f"m__h3__{STAMP}.csv"), expected)
+
+    def test_new_pair_leaves_no_snapshot(self):
+        path = self.dir / "horizons_per_series.csv"
+        per_series("other", 3, [0, 1, 2]).to_csv(path, index=False)
+        horizons.merge_into(path, per_series("m", 3, [0, 1, 2]), PAIR, same_panel=True, stamp=STAMP)
+        self.assertFalse((self.dir / "realizations").exists())
 
 
 class _Silent:
@@ -383,6 +408,29 @@ class MainTest(unittest.TestCase):
                   ignore_index=True).to_csv(self.per_path, index=False)
         pd.concat([steps("naive_last", 3, [0, 1, 2], mae=999.0), steps("drift", 3, [0, 1, 2], mae=5.0)],
                   ignore_index=True).to_csv(self.steps_path, index=False)
+
+    def test_replaced_pairs_are_snapshotted_under_one_stamp_and_steps_are_not(self):
+        # В файле naive_last на горизонтах 3 и 1: обе пары заменяются одним вызовом main,
+        # и оба снимка — под одним штампом, хотя слияний два.
+        pd.concat([per_series("naive_last", 3, [0, 1, 2], mae=999.0),
+                   per_series("naive_last", 1, list(range(9)), mae=999.0)],
+                  ignore_index=True).to_csv(self.per_path, index=False)
+        pd.concat([steps("naive_last", 3, [0, 1, 2], mae=999.0), steps("naive_last", 1, list(range(9)), mae=999.0)],
+                  ignore_index=True).to_csv(self.steps_path, index=False)
+        stamp = mock.Mock(side_effect=[STAMP, "20260925T200001"])
+        plan = {"horizons": [{"horizon": 3, "n_folds": 3}, {"horizon": 1, "n_folds": 9}],
+                "models": ["naive_last"]}
+        run_main(self.root, plan, matrix(SERIES), realization_stamp=stamp)
+        snapshots = self.root / "results" / "realizations"
+        self.assertEqual(sorted(p.name for p in snapshots.iterdir()),
+                         [f"naive_last__h1__{STAMP}.csv", f"naive_last__h3__{STAMP}.csv"])
+        self.assertEqual(stamp.call_count, 1)
+        for name, n_rows in ((f"naive_last__h1__{STAMP}.csv", 9 * 3), (f"naive_last__h3__{STAMP}.csv", 3 * 3)):
+            with self.subTest(name):
+                snapshot = pd.read_csv(snapshots / name)
+                self.assertEqual(len(snapshot), n_rows)
+                self.assertIn("mo", snapshot.columns)  # снимок файла по рядам, не шагов
+                self.assertTrue((snapshot["mae"] == 999.0).all())
 
     def test_plan_on_other_series_stops_before_any_model(self):
         five = [f"мо_{i}" for i in range(5)]

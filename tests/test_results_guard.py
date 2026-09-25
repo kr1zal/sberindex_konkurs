@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+import contextlib
+import io
+import re
 import subprocess
 import sys
 import tempfile
@@ -215,6 +218,47 @@ class RefusalRuleTest(unittest.TestCase):
     def test_failure_reason_names_exception_type(self):
         self.assertEqual(results_guard.failure_reason(AssertionError()), "AssertionError: ")
         self.assertEqual(results_guard.failure_reason(ValueError("мало точек")), "ValueError: мало точек")
+
+
+class SaveRealizationTest(unittest.TestCase):
+    """Снимок строк, которые слияние сейчас заменит: первая реализация модели не должна
+    исчезать при прогоне той же модели ещё раз."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name) / "realizations"
+
+    def save(self, rows: pd.DataFrame, label: str = "chronos_ft") -> tuple[Path, str]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            path = results_guard.save_realization(rows, self.dir, label, "20260925T200000")
+        return path, out.getvalue()
+
+    def test_rows_are_written_exactly_with_all_columns(self):
+        # Слияния снимают строки, прочитанные из файла результатов, — так и здесь:
+        # с текстом отказа в части строк и неудобными для разбора числами.
+        rows = frame(["chronos_ft"], SERIES, [0, 1, 2])
+        rows["mae"] = np.concatenate([[1217.032436222938, 0.6207988257547953],
+                                      np.random.default_rng(2).uniform(0, 5000, len(rows) - 2)])
+        rows.loc[0, ["mae", "error"]] = [np.nan, "ValueError: мало точек"]
+        source = self.dir.parent / "per_series.csv"
+        rows.to_csv(source, index=False)
+        rows = results_guard.read_results(source)
+        path, printed = self.save(rows)
+        self.assertEqual(path, self.dir / "chronos_ft__20260925T200000.csv")
+        pd.testing.assert_frame_equal(results_guard.read_results(path), rows)
+        self.assertIn(str(path), printed)
+
+    def test_existing_snapshot_is_never_overwritten(self):
+        first, _ = self.save(frame(["chronos_ft"], SERIES, [0]))
+        before = first.read_bytes()
+        second, _ = self.save(frame(["chronos_ft"], SERIES, [1]))
+        self.assertEqual(second, self.dir / "chronos_ft__20260925T200000__2.csv")
+        self.assertEqual(first.read_bytes(), before)
+
+    def test_stamp_is_utc_to_the_second(self):
+        self.assertRegex(results_guard.realization_stamp(), re.compile(r"^\d{8}T\d{6}$"))
 
 
 class ReadResultsTest(unittest.TestCase):

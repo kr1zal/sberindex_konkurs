@@ -27,7 +27,8 @@ from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.models.two_stage import TwoStage, TwoStageNews  # noqa: E402
 from src.results_guard import (  # noqa: E402
-    check_plan, check_same_panel, failure_reason, read_results, refused, uneven_series,
+    check_plan, check_same_panel, failure_reason, read_results, realization_stamp, refused,
+    save_realization, uneven_series,
 )
 from src.split import rolling_origin  # noqa: E402
 
@@ -335,7 +336,7 @@ def _series_regions(wide: pd.DataFrame) -> dict[str, str]:
     }
 
 
-def merge_results(per_path: Path, fresh: pd.DataFrame) -> pd.DataFrame:
+def merge_results(per_path: Path, fresh: pd.DataFrame, *, stamp: str) -> pd.DataFrame:
     """Дописывает партию в `per_path` и возвращает всё, что теперь лежит в файле.
 
     Результаты предыдущих прогонов не затираются, а дополняются: модели часто
@@ -347,13 +348,19 @@ def merge_results(per_path: Path, fresh: pd.DataFrame) -> pd.DataFrame:
     файл: сверка идёт до отбрасывания строк и до записи, при несовпадении файл
     не меняется (src/results_guard.py). Файл читается точно (`read_results`): строки
     остальных моделей записываются обратно теми же числами до последнего разряда.
+
+    Заменяемые строки не пропадают: после сверки и до замены строки каждой модели
+    партии, уже лежащие в файле, уходят снимком в `realizations/<модель>__<stamp>.csv`
+    рядом с файлом (`save_realization`). `stamp` — один на вызов `main`.
     """
     merged = fresh
     if per_path.exists():
         previous = read_results(per_path)
         check_same_panel(previous, fresh, path=per_path)
-        kept = previous[~previous["model"].isin(fresh["model"].unique())]
-        merged = pd.concat([kept, fresh], ignore_index=True)
+        replaced = previous["model"].isin(fresh["model"].unique())
+        for model, rows in previous.loc[replaced].groupby("model"):
+            save_realization(rows, per_path.parent / "realizations", model, stamp)
+        merged = pd.concat([previous.loc[~replaced], fresh], ignore_index=True)
     merged.to_csv(per_path, index=False)
     return merged
 
@@ -385,6 +392,7 @@ def main() -> int:
 
     out_dir = ROOT / cfg["output"]["dir"]
     per_path = out_dir / "per_series.csv"
+    stamp = realization_stamp()  # один на вызов: снимки заменённых строк партии — под одним именем
     if per_path.exists():
         # Перед записью партия сверяется с файлом ещё раз, но там несовпадение
         # всплывает, когда часы счёта уже потрачены, а результаты некуда деть.
@@ -420,7 +428,7 @@ def main() -> int:
     per_series = pd.concat(parts, ignore_index=True)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    per_series = merge_results(per_path, per_series)
+    per_series = merge_results(per_path, per_series, stamp=stamp)
     summary = summarise(per_series)
     _warn_uneven(per_series)
     summary.to_csv(out_dir / "summary.csv")

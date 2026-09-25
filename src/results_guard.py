@@ -20,14 +20,15 @@
 или удлинение панели при том же числе фолдов она пропустит — штампа протокола
 в файлах нет. Прогон на намеренно другом протоколе пишется в другой `output.dir`.
 
-Здесь же правило отказа (`refused`, `failure_reason`) — одно на прогоны и отчёт —
-и чтение файлов результатов (`read_results`). Модуль лёгкий, только pandas
-и стандартная библиотека: отчёт берёт правила отсюда, не поднимая `src.run`
-со всеми моделями.
+Здесь же правило отказа (`refused`, `failure_reason`), одно на прогоны и отчёт,
+чтение файлов результатов (`read_results`) и снимки строк, которые слияние заменяет
+(`save_realization`). Модуль лёгкий, только pandas и стандартная библиотека: отчёт
+берёт правила отсюда, не поднимая `src.run` со всеми моделями.
 """
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -129,6 +130,32 @@ def read_results(path: Path, **kwargs) -> pd.DataFrame:
     заново, и каждая партия сдвигала бы сохранённые метрики чужих моделей. Все чтения
     файлов результатов в прогонах и бэкфилле идут через эту функцию — правило одно."""
     return pd.read_csv(path, float_precision="round_trip", **kwargs)
+
+
+def realization_stamp() -> str:
+    """Штамп снимков: время UTC до секунды, `YYYYmmddTHHMMSS`. Берётся один раз на вызов
+    `main`, чтобы снимки одной партии совпадали по имени."""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+
+
+def save_realization(rows: pd.DataFrame, directory: Path, label: str, stamp: str) -> Path:
+    """Пишет строки, которые слияние сейчас заменит, в `directory/<label>__<stamp>.csv`,
+    печатает путь и возвращает его.
+
+    Прогон той же модели заменяет её строки, и прежняя реализация пропадала, а модель
+    со случайностью показывается средним и размахом по реализациям: дообученный Chronos
+    на одних данных дал 1 606 и 1 772. Слияния зовут это после сверки партии с файлом
+    и до замены — партия, которую сверка остановила, снимка не оставляет. Снимок
+    с тем же именем не перезаписывается: к имени добавляется номер."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{label}__{stamp}.csv"
+    number = 2
+    while path.exists():
+        path = directory / f"{label}__{stamp}__{number}.csv"
+        number += 1
+    rows.to_csv(path, index=False)
+    print(f"снимок заменяемых строк: {path}")
+    return path
 
 
 def failure_reason(exc: Exception) -> str:

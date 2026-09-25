@@ -19,9 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src import run  # noqa: E402
+from src.results_guard import read_results  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 SERIES = ["мо_0", "мо_1", "мо_2", "мо_3", "мо_4"]
+STAMP = "20260925T200000"
 # Метрики строки в порядке файла: четыре прежние и слагаемые R² пула.
 METRICS = ["mae", "r2", "smape", "mase", "sse", "sst", "n", "y_sum", "y_sq"]
 SUMMARY = ["MAE", "MASE", "sMAPE", "R² пул", "R² медиана", "к Prophet, %", "к наивной, %",
@@ -266,13 +268,35 @@ class MergeResultsTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.path = Path(tmp.name) / "per_series.csv"
+        self.snapshots = Path(tmp.name) / "realizations"
         frame(["naive_last", "drift"], SERIES).to_csv(self.path, index=False)
+
+    def merge(self, fresh: pd.DataFrame) -> pd.DataFrame:
+        with contextlib.redirect_stdout(io.StringIO()):  # путь снимка печатается
+            return run.merge_results(self.path, fresh, stamp=STAMP)
 
     def test_batch_on_other_series_is_rejected_and_file_untouched(self):
         before = digest(self.path)
         with self.assertRaises(ValueError):
-            run.merge_results(self.path, frame(["naive_last"], SERIES[:3], mae=2.0))
+            self.merge(frame(["naive_last"], SERIES[:3], mae=2.0))
         self.assertEqual(digest(self.path), before)
+        self.assertFalse(self.snapshots.exists())  # сверка идёт раньше снимка
+
+    def test_replaced_rows_are_snapshotted_exactly(self):
+        old = frame(["naive_last"], SERIES)
+        for i, column in enumerate(["mae", "r2", "smape", "mase"]):
+            old[column] = awkward(len(old), seed=20 + i)
+        pd.concat([old, frame(["drift"], SERIES)], ignore_index=True).to_csv(self.path, index=False)
+        before = read_results(self.path)
+        self.merge(frame(["naive_last"], SERIES, mae=2.0))
+        self.assertEqual(sorted(p.name for p in self.snapshots.iterdir()), [f"naive_last__{STAMP}.csv"])
+        # Ровно старые строки модели, все колонки файла, числа до последнего разряда.
+        expected = before.loc[before["model"] == "naive_last"].reset_index(drop=True)
+        pd.testing.assert_frame_equal(read_results(self.snapshots / f"naive_last__{STAMP}.csv"), expected)
+
+    def test_new_model_leaves_no_snapshot(self):
+        self.merge(frame(["theta"], SERIES, mae=2.0))
+        self.assertFalse(self.snapshots.exists())
 
     def test_other_models_keep_their_numbers_to_the_last_digit(self):
         # Слияние читает файл и пишет его заново: строки чужих моделей должны вернуться
@@ -281,7 +305,7 @@ class MergeResultsTest(unittest.TestCase):
         for i, column in enumerate(["mae", "r2", "smape", "mase"]):
             kept[column] = awkward(len(kept), seed=i)
         pd.concat([frame(["naive_last"], SERIES), kept], ignore_index=True).to_csv(self.path, index=False)
-        run.merge_results(self.path, frame(["naive_last"], SERIES, mae=2.0))
+        self.merge(frame(["naive_last"], SERIES, mae=2.0))
         back = pd.read_csv(self.path, float_precision="round_trip")
         drift = back[back["model"] == "drift"]
         for column in ["mae", "r2", "smape", "mase"]:
@@ -289,7 +313,7 @@ class MergeResultsTest(unittest.TestCase):
                 self.assertTrue(np.array_equal(drift[column].to_numpy(), kept[column].to_numpy()))
 
     def test_batch_replaces_rows_of_its_model_and_keeps_the_rest(self):
-        merged = run.merge_results(self.path, frame(["naive_last"], SERIES, mae=2.0))
+        merged = self.merge(frame(["naive_last"], SERIES, mae=2.0))
         on_disk = pd.read_csv(self.path)
         self.assertEqual(len(on_disk), 2 * len(SERIES) * 3)
         self.assertEqual(on_disk.loc[on_disk["model"] == "naive_last", "mae"].unique().tolist(), [2.0])
@@ -391,6 +415,18 @@ class MainTest(unittest.TestCase):
         # Строки drift — из файла старой раскладки, слагаемых пула у них нет.
         self.assertTrue(np.isfinite(summary.loc["naive_last", "R² пул"]))
         self.assertTrue(np.isnan(summary.loc["drift", "R² пул"]))
+
+    def test_replaced_model_is_snapshotted_under_the_stamp_of_the_run(self):
+        frame(["naive_last"], SERIES[:3], mae=999.0).to_csv(self.per_path, index=False)
+        frame(["drift"], SERIES[:3], mae=5.0).to_csv(self.per_path, index=False, mode="a", header=False)
+        stamp = mock.Mock(side_effect=[STAMP, "20260925T200001"])
+        out = run_main(self.root, ["naive_last"], matrix(SERIES[:3]), realization_stamp=stamp)
+        snapshots = self.root / "results" / "realizations"
+        self.assertEqual(sorted(p.name for p in snapshots.iterdir()), [f"naive_last__{STAMP}.csv"])
+        self.assertEqual(stamp.call_count, 1)
+        snapshot = pd.read_csv(snapshots / f"naive_last__{STAMP}.csv")
+        self.assertEqual(snapshot["mae"].tolist(), [999.0] * 9)
+        self.assertIn(str(snapshots / f"naive_last__{STAMP}.csv"), out)
 
     def test_identical_models_warning_is_printed_once(self):
         # Раньше сводка считалась и по одной партии до слияния (результат не читался),
