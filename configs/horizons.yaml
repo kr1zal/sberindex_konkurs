@@ -45,6 +45,14 @@ models:
   - global_gbm_cat
   - global_gbm_stack_factor
   - chronos_ft
+  # Фундаментальные модели оцениваются на всех горизонтах, а не только на h=3:
+  # zero-shot трёх семейств рядом с дообученным Chronos.
+  - chronos_small
+  - timesfm
+  - moirai
+  # Новости классически помогают на наукасте — здесь это горизонт 1, и проверять
+  # их надо на нём, а не только в основном протоколе.
+  - two_stage_news
 
 output:
   dir: results

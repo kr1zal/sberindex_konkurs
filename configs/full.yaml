@@ -48,6 +48,10 @@ models:
   - two_stage_sa
   - two_stage_news
   - prophet
+  # Числа этих трёх были только с пилота на 300 рядах; нужны полнопанельные.
+  - prophet_forced_yearly
+  - chronos_small_log
+  - chronos_base_log
 
 output:
   dir: results

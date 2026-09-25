@@ -20,3 +20,5 @@ data/news/bodies_sample.jsonl
 data/news/bodies_state.db*
 report/report_files/
 report/.quarto/
+# Логи фоновых прогонов: nohup ... > logs/*.log
+logs/
