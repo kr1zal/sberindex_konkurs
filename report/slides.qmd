@@ -124,6 +124,57 @@ plt.show()
 Классические модели сбиты в плотную группу — это **потолок подхода
 «моделируем каждый ряд отдельно»**.
 
+## Метрики рядом: MAE, MASE, R²
+
+```{python}
+from src.results_guard import refused
+# Подписи — как в таблицах пяти горизонтов отчёта.
+_ru = {
+    "naive_last": "наивная: оставить как в прошлом месяце",
+    "prophet": "эталон конкурса (Prophet по умолчанию)",
+    "chronos_ft": "Chronos-Bolt, дообученный",
+    "two_stage": "двухэтапная: одно число и разнос долями",
+    "global_gbm": "панельная модель, без внешних источников",
+    "global_gbm_stack_factor": "панельная + фактор + категории рядами",
+}
+
+def _num(value, digits, sign=False):
+    """Как `num` отчёта: разряды, запятая и минус «−» — на одном числе, а не заменой
+    во всей строке; «+» у выигрыша, но не у нуля — у эталона против самого себя."""
+    text = format(value, ("+" if sign and value != 0 else "") + f",.{digits}f")
+    return text.replace(",", "\u00a0").replace(".", ",").replace("-", "−")
+
+_sm = pd.read_csv("../results/summary.csv", index_col=0).loc[list(_ru)].sort_values("MAE")
+_tab = pd.DataFrame({
+    "MAE, ₽": _sm["MAE"].map(lambda v: _num(v, 0)),
+    "MASE": _sm["MASE"].map(lambda v: _num(v, 2)),
+    "R² пул": _sm["R² пул"].map(lambda v: _num(v, 3)),
+    "R² медиана": _sm["R² медиана"].map(lambda v: _num(v, 2)),
+    "к Prophet, %": _sm["к Prophet, %"].map(lambda v: _num(v, 1, sign=True)),
+})
+_tab.index = pd.Index([_ru[m] for m in _tab.index], name="модель")
+# Не через md_table: разбор чисел tabulate принимает «0,978» за число с разделителем
+# тысяч и выравнивает одну колонку иначе остальных. Числа уже строки — разбор выключен.
+Markdown(_tab.to_markdown(disable_numparse=True, colalign=("left",) + ("right",) * len(_tab.columns)))
+```
+
+```{python}
+# Строка под таблицей — по фактическим средним: вырожденным среднее называется, только
+# если оно ниже нуля у всех, а «наивная лучшая» — только если это так.
+_per = pd.read_csv("../results/per_series.csv", usecols=["model", "mae", "r2", "error"])
+_mean = _per[~refused(_per) & _per["model"].isin(_ru)].groupby("model")["r2"].mean()
+_span = f"от {_num(_mean.min(), 1)} до {_num(_mean.max(), 1)}"
+if (_mean < 0).all() and _mean.idxmax() == _sm["MAE"].idxmax() == "naive_last":
+    _line = (f"Среднее R² по парам ряд × фолд в таблицы не идёт: на трёх тестовых точках "
+             f"оно вырождено — {_span}, и лучшей по нему выходит наивная модель, худшая по MAE.")
+elif (_mean < 0).all():
+    _line = (f"Среднее R² по парам ряд × фолд в таблицы не идёт: на трёх тестовых точках "
+             f"оно вырождено — {_span}, ниже нуля у всех.")
+else:
+    _line = f"Среднее R² по парам ряд × фолд — {_span}; в таблицы идут пул и медиана."
+Markdown(_line)
+```
+
 ## Что дало выигрыш
 
 **Не более хитрая модель одного ряда, а информация со стороны.**
