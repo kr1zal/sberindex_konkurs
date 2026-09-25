@@ -131,6 +131,16 @@ class ChronosPanel:
         """
         import torch
 
+        if train_end <= 2 * horizon:
+            # Самое короткое окно — контекст в horizon + 1 месяцев и цель в horizon
+            # месяцев, и оба должны уместиться в обучающую часть. При обучении 12
+            # и горизонте 6 не остаётся ни одного примера; пусть отказ будет назван,
+            # а не выглядеть как ошибка max() на пустом списке. «Короче двух
+            # горизонтов» здесь было бы неправдой: 12 — ровно два горизонта по 6.
+            raise ValueError(
+                f"обучение {train_end} мес не длиннее двух горизонтов по {horizon}: "
+                "окно контекста и окно цели не умещаются вместе"
+            )
         values = wide.to_numpy(dtype=float).T
         contexts, targets, origins = [], [], []
         for series in values:
@@ -141,13 +151,7 @@ class ChronosPanel:
                 targets.append(series[t + 1 : t + 1 + horizon])
                 origins.append(t)
         if not contexts:
-            # Окно дообучения — горизонт контекста плюс горизонт цели, и обоим
-            # надо уместиться в обучающую часть. При обучении 12 и горизонте 6
-            # не остаётся ни одного примера; пусть отказ будет назван, а не
-            # выглядеть как ошибка max() на пустом списке.
-            raise ValueError(
-                f"нет обучающих окон: обучение {train_end} мес короче двух горизонтов по {horizon}"
-            )
+            raise ValueError(f"нет обучающих окон: ни один ряд не заполнен на всех {train_end} мес обучения")
         width = max(len(c) for c in contexts)
         padded = np.full((len(contexts), width), np.nan)
         for i, c in enumerate(contexts):
@@ -158,6 +162,23 @@ class ChronosPanel:
             np.asarray(origins),
         )
 
+    @staticmethod
+    def _validation_split(origins: np.ndarray, horizon: int) -> tuple[np.ndarray, np.ndarray]:
+        """Номера обучающих и проверочных окон по их origin.
+
+        Проверочное окно — последний origin каждого ряда: его цель — последние
+        `horizon` месяцев обучающей части, ровно та задача, что и на тесте. Цели
+        обучающих окон заканчиваются раньше первого проверочного месяца. Прежде
+        проверочными были последние `horizon` origin, и их цели заходили в цели
+        обучения на `horizon − 1` месяцев: ранняя остановка отчасти судила по
+        месяцам, которые модель уже учила. Окна между обучающими и проверочными
+        не идут никуда — их цели задевают проверочные месяцы; обучение от этого
+        не короче прежнего.
+        """
+        last = origins.max()
+        cutoff = last - horizon + 1
+        return np.flatnonzero(origins < cutoff), np.flatnonzero(origins == last)
+
     # -- обучение и прогноз ------------------------------------------------
 
     def fit(self, wide, train_end: int, horizon: int) -> "ChronosPanel":
@@ -166,14 +187,10 @@ class ChronosPanel:
         if not self.finetune:
             return self
 
-        import numpy as _np
-
         context, target, origins = self._samples(wide, train_end, horizon)
-        # Валидация — последние horizon месяцев обучающей части. Ровно та задача,
-        # что и на тесте: спрогнозировать месяцы, которых модель ещё не видела.
-        cutoff = origins.max() - horizon + 1
-        train_idx = _np.flatnonzero(origins < cutoff)
-        valid_idx = _np.flatnonzero(origins >= cutoff)
+        # Проверочные окна — последний origin каждого ряда; обучающие цели
+        # заканчиваются раньше первого проверочного месяца.
+        train_idx, valid_idx = self._validation_split(origins, horizon)
         if len(train_idx) == 0 or len(valid_idx) == 0:
             self.notes.append("дообучение пропущено: не хватает месяцев на валидацию по времени")
             return self
@@ -211,10 +228,9 @@ class ChronosPanel:
         # Сид нужен не только выборке батчей. В режиме обучения у T5 работает
         # dropout, и он берёт глобальный генератор torch — без этой строки два
         # прогона на одних данных давали 1 606 и 1 772 на трёх фолдах протокола,
-        # а на третьем фолде расходились на 555 рублей. Сидируется и MPS.
+        # а на третьем фолде расходились на 555 рублей. Отдельный сид MPS не нужен:
+        # в torch 2.x `manual_seed` сидирует генераторы всех устройств.
         torch.manual_seed(self.seed)
-        if device == "mps" and hasattr(torch, "mps"):
-            torch.mps.manual_seed(self.seed)
         model = copy.deepcopy(self._pipeline).model.to(device)
         optimiser = torch.optim.AdamW(model.parameters(), lr=learning_rate)
         generator = torch.Generator().manual_seed(self.seed)
@@ -376,10 +392,14 @@ class Moirai:
 
     PATCH_SIZES = (8, 16, 32)
 
-    def __init__(self, num_samples: int = 100, batch_size: int = 256, probe: int = 300) -> None:
+    def __init__(
+        self, num_samples: int = 100, batch_size: int = 256, probe: int = 300,
+        seed: int = 20260920,
+    ) -> None:
         self.num_samples = num_samples
         self.batch_size = batch_size
         self.probe = probe  # на скольких рядах сравниваются размеры патча
+        self.seed = seed
         self.patch_size = self.PATCH_SIZES[0]
         self.notes: list[str] = []
 
@@ -435,17 +455,25 @@ class Moirai:
         )
         window = values[:, :context_length]
         out = np.full((window.shape[0], horizon), np.nan)
-        for start in range(0, len(window), self.batch_size):
-            chunk = window[start : start + self.batch_size]
-            context = torch.tensor(chunk[:, :, None], dtype=torch.float32)
-            with torch.no_grad():
-                samples = forecaster(
-                    past_target=context,
-                    past_observed_target=torch.ones(context.shape, dtype=torch.bool),
-                    past_is_pad=torch.zeros(context.shape[:2], dtype=torch.bool),
-                )
-            # (ряды, выборки, горизонт) -> медиана по выборкам
-            out[start : start + len(chunk)] = np.median(np.asarray(samples), axis=1)[:, :horizon]
+        # Сто выборок брались из несидированного генератора, и между прогонами плавали
+        # и MAE, и выбор патча в `fit` — он сравнивает MAE тех же выборок. Правило
+        # проекта — стохастический шаг проверяется двойным прогоном, а без сида двойной
+        # прогон не сходится по построению. Сидируется генератор CPU: forecaster
+        # считает на CPU. fork_rng возвращает генераторы как были, иначе сид Moirai
+        # сдвигал бы случайность всего, что идёт после неё в том же процессе.
+        with torch.random.fork_rng():
+            torch.manual_seed(self.seed)
+            for start in range(0, len(window), self.batch_size):
+                chunk = window[start : start + self.batch_size]
+                context = torch.tensor(chunk[:, :, None], dtype=torch.float32)
+                with torch.no_grad():
+                    samples = forecaster(
+                        past_target=context,
+                        past_observed_target=torch.ones(context.shape, dtype=torch.bool),
+                        past_is_pad=torch.zeros(context.shape[:2], dtype=torch.bool),
+                    )
+                # (ряды, выборки, горизонт) -> медиана по выборкам
+                out[start : start + len(chunk)] = np.median(np.asarray(samples), axis=1)[:, :horizon]
         return out
 
     def predict(self, wide, train_end: int, horizon: int) -> np.ndarray:
