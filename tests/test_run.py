@@ -214,6 +214,16 @@ class SummariseTest(unittest.TestCase):
         self.assertEqual(summary.loc["prophet", "к Prophet, %"], 0.0)
         self.assertEqual(summary.loc["best", "отказов"], 1)
 
+    def test_file_with_r2_but_without_parts_gives_median_and_nan_pool(self):
+        # Строки старой раскладки: r2 по рядам есть, слагаемых пула нет.
+        per_series = pd.concat([frame(["naive_last"], SERIES), frame(["drift"], SERIES, mae=2.0)],
+                               ignore_index=True)
+        per_series.loc[per_series["model"] == "drift", "r2"] = np.linspace(-3.0, 0.5, 15)
+        summary = run.summarise(per_series)
+        self.assertTrue(summary["R² пул"].isna().all())
+        self.assertEqual(summary.loc["naive_last", "R² медиана"], 0.0)
+        self.assertEqual(summary.loc["drift", "R² медиана"], float(np.median(np.linspace(-3.0, 0.5, 15))))
+
     def test_row_without_mae_counts_as_refusal_even_with_empty_error(self):
         frame = pd.DataFrame({
             "model": ["m", "m"], "fold": [0, 0], "mo": ["мо_0", "мо_1"],

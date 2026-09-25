@@ -96,7 +96,8 @@ def r2_and_gains(ok: pd.DataFrame, summary_mae: pd.Series) -> pd.DataFrame:
     R² пул группы — 1 − Σsse / (Σy_sq − (Σy_sum)² / Σn): один R² по объединённым тестовым
     точкам всех рядов и фолдов группы, SST вокруг среднего пула. Строка без `sse` не входит
     ни в одну сумму — её точек в пуле нет. R² медиана — медиана `r2` строк, NaN не в счёт.
-    В кадре без колонок-слагаемых (файл посчитан до них) обе R²-колонки — NaN.
+    В кадре без колонок-слагаемых (файл посчитан до них) пул — NaN, а медиана считается
+    по `r2`, если он есть; без `r2` NaN и она.
 
     Выигрыш — 100 · (MAE эталона − MAE) / MAE эталона, плюс — лучше эталона. Эталон берётся
     из строки сводки с теми же ключами, кроме модели: в сводке run.py — из всей сводки,
@@ -111,8 +112,9 @@ def r2_and_gains(ok: pd.DataFrame, summary_mae: pd.Series) -> pd.DataFrame:
         sst = sums["y_sq"] - sums["y_sum"] ** 2 / sums["n"]
         # Все точки пула равны — R² не определён, как у ряда с ровным тестом в `r2`.
         out[R2_POOL] = (1.0 - sums["sse"] / sst).where(sst > 0).reindex(summary_mae.index)
-        if "r2" in ok.columns:
-            out[R2_MEDIAN] = ok.groupby(keys)["r2"].median().reindex(summary_mae.index)
+    # Медиане слагаемые не нужны: r2 строк есть и в файлах, посчитанных до них.
+    if "r2" in ok.columns:
+        out[R2_MEDIAN] = ok.groupby(keys)["r2"].median().reindex(summary_mae.index)
 
     table = summary_mae.rename("MAE").reset_index()
     within = [key for key in keys if key != "model"]

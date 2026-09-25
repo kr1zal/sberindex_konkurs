@@ -119,11 +119,22 @@ class PoolTest(unittest.TestCase):
                     "y_train": np.arange(12, dtype=float)} for f in range(2)])
         self.assertTrue(np.isnan(by_model(ok).loc["m", R2_POOL]))
 
-    def test_old_file_without_parts_gives_nan_r2_and_keeps_gains(self):
+    def test_file_without_r2_and_parts_gives_nan_r2_and_keeps_gains(self):
+        # Раскладка старого horizons_per_series.csv: ни r2, ни слагаемых.
         old = self.ok.drop(columns=["r2", "sse", "sst", "n", "y_sum", "y_sq"])
         table = by_model(old)
         self.assertTrue(table[[R2_POOL, R2_MEDIAN]].isna().all().all())
         self.assertTrue(table[[PROPHET, NAIVE]].notna().all().all())
+
+    def test_median_comes_from_r2_even_without_pool_parts(self):
+        # Раскладка per_series.csv до слагаемых: r2 по рядам есть, пула не собрать.
+        # Медиана от слагаемых не зависит и считается; NaN — только пул.
+        old = self.ok.drop(columns=["sse", "sst", "n", "y_sum", "y_sq"])
+        table = by_model(old)
+        self.assertTrue(table[R2_POOL].isna().all())
+        for model in NOISE:
+            with self.subTest(model):
+                self.assertEqual(table.loc[model, R2_MEDIAN], old.loc[old["model"] == model, "r2"].median())
 
 
 class GainsTest(unittest.TestCase):
