@@ -22,7 +22,10 @@ from src import run  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 SERIES = ["мо_0", "мо_1", "мо_2", "мо_3", "мо_4"]
-METRICS = ["mae", "r2", "smape", "mase"]
+# Метрики строки в порядке файла: четыре прежние и слагаемые R² пула.
+METRICS = ["mae", "r2", "smape", "mase", "sse", "sst", "n", "y_sum", "y_sq"]
+SUMMARY = ["MAE", "MASE", "sMAPE", "R² пул", "R² медиана", "к Prophet, %", "к наивной, %",
+           "серий", "отказов"]
 
 
 def frame(models: list[str], series: list[str], mae: float = 1.0) -> pd.DataFrame:
@@ -111,7 +114,106 @@ class FailureTextTest(unittest.TestCase):
             self.assertTrue(part[METRICS].isna().all().all())
 
 
+class _LastValue:
+    """Панельная модель с известным прогнозом: последнее значение обучения каждого ряда."""
+
+    def fit(self, full, train_end, horizon):
+        return self
+
+    def predict(self, subset, train_end, horizon):
+        last = subset.to_numpy(dtype=float)[train_end - 1]
+        return np.repeat(last[:, None], horizon, axis=1)
+
+
+def parts(y_test: np.ndarray, y_pred: np.ndarray) -> dict:
+    """Слагаемые пула, посчитанные в тесте напрямую."""
+    return {
+        "sse": float(np.sum((y_test - y_pred) ** 2)),
+        "sst": float(np.sum((y_test - y_test.mean()) ** 2)),
+        "n": len(y_test), "y_sum": float(np.sum(y_test)), "y_sq": float(np.sum(y_test ** 2)),
+    }
+
+
+class RowPartsTest(unittest.TestCase):
+    """Строки успеха несут слагаемые R² пула, у моделей по рядам и панельных одинаково."""
+
+    def assert_row(self, row, y_test: np.ndarray, y_pred: np.ndarray) -> None:
+        self.assertEqual(list(row.keys()), ["model", "fold", "mo", *METRICS, "error"])
+        for key, value in parts(y_test, y_pred).items():
+            self.assertAlmostEqual(row[key], value, places=6, msg=key)
+        self.assertAlmostEqual(row["r2"], 1 - row["sse"] / row["sst"], places=12)
+
+    def test_series_model_rows(self):
+        series = matrix(["мо_0"])["мо_0"].to_numpy()
+        folds = rolling_origin(24, 3, 3)
+        rows = run._score_series(("naive_last", "мо_0", series, pd.RangeIndex(24), folds, 3))
+        self.assertEqual(len(rows), 3)
+        for row, fold in zip(rows, folds):
+            self.assert_row(row, series[fold.test_start : fold.test_end],
+                            np.full(3, series[fold.train_end - 1]))
+
+    def test_panel_model_rows(self):
+        wide = matrix(SERIES[:2])
+        with mock.patch.dict(run.GLOBAL_MODELS, {"last": _LastValue}):
+            part = run.evaluate_global(wide, wide, "last", 3, 3)
+        self.assertEqual(len(part), 2 * 3)
+        for row in part.to_dict("records"):
+            fold = rolling_origin(24, 3, 3)[row["fold"]]
+            series = wide[row["mo"]].to_numpy()
+            self.assert_row(row, series[fold.test_start : fold.test_end],
+                            np.full(3, series[fold.train_end - 1]))
+
+
+def scored(model: str, mo: str, fold: int, y: np.ndarray, p: np.ndarray) -> dict:
+    """Строка успеха с метриками, посчитанными в тесте напрямую."""
+    row = parts(y, p)
+    return {"model": model, "fold": fold, "mo": mo, "mae": float(np.mean(np.abs(y - p))),
+            "r2": 1 - row["sse"] / row["sst"], "smape": 1.0, "mase": 1.0, **row, "error": None}
+
+
 class SummariseTest(unittest.TestCase):
+    def test_columns_in_order(self):
+        # Разные MAE: одинаковые модели сводка отметила бы предупреждением в выводе.
+        per_series = pd.concat([frame(["naive_last"], SERIES), frame(["drift"], SERIES, mae=2.0)],
+                               ignore_index=True)
+        summary = run.summarise(per_series)
+        self.assertEqual(list(summary.columns), SUMMARY)
+        self.assertEqual(summary.index.name, "model")
+
+    def test_pool_median_and_gains(self):
+        rng = np.random.default_rng(3)
+        noise = {"prophet": 0.05, "naive_last": 0.08, "best": 0.02}
+        actual, forecast, rows = {m: [] for m in noise}, {m: [] for m in noise}, []
+        for s, level in enumerate([100.0, 1_000.0, 10_000.0]):
+            for fold in (0, 1, 2):
+                y = level * (1 + 0.1 * rng.standard_normal(3))
+                for model, scale in noise.items():
+                    p = y + level * scale * rng.standard_normal(3)
+                    actual[model].append(y)
+                    forecast[model].append(p)
+                    rows.append(scored(model, f"мо_{s}", fold, y, p))
+        # Отказ не входит ни в пул, ни в медиану, но считается в отказах.
+        rows.append({"model": "best", "fold": 0, "mo": "мо_9", **dict.fromkeys(METRICS, np.nan),
+                     "error": "ValueError: мало точек"})
+        per_series = pd.DataFrame(rows)
+        summary = run.summarise(per_series)
+
+        ok = per_series[per_series["error"].isna()]
+        for model in noise:
+            with self.subTest(model):
+                y, p = np.concatenate(actual[model]), np.concatenate(forecast[model])
+                pool = 1 - np.sum((y - p) ** 2) / np.sum((y - y.mean()) ** 2)
+                self.assertAlmostEqual(summary.loc[model, "R² пул"], pool, places=12)
+                self.assertEqual(summary.loc[model, "R² медиана"],
+                                 ok.loc[ok["model"] == model, "r2"].median())
+        mae = summary["MAE"]
+        self.assertAlmostEqual(summary.loc["best", "к Prophet, %"],
+                               100 * (mae["prophet"] - mae["best"]) / mae["prophet"], places=12)
+        self.assertAlmostEqual(summary.loc["best", "к наивной, %"],
+                               100 * (mae["naive_last"] - mae["best"]) / mae["naive_last"], places=12)
+        self.assertEqual(summary.loc["prophet", "к Prophet, %"], 0.0)
+        self.assertEqual(summary.loc["best", "отказов"], 1)
+
     def test_row_without_mae_counts_as_refusal_even_with_empty_error(self):
         frame = pd.DataFrame({
             "model": ["m", "m"], "fold": [0, 0], "mo": ["мо_0", "мо_1"],
@@ -233,12 +335,19 @@ class MainTest(unittest.TestCase):
         self.assertTrue(theta["mae"].isna().all())
         self.assertTrue(theta["error"].str.startswith("AssertionError").all())
 
+        self.assertTrue(naive[METRICS].notna().all().all())
+        self.assertTrue(theta[METRICS].isna().all().all())
+
         summary = pd.read_csv(self.root / "results" / "summary.csv", index_col=0)
+        self.assertEqual(list(summary.columns), SUMMARY)
         self.assertEqual(summary.loc["theta", "отказов"], 9)
         self.assertEqual(summary.loc["theta", "серий"], 0)
         self.assertEqual(summary["серий"].dtype.kind, "i")  # целые, а не дробные из-за NaN
         self.assertTrue(np.isnan(summary.loc["theta", "MAE"]))
         self.assertEqual(summary.loc["drift", "MAE"], 5.0)
+        # Строки drift — из файла старой раскладки, слагаемых пула у них нет.
+        self.assertTrue(np.isfinite(summary.loc["naive_last", "R² пул"]))
+        self.assertTrue(np.isnan(summary.loc["drift", "R² пул"]))
 
     def test_identical_models_warning_is_printed_once(self):
         # Раньше сводка считалась и по одной партии до слияния (результат не читался),

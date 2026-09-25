@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.external import ExternalFeatures, load_aggregate, load_industry  # noqa: E402
 from src.regions import attach_regions, load_dictionary  # noqa: E402
-from src.metrics import mae, mase, r2, smape  # noqa: E402
+from src.metrics import ROW_METRICS, SUMMARY_COLUMNS, r2_and_gains, row_metrics  # noqa: E402
 from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
 from src.models.foundation import Chronos, ChronosPanel, Moirai, TimesFM  # noqa: E402
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
@@ -105,12 +105,23 @@ def _build_model(name: str):
     return REGISTRY[name]()
 
 
+def _record(
+    model_name: str, fold: int, col: str,
+    y_train: np.ndarray, y_test: np.ndarray, y_pred: np.ndarray,
+) -> dict:
+    """Строка успеха — одна на модели по рядам и панельные, чтобы колонки не расходились."""
+    return {
+        "model": model_name, "fold": fold, "mo": col,
+        **row_metrics(y_test, y_pred, y_train), "error": None,
+    }
+
+
 def _failure(model_name: str, fold: int, col: str, reason: str) -> dict:
     """Строка отказа. Метрики — NaN, а не отсутствующие ключи: у партии из одних
     отказов иначе нет колонки `mae`, и сводка падает с KeyError ещё до слияния."""
     return {
         "model": model_name, "fold": fold, "mo": col,
-        "mae": np.nan, "r2": np.nan, "smape": np.nan, "mase": np.nan, "error": reason,
+        **dict.fromkeys(ROW_METRICS, np.nan), "error": reason,
     }
 
 
@@ -131,18 +142,7 @@ def _score_series(task: tuple) -> list[dict]:
             out.append(_failure(model_name, fold.index, col, failure_reason(exc)[:120]))
             continue
 
-        out.append(
-            {
-                "model": model_name,
-                "fold": fold.index,
-                "mo": col,
-                "mae": mae(y_test, y_pred),
-                "r2": r2(y_test, y_pred),
-                "smape": smape(y_test, y_pred),
-                "mase": mase(y_test, y_pred, y_train, season=1),
-                "error": None,
-            }
-        )
+        out.append(_record(model_name, fold.index, col, y_train, y_test, y_pred))
     return out
 
 
@@ -173,15 +173,7 @@ def evaluate_global(
             if np.isnan(y_pred).any():
                 rows.append(_failure(model_name, fold.index, col, "недостаточно истории для признаков"))
                 continue
-            rows.append(
-                {
-                    "model": model_name, "fold": fold.index, "mo": col,
-                    "mae": mae(y_test, y_pred), "r2": r2(y_test, y_pred),
-                    "smape": smape(y_test, y_pred),
-                    "mase": mase(y_test, y_pred, y_train, season=1),
-                    "error": None,
-                }
-            )
+            rows.append(_record(model_name, fold.index, col, y_train, y_test, y_pred))
     return pd.DataFrame(rows)
 
 
@@ -209,8 +201,12 @@ def evaluate(
 
 
 def summarise(per_series: pd.DataFrame) -> pd.DataFrame:
-    """Сводка по моделям. R² считается по объединённому пулу точек, а не усреднением по рядам:
-    на трёх точках горизонта R² отдельного ряда неустойчив и его среднее ничего не значит."""
+    """Сводка по моделям, колонки — `src.metrics.SUMMARY_COLUMNS`. MAE, MASE и sMAPE —
+    средние по строкам ряд × фолд без отказов. R² — по объединённому пулу тестовых точек
+    всех рядов и фолдов модели и медианой по рядам, а не средним: на трёх точках горизонта
+    R² отдельного ряда неустойчив, и его среднее ничего не значит. Выигрыш к Prophet
+    и к наивной — по MAE. Пул, медиана и выигрыш — `src.metrics.r2_and_gains`, одна
+    функция со сводками scripts/horizons.py."""
     refusals = refused(per_series)
     ok = per_series.loc[~refusals]
     grouped = ok.groupby("model")
@@ -227,6 +223,7 @@ def summarise(per_series: pd.DataFrame) -> pd.DataFrame:
     # и вся колонка сводки становится дробной.
     summary["серий"] = summary["серий"].fillna(0).astype(int)
     summary["отказов"] = summary["отказов"].fillna(0).astype(int)
+    summary = summary.join(r2_and_gains(ok, summary["MAE"]))[SUMMARY_COLUMNS]
 
     _warn_identical(ok)
     return summary.sort_values("MAE")

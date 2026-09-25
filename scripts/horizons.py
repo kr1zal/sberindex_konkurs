@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
-from src.metrics import mae, mase, smape  # noqa: E402
+from src.metrics import ROW_METRICS, SUMMARY_COLUMNS, r2_and_gains, row_metrics  # noqa: E402
 from src.models.two_stage import TwoStageKnownAggregate  # noqa: E402
 from src.results_guard import check_plan, check_same_panel  # noqa: E402
 from src.run import (  # noqa: E402
@@ -63,11 +63,11 @@ def _record(
     model_name: str, horizon: int, fold: Fold, col: str,
     y_train: np.ndarray, y_test: np.ndarray, y_pred: np.ndarray,
 ) -> dict:
+    """Строка успеха: метрики той же функцией, что в src/run.py, — со слагаемыми R² пула."""
     return {
         "model": model_name, "horizon": horizon, "fold": fold.index,
         "train_end": fold.train_end, "mo": col,
-        "mae": mae(y_test, y_pred), "smape": smape(y_test, y_pred),
-        "mase": mase(y_test, y_pred, y_train, season=1), "error": None,
+        **row_metrics(y_test, y_pred, y_train), "error": None,
     }
 
 
@@ -75,7 +75,7 @@ def _failure(model_name: str, horizon: int, fold: Fold, col: str, reason: str) -
     return {
         "model": model_name, "horizon": horizon, "fold": fold.index,
         "train_end": fold.train_end, "mo": col,
-        "mae": np.nan, "smape": np.nan, "mase": np.nan, "error": reason[:120],
+        **dict.fromkeys(ROW_METRICS, np.nan), "error": reason[:120],
     }
 
 
@@ -210,7 +210,13 @@ def merge_into(
 
 
 def summarise(per_series: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Сводки по фолдам и по горизонтам. Отказ модели на фолде виден числом отказов."""
+    """Сводки по фолдам и по горизонтам. Отказ модели на фолде виден числом отказов.
+
+    Колонки — `src.metrics.SUMMARY_COLUMNS`, как в сводке src/run.py, и той же функцией
+    (`src.metrics.r2_and_gains`): R² пул — по всем рядам и фолдам модели на горизонте
+    (в пофолдовой — на фолде), выигрыш к Prophet и к наивной — внутри горизонта
+    (в пофолдовой — внутри горизонта и фолда). В файле, посчитанном до слагаемых пула,
+    колонок r2 и sse нет, и R²-колонки — NaN."""
     refusals = refused(per_series)  # правило одно на run.py и этот скрипт
     ok = per_series.loc[~refusals]
     failed = per_series.loc[refusals]
@@ -228,7 +234,7 @@ def summarise(per_series: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         out = out.reindex(all_keys)
         out["отказов"] = refusals.reindex(all_keys).fillna(0).astype(int)
         out["серий"] = out["серий"].fillna(0).astype(int)
-        return out.reset_index()
+        return out.join(r2_and_gains(ok, out["MAE"]))[SUMMARY_COLUMNS].reset_index()
 
     by_fold = _summary(["horizon", "model", "fold", "train_end"])
     by_horizon = _summary(["horizon", "model"])

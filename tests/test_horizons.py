@@ -31,6 +31,10 @@ _spec.loader.exec_module(horizons)
 
 SERIES = ["мо_0", "мо_1", "мо_2"]
 PAIR = {"model": "m", "horizon": 3}
+# Метрики строки в порядке файла: четыре прежние и слагаемые R² пула.
+METRICS = ["mae", "r2", "smape", "mase", "sse", "sst", "n", "y_sum", "y_sq"]
+SUMMARY = ["MAE", "MASE", "sMAPE", "R² пул", "R² медиана", "к Prophet, %", "к наивной, %",
+           "серий", "отказов"]
 
 
 def _train_end(horizon: int, folds: list[int], fold: int) -> int:
@@ -131,7 +135,109 @@ class FailureTextTest(unittest.TestCase):
         self.assertEqual(part["error"].tolist(), ["AssertionError: ", "AssertionError: "])
 
 
+def naive_rows(wide: pd.DataFrame, horizon: int, n_folds: int) -> tuple[pd.DataFrame, dict]:
+    """Строки naive_last по всем рядам через настоящий `_score_series` и его известный
+    прогноз: {фолд: (факт, прогноз)} — точки всех рядов фолда подряд."""
+    folds = rolling_origin(wide.shape[0], horizon, n_folds)
+    rows, points = [], {f.index: ([], []) for f in folds}
+    for col in wide.columns:
+        series = wide[col].to_numpy(dtype=float)
+        part, _ = horizons._score_series(("naive_last", col, series, wide.index, folds, horizon))
+        rows.extend(part)
+        for fold in folds:
+            points[fold.index][0].append(series[fold.test_start : fold.test_end])
+            points[fold.index][1].append(np.full(horizon, series[fold.train_end - 1]))
+    return pd.DataFrame(rows), points
+
+
+def pooled(points: list[tuple[list, list]]) -> float:
+    y = np.concatenate([a for actual, _ in points for a in actual])
+    p = np.concatenate([b for _, forecast in points for b in forecast])
+    return 1 - float(np.sum((y - p) ** 2)) / float(np.sum((y - y.mean()) ** 2))
+
+
+class RowPartsTest(unittest.TestCase):
+    def test_series_model_rows_carry_r2_and_pool_parts(self):
+        series = matrix(["мо_0"])["мо_0"].to_numpy()
+        folds = rolling_origin(24, 3, 3)
+        rows, _ = horizons._score_series(("naive_last", "мо_0", series, pd.RangeIndex(24), folds, 3))
+        for row, fold in zip(rows, folds):
+            self.assertEqual(list(row), ["model", "horizon", "fold", "train_end", "mo", *METRICS, "error"])
+            y = series[fold.test_start : fold.test_end]
+            p = np.full(3, series[fold.train_end - 1])
+            self.assertAlmostEqual(row["sse"], float(np.sum((y - p) ** 2)), places=6)
+            self.assertAlmostEqual(row["sst"], float(np.sum((y - y.mean()) ** 2)), places=6)
+            self.assertEqual(row["n"], 3)
+            self.assertAlmostEqual(row["y_sum"], float(y.sum()), places=6)
+            self.assertAlmostEqual(row["y_sq"], float(np.sum(y ** 2)), places=3)
+            self.assertAlmostEqual(row["r2"], 1 - row["sse"] / row["sst"], places=12)
+
+    def test_failure_rows_carry_empty_metrics(self):
+        folds = rolling_origin(24, 3, 1)
+        with self.subTest("модель по рядам"):
+            task = ("silent", "мо_0", np.arange(24, dtype=float), pd.RangeIndex(24), folds, 3)
+            with mock.patch.object(horizons, "_build_model", return_value=_Silent()):
+                rows, _ = horizons._score_series(task)
+            self.assertTrue(all(np.isnan(rows[0][metric]) for metric in METRICS))
+        with self.subTest("панельная модель"):
+            wide = pd.DataFrame(np.ones((24, 2)), columns=["мо_0", "мо_1"])
+            with mock.patch.dict(horizons.EXTRA_GLOBAL, {"silent": _Silent}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                part, _ = horizons.evaluate_panel_model(wide, wide, "silent", 3, folds, context=None)
+            self.assertTrue(part[METRICS].isna().all().all())
+
+
 class SummariseTest(unittest.TestCase):
+    def test_columns_in_order(self):
+        by_fold, by_horizon = horizons.summarise(per_series("m", 3, [0, 1, 2]))
+        self.assertEqual(list(by_fold.columns), ["horizon", "model", "fold", "train_end", *SUMMARY])
+        self.assertEqual(list(by_horizon.columns), ["horizon", "model", *SUMMARY, "фолдов"])
+
+    def test_r2_pool_per_horizon_and_per_fold(self):
+        wide = matrix(SERIES)
+        h1, points1 = naive_rows(wide, 1, 9)
+        h3, points3 = naive_rows(wide, 3, 3)
+        by_fold, by_horizon = horizons.summarise(pd.concat([h1, h3], ignore_index=True))
+        summary = by_horizon.set_index(["horizon", "model"])
+        folds = by_fold.set_index(["horizon", "model", "fold"])
+        for horizon, points in ((1, points1), (3, points3)):
+            with self.subTest(horizon=horizon):
+                self.assertAlmostEqual(summary.loc[(horizon, "naive_last"), "R² пул"],
+                                       pooled(list(points.values())), places=12)
+                for fold, fold_points in points.items():
+                    self.assertAlmostEqual(folds.loc[(horizon, "naive_last", fold), "R² пул"],
+                                           pooled([fold_points]), places=12)
+        self.assertEqual(summary.loc[(3, "naive_last"), "R² медиана"], h3["r2"].median())
+        # На горизонте 1 в тесте ряда одна точка: SST ряда ноль, R² строки не определён,
+        # и медиана — NaN по построению. Пул определён: его SST — вокруг среднего всех точек.
+        self.assertTrue(h1["r2"].isna().all())
+        self.assertTrue(np.isnan(summary.loc[(1, "naive_last"), "R² медиана"]))
+
+    def test_old_file_without_r2_gives_nan_r2_and_gains_within_horizon(self):
+        # Файл горизонтов, посчитанный до слагаемых пула: колонок r2 и sse в нём нет.
+        frame = pd.concat([
+            per_series("prophet", 1, [0, 1], mae=50.0), per_series("m", 1, [0, 1], mae=40.0),
+            per_series("naive_last", 3, [0, 1, 2], mae=100.0), per_series("m", 3, [0, 1, 2], mae=90.0),
+        ], ignore_index=True)
+        by_fold, by_horizon = horizons.summarise(frame)
+        for table in (by_fold, by_horizon):
+            self.assertTrue(table[["R² пул", "R² медиана"]].isna().all().all())
+        summary = by_horizon.set_index(["horizon", "model"])
+        self.assertAlmostEqual(summary.loc[(1, "m"), "к Prophet, %"], 20.0)
+        self.assertTrue(np.isnan(summary.loc[(3, "m"), "к Prophet, %"]))
+        self.assertAlmostEqual(summary.loc[(3, "m"), "к наивной, %"], 10.0)
+        self.assertTrue(np.isnan(summary.loc[(1, "m"), "к наивной, %"]))
+
+    def test_fold_summary_takes_reference_of_the_same_fold(self):
+        frame = pd.concat([per_series("prophet", 3, [0, 1, 2]), per_series("m", 3, [0, 1, 2])],
+                          ignore_index=True)
+        frame["mae"] = np.where(frame["model"] == "prophet", 50.0 * (frame["fold"] + 1), 40.0)
+        by_fold, _ = horizons.summarise(frame)
+        gains = by_fold[by_fold["model"] == "m"].set_index("fold")["к Prophet, %"]
+        self.assertAlmostEqual(gains[0], 20.0)
+        self.assertAlmostEqual(gains[1], 60.0)
+        self.assertAlmostEqual(gains[2], 100 * (150.0 - 40.0) / 150.0)
+
     def test_row_without_mae_counts_as_refusal_even_with_empty_error(self):
         frame = pd.DataFrame({
             "model": ["m", "m"], "horizon": [3, 3], "fold": [0, 0], "train_end": [21, 21],
@@ -261,6 +367,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(steps_on_disk.loc[steps_on_disk["model"] == "drift", "mae"].unique().tolist(), [5.0])
 
         summary = pd.read_csv(self.root / "results" / "horizons_summary.csv")
+        self.assertEqual(list(summary.columns), ["horizon", "model", *SUMMARY, "фолдов"])
         self.assertEqual(sorted(zip(summary["model"], summary["horizon"])),
                          [("drift", 3), ("naive_last", 1), ("naive_last", 3)])
         self.assertTrue((self.root / "results" / "horizons_folds.csv").exists())

@@ -12,7 +12,7 @@ configs/horizons.yaml   тот же протокол на пяти горизо�
 src/data.py             загрузка панели, восстановление сущностей МО, обработка пропусков
 src/regions.py          привязка к регионам и ОКТМО по справочнику СберИндекса
 src/split.py            скользящий origin с расширяющимся окном
-src/metrics.py          MAE, R², sMAPE, MASE
+src/metrics.py          MAE, R², sMAPE, MASE; R² сводок — по пулу тестовых точек и медианой по рядам
 src/external.py         длинные ряды СберИндекса и перенос с них общего фактора
 src/models/             модели прогноза за единым интерфейсом fit/predict
 src/changepoints.py     детекторы точек структурных изменений
