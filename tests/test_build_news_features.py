@@ -27,13 +27,19 @@ _spec = importlib.util.spec_from_file_location("build_news_features", ROOT / "sc
 builder = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(builder)
 
+# Доля ДКП по месяцам: прежним словарём 2/3, 1, 2/3 («выставка», «отставка», «поставка»
+# шли в тему), новым — 1/3, 1/3, 2/3. Ряды меняются от месяца к месяцу, и их корреляция
+# определена: −0,5.
 ROWS = [
     ("https://a.ru/1", "ЦБ повысил ключевую ставку", "2024-01-10", "Область А", "a.ru"),
     ("https://a.ru/2", "Выставка цветов в центре города", "2024-01-12", "Область А", "a.ru"),
     ("https://b.ru/1", "Цены на бензин выросли", "2024-01-15", "Область Б", "b.ru"),
-    ("https://b.ru/2", "Банкет в честь юбилея", "2024-02-03", "Область Б", "b.ru"),
+    ("https://b.ru/2", "Отставка министра", "2024-02-03", "Область Б", "b.ru"),
     ("https://a.ru/3", "Поставка газа в Европу", "2024-02-05", "Область А", "a.ru"),
     ("https://b.ru/3", "Инфляция замедлилась", "2024-02-20", "Область Б", "b.ru"),
+    ("https://a.ru/4", "Регулятор снизил ставку", "2024-03-05", "Область А", "a.ru"),
+    ("https://b.ru/4", "Набиуллина выступила", "2024-03-12", "Область Б", "b.ru"),
+    ("https://a.ru/5", "Погода в выходные", "2024-03-20", "Область А", "a.ru"),
 ]
 
 
@@ -109,9 +115,9 @@ class MainTest(unittest.TestCase):
         old = pd.read_parquet(self.backup / "national.parquet")
         self.assertEqual(list(national.columns), list(old.columns))
         self.assertEqual(national.dtypes.to_dict(), old.dtypes.to_dict())
-        # По месяцу из трёх заголовков в теме ДКП остаётся один: «выставка» и «поставка» сняты.
-        self.assertEqual(national["t_dkp"].tolist(), [1 / 3, 1 / 3])
-        self.assertEqual(old["t_dkp"].tolist(), [2 / 3, 2 / 3])
+        # «Выставка», «отставка» и «поставка» из темы ДКП сняты.
+        self.assertEqual(national["t_dkp"].tolist(), [1 / 3, 1 / 3, 2 / 3])
+        self.assertEqual(old["t_dkp"].tolist(), [2 / 3, 1.0, 2 / 3])
 
         monthly = pd.read_parquet(self.news_dir / "monthly.parquet")
         old_monthly = pd.read_parquet(self.backup / "monthly.parquet")
@@ -120,11 +126,32 @@ class MainTest(unittest.TestCase):
         table = pd.read_csv(self.root / "results" / "news_dictionary.csv")
         self.assertEqual(table["тема"].tolist(), list(news.NATIONAL_TOPICS))
 
-    def test_existing_backup_is_not_overwritten(self):
-        self.backup.mkdir(parents=True)
-        (self.backup / "national.parquet").write_bytes(b"backup made earlier")
+    def test_rerun_compares_with_the_original_not_with_the_previous_rebuild(self):
+        # После первой пересборки в data/news лежит уже она, а исходный файл — в копии.
+        # «До» в таблице и проверка воспроизведения должны по-прежнему относиться к исходному.
+        before = self.files()
         self.run_main()
-        self.assertEqual((self.backup / "national.parquet").read_bytes(), b"backup made earlier")
+        first = pd.read_csv(self.root / "results" / "news_dictionary.csv")
+        out = self.run_main()
+        second = pd.read_csv(self.root / "results" / "news_dictionary.csv")
+        self.assertIn("старые доли тем воспроизводятся старым словарём: да", out)
+        pd.testing.assert_frame_equal(second, first)
+        self.assertAlmostEqual(second.set_index("тема").loc["dkp", "корреляция рядов"], -0.5)
+        for name in ("monthly.parquet", "national.parquet"):
+            with self.subTest(name):
+                self.assertEqual((self.backup / name).read_bytes(), before[f"data/news/{name}"])
+
+    def test_existing_backup_is_not_overwritten(self):
+        # Копия от прошлого запуска — исходный файл, а в data/news лежит уже другой:
+        # перезапиши сборщик копию, байты бы разошлись.
+        self.backup.mkdir(parents=True)
+        earlier = (self.news_dir / "national.parquet").read_bytes()
+        (self.backup / "national.parquet").write_bytes(earlier)
+        current = pd.read_parquet(self.news_dir / "national.parquet")
+        current["t_dkp"] = 0.0
+        current.to_parquet(self.news_dir / "national.parquet", index=False)
+        self.run_main()
+        self.assertEqual((self.backup / "national.parquet").read_bytes(), earlier)
         self.assertTrue((self.backup / "monthly.parquet").exists())
 
     def test_columns_other_than_before_stop_before_any_write(self):

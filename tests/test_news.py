@@ -30,18 +30,33 @@ def in_topic(topic: str, text: str) -> bool:
 
 
 class TopicPatternTest(unittest.TestCase):
-    """Корень темы должен начинать слово: подстрока в середине слова — чужое слово."""
+    """Корень темы начинает слово — кроме корней, которые законно живут внутри сложных
+    слов (`news.COMPOUND_ROOTS`): подстрока в середине слова у остальных — чужое слово."""
 
     CASES = {
         "dkp": {"stavka": True, "czb snizil stavku": True, "vystavka": False, "postavka": False,
-                "dostavka": False, "otstavka": False},
+                "dostavka": False, "otstavka": False, "reguljator": True, "megareguljator": True,
+                "gazoreguljatornyj": False},
         "ceny": {"cena": True, "czena": True, "tseny": True, "centr": False, "czentr": False,
-                 "tsentr": False},
-        "kredit": {"dolg": True, "dolgi": True, "dolgo": False, "bank": True, "banki": True,
-                   "banket": False, "stavka": True, "vystavka": False},
+                 "tsentr": False, "oczenili": False, "podesheveli": True},
+        "kredit": {"dolg": True, "dolgi": True, "dolgov": True, "dolgovaja": True, "gosdolg": True,
+                   "dolgo": False, "dolgosrochn": False, "dolgozhdann": False,
+                   "dolgovremennyj": False, "dolgovechnyj": False,
+                   "bank": True, "banki": True, "banket": False, "sberbank": True, "czentrobank": True,
+                   "sotsipoteka": True, "diskreditacija": False, "stavka": True, "vystavka": False},
         "zanjatost": {"rabota": True, "bezrabotica": True, "zarabotok": False, "razrabotka": False,
                       "obrabotka": False},
+        "proizvodstvo": {"neftezavod": True, "pticefabrika": True, "pticzefabrika": True,
+                         "promproizvodstvo": True, "gospredprijatie": True},
+        "dohody": {"nevyplata": True, "sotsvyplaty": True, "ledohod": False, "kompensirovat": False},
+        "torgovlja": {"avtorynok": True, "avtorynka": True, "zoomagazin": True, "narkotorgovec": False},
     }
+
+    def test_every_compound_root_is_a_root_of_some_topic(self):
+        # Корень сверяется по строке: поправь его в теме и забудь здесь — он молча
+        # получил бы границу начала слова обратно.
+        roots = {root for topic in news.NATIONAL_TOPICS.values() for root in topic}
+        self.assertLessEqual(news.COMPOUND_ROOTS, roots)
 
     def test_roots_match_only_from_the_start_of_a_word(self):
         for topic, cases in self.CASES.items():

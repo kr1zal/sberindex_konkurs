@@ -3,15 +3,18 @@
 До 25.09 корни тем искались как подстроки в любом месте слова: `stavk` ловил
 «выставку», «отставку», «поставку» и «доставку», и тема ДКП больше чем наполовину
 состояла из них; `cen` и `czen` в «ценах» ловили «центр». Теперь корень начинает
-слово (`src.news.topic_pattern`), и признаки, собранные старым словарём, собираются
-заново: их читают `two_stage_news` и новостные проверки.
+слово, кроме корней, законно живущих внутри сложных слов (`src.news.topic_pattern`,
+`src.news.COMPOUND_ROOTS`), и признаки собираются заново: их читают `two_stage_news`
+и новостные проверки.
 
 Скрипт — единственный, кто пишет `data/news/monthly.parquet` и `data/news/national.parquet`:
 
 1. читает `data/news/headlines.parquet` — слой заголовков он не меняет;
 2. по каждой теме считает заголовки, попавшие по старому словарю и по новому, долю
-   снятого и пять самых частых снятых слов; сверяет старые доли тем с лежащим
-   `national.parquet` и печатает корреляцию старого и нового месячного ряда ДКП;
+   снятого и пять самых частых снятых слов; сверяет доли тем по старому словарю
+   с файлом до 25.09 и печатает корреляцию старого и нового месячного ряда ДКП.
+   «Старое» — всегда словарь и файл до 25.09, а не прошлая пересборка: после первой
+   пересборки исходный `national.parquet` лежит в копии, и сверка идёт с ней;
 3. собирает оба файла заново и сверяет колонки и типы со старыми — до всякой записи;
 4. пишет таблицу в `results/news_dictionary.csv`, копирует старые файлы
    в `results/backup_2026-09-25/` (копию, которая там уже есть, не трогает)
@@ -124,12 +127,17 @@ def dictionary_table(norm: pd.Series, hits: tuple[pd.DataFrame, pd.DataFrame] | 
     return pd.DataFrame(rows)
 
 
-def legacy_gap(old_hits: pd.DataFrame, months: pd.Series, stored: pd.DataFrame) -> float:
-    """Наибольшее расхождение долей тем по старому словарю с лежащим `national.parquet`.
-    Ноль — таблица до/после описывает ровно тот файл, который сейчас заменяется."""
-    shares = old_hits.groupby(months.to_numpy()).mean()
-    stored = stored.set_index("month")[[f"t_{t}" for t in old_hits.columns]]
-    stored.columns = list(old_hits.columns)
+def legacy_shares(old_hits: pd.DataFrame, dates: pd.Series) -> pd.DataFrame:
+    """Помесячные доли тем по старому словарю — ряды `national.parquet` до 25.09. От того,
+    что сейчас лежит в `data/news`, не зависят: «до» в таблице — всегда словарь до 25.09."""
+    return old_hits.groupby(pd.PeriodIndex(dates.dt.to_period("M"))).mean()
+
+
+def legacy_gap(shares: pd.DataFrame, stored: pd.DataFrame) -> float:
+    """Наибольшее расхождение долей тем по старому словарю с файлом до 25.09 (`stored`).
+    Ноль — «до» в таблице описывает ровно этот файл."""
+    stored = stored.set_index("month")[[f"t_{t}" for t in shares.columns]]
+    stored.columns = list(shares.columns)
     gap = (shares.reindex(stored.index) - stored).abs().to_numpy()
     return float(np.max(gap)) if np.isfinite(gap).all() else float("inf")
 
@@ -177,19 +185,25 @@ def main(argv: list[str] | None = None) -> int:
     print(f"заголовков {len(frame)}, месяцев {frame['month'].nunique()}, изданий {frame['domain'].nunique()}")
 
     hits = topic_hits(frame["norm"])
-    gap = legacy_gap(hits[0], headlines["date"].dt.to_period("M"), old["national.parquet"])
+    shares = legacy_shares(hits[0], headlines["date"])
+    # Файл до 25.09: после первой пересборки в data/news лежит уже она, а исходный — в копии.
+    original = backup / "national.parquet"
+    if not original.exists():
+        original = news_dir / "national.parquet"
+    gap = legacy_gap(shares, pd.read_parquet(original))
     print(f"старые доли тем воспроизводятся старым словарём: {'да' if gap < 1e-12 else 'НЕТ'} "
-          f"(наибольшее расхождение с national.parquet {gap:.3g})")
+          f"(наибольшее расхождение с {original.relative_to(ROOT)} {gap:.3g})")
     table = dictionary_table(frame["norm"], hits)
 
     monthly = aligned(monthly_features(frame), old["monthly.parquet"], "monthly.parquet")
     national = aligned(national_features(headlines), old["national.parquet"], "national.parquet")
-    before, after = old["national.parquet"].set_index("month"), national.set_index("month")
+    after = national.set_index("month")
     # У постоянного ряда корреляции нет: NaN — верный ответ, предупреждение numpy лишнее.
     with np.errstate(invalid="ignore", divide="ignore"):
-        table["корреляция рядов"] = [before[f"t_{t}"].corr(after[f"t_{t}"]) for t in table["тема"]]
+        table["корреляция рядов"] = [shares[t].corr(after[f"t_{t}"]) for t in table["тема"]]
 
-    print("\nСЛОВАРЬ ДО И ПОСЛЕ: заголовки корпуса по темам; корреляция — помесячных долей по стране")
+    print("\nСЛОВАРЬ ДО И ПОСЛЕ: заголовки корпуса по темам; корреляция — помесячных долей по стране, "
+          "словарь до 25.09 против нового")
     print(table.to_string(index=False, float_format=lambda v: f"{v:.2f}"))
     dkp = table.set_index("тема").loc["dkp"]
     print(f"\nтема ДКП: снято {dkp['снято']} из {dkp['заголовков до']} заголовков ({dkp['доля снятого, %']:.1f}%)")
