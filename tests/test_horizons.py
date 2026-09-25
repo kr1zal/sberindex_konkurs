@@ -51,6 +51,13 @@ def per_series(model: str, horizon: int, folds: list[int], series=SERIES, mae=1.
     ])
 
 
+def awkward(n: int, seed: int) -> np.ndarray:
+    """Числа, неудобные для разбора CSV: два из сводки и случайные. Разбор pandas
+    по умолчанию читает примерно каждое восьмое из них не тем, что записано."""
+    rng = np.random.default_rng(seed)
+    return np.concatenate([[1217.032436222938, 0.6207988257547953], rng.uniform(0, 5000, n - 2)])
+
+
 def steps(model: str, horizon: int, folds: list[int], mae=1.0) -> pd.DataFrame:
     """Строки фолд × шаг в раскладке `horizons_steps.csv`: колонки `mo` в нём нет."""
     return pd.DataFrame([
@@ -98,6 +105,22 @@ class MergeIntoTest(unittest.TestCase):
         self.assertEqual(len(after), 2 * len(SERIES) * 3)
         self.assertEqual(after.loc[after["model"] == "m", "mae"].unique().tolist(), [2.0])
         self.assertEqual(after.loc[after["model"] == "other", "mae"].unique().tolist(), [5.0])
+
+    def test_other_pairs_keep_their_numbers_to_the_last_digit(self):
+        # Слияние читает файл и пишет его заново: строки чужих пар должны вернуться
+        # теми же числами, иначе каждая партия сдвигала бы их в последнем разряде.
+        path = self.dir / "horizons_per_series.csv"
+        many = [f"мо_{i}" for i in range(10)]
+        other = per_series("other", 3, [0, 1, 2], series=many)
+        for i, column in enumerate(["mae", "smape", "mase"]):
+            other[column] = awkward(len(other), seed=10 + i)
+        pd.concat([per_series("m", 3, [0, 1, 2], series=many), other], ignore_index=True).to_csv(path, index=False)
+        horizons.merge_into(path, per_series("m", 3, [0, 1, 2], series=many, mae=2.0), PAIR, same_panel=True)
+        back = pd.read_csv(path, float_precision="round_trip")
+        kept = back[back["model"] == "other"]
+        for column in ["mae", "smape", "mase"]:
+            with self.subTest(column):
+                self.assertTrue(np.array_equal(kept[column].to_numpy(), other[column].to_numpy()))
 
     def test_batch_on_other_series_is_rejected_and_file_untouched(self):
         path = self.dir / "horizons_per_series.csv"

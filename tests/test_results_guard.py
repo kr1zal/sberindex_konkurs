@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -213,6 +215,28 @@ class RefusalRuleTest(unittest.TestCase):
     def test_failure_reason_names_exception_type(self):
         self.assertEqual(results_guard.failure_reason(AssertionError()), "AssertionError: ")
         self.assertEqual(results_guard.failure_reason(ValueError("мало точек")), "ValueError: мало точек")
+
+
+class ReadResultsTest(unittest.TestCase):
+    """Файлы результатов читаются числами ровно такими, какими они записаны."""
+
+    def test_numbers_come_back_exactly_as_written(self):
+        # Разбор pandas по умолчанию читает примерно каждое восьмое такое число
+        # на единицу последнего разряда не тем, что записано.
+        values = np.concatenate([[1217.032436222938, 0.6207988257547953],
+                                 np.random.default_rng(1).uniform(0, 5000, 200)])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "per_series.csv"
+            pd.DataFrame({"mae": values}).to_csv(path, index=False)
+            back = results_guard.read_results(path)
+        self.assertTrue(np.array_equal(back["mae"].to_numpy(), values))
+
+    def test_runs_and_backfill_read_results_only_through_it(self):
+        # Правило одно на все чтения: прямое чтение в одном месте разошлось бы с ним молча.
+        for name in ("src/run.py", "scripts/horizons.py", "scripts/backfill_r2.py"):
+            with self.subTest(name):
+                direct = (ROOT / name).read_text(encoding="utf-8").count("read_csv(")
+                self.assertEqual(direct, 0, f"{name}: прямых чтений CSV — {direct}")
 
 
 if __name__ == "__main__":

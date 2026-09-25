@@ -46,7 +46,7 @@ sys.path.insert(0, str(ROOT))
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.metrics import ROW_METRICS, SUMMARY_COLUMNS, r2_and_gains, row_metrics  # noqa: E402
 from src.models.two_stage import TwoStageKnownAggregate  # noqa: E402
-from src.results_guard import check_plan, check_same_panel  # noqa: E402
+from src.results_guard import check_plan, check_same_panel, read_results  # noqa: E402
 from src.run import (  # noqa: E402
     GLOBAL_MODELS, _build_model, build_context, failure_reason, refused,
 )
@@ -187,12 +187,15 @@ def merge_into(
     `same_panel` — до записи сверить ряды и фолды партии со всем файлом
     (`src.results_guard.check_same_panel`); при несовпадении файл не меняется.
     Только для файла по рядам: в файле шагов колонки `mo` нет.
+
+    Файл читается точно (`read_results`): строки остальных пар записываются обратно
+    теми же числами до последнего разряда.
     """
     if not path.exists():
         if not fresh.empty:
             fresh.to_csv(path, index=False)
         return  # пустой кадр без колонок записался бы файлом, который потом не читается
-    previous = pd.read_csv(path)
+    previous = read_results(path)
     if same_panel:
         check_same_panel(previous, fresh, path=path)
     keys = list(replace)
@@ -287,7 +290,7 @@ def main() -> int:
         # Перед каждой записью партия сверяется с файлом ещё раз (merge_into), но там
         # несовпадение всплывает, когда первая пара модель × горизонт уже посчитана.
         plan_folds = {horizon: [f.index for f in folds] for horizon, folds in plan}
-        check_plan(pd.read_csv(per_path), wide.columns, plan_folds, path=per_path)
+        check_plan(read_results(per_path), wide.columns, plan_folds, path=per_path)
 
     for name in names:
         for horizon, folds in plan:
@@ -312,7 +315,7 @@ def main() -> int:
                   + f" | отказов {int(is_refusal.sum())} | {time.perf_counter() - started:.0f} с")
         print()
 
-    per_series = pd.read_csv(per_path)
+    per_series = read_results(per_path)
     by_fold, by_horizon = summarise(per_series)
     by_fold.to_csv(out_dir / f"{prefix}_folds.csv", index=False)
     by_horizon.to_csv(out_dir / f"{prefix}_summary.csv", index=False)

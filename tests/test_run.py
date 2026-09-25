@@ -43,6 +43,13 @@ def matrix(series: list[str]) -> pd.DataFrame:
     return pd.DataFrame({s: 100 + (i + 1) * t + 5 * np.sin(t) for i, s in enumerate(series)})
 
 
+def awkward(n: int, seed: int) -> np.ndarray:
+    """Числа, неудобные для разбора CSV: два из сводки и случайные. Разбор pandas
+    по умолчанию читает примерно каждое восьмое из них не тем, что записано."""
+    rng = np.random.default_rng(seed)
+    return np.concatenate([[1217.032436222938, 0.6207988257547953], rng.uniform(0, 5000, n - 2)])
+
+
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -254,6 +261,20 @@ class MergeResultsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             run.merge_results(self.path, frame(["naive_last"], SERIES[:3], mae=2.0))
         self.assertEqual(digest(self.path), before)
+
+    def test_other_models_keep_their_numbers_to_the_last_digit(self):
+        # Слияние читает файл и пишет его заново: строки чужих моделей должны вернуться
+        # теми же числами, иначе каждая партия сдвигала бы их в последнем разряде.
+        kept = frame(["drift"], SERIES)
+        for i, column in enumerate(["mae", "r2", "smape", "mase"]):
+            kept[column] = awkward(len(kept), seed=i)
+        pd.concat([frame(["naive_last"], SERIES), kept], ignore_index=True).to_csv(self.path, index=False)
+        run.merge_results(self.path, frame(["naive_last"], SERIES, mae=2.0))
+        back = pd.read_csv(self.path, float_precision="round_trip")
+        drift = back[back["model"] == "drift"]
+        for column in ["mae", "r2", "smape", "mase"]:
+            with self.subTest(column):
+                self.assertTrue(np.array_equal(drift[column].to_numpy(), kept[column].to_numpy()))
 
     def test_batch_replaces_rows_of_its_model_and_keeps_the_rest(self):
         merged = run.merge_results(self.path, frame(["naive_last"], SERIES, mae=2.0))

@@ -66,7 +66,7 @@ sys.path.insert(0, str(ROOT))
 from scripts import horizons  # noqa: E402
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.metrics import GAINS, R2_MEDIAN, R2_POOL, target_sums  # noqa: E402
-from src.results_guard import refused  # noqa: E402
+from src.results_guard import read_results, refused  # noqa: E402
 from src.run import REGISTRY, summarise  # noqa: E402
 from src.split import Fold, rolling_origin  # noqa: E402
 
@@ -76,11 +76,6 @@ BACKUP = "backup_2026-09-25"
 TOLERANCE = 1e-6
 KNOWN = ("naive_last", "seasonal_naive")
 SEASON = REGISTRY["seasonal_naive"]().season
-# Разбор чисел CSV по умолчанию в pandas не обратим: примерно каждое восьмое число читается
-# на единицу последнего разряда не тем, что записано. Файлы, которые run.py пишет из памяти
-# (per_series.csv, summary.csv), и прежние сводки читаются точно: иначе переписанный файл
-# сменил бы последние разряды прежних колонок, а сверка сводок споткнулась бы о шум разбора.
-EXACT = {"float_precision": "round_trip"}
 FORMATS = {
     "MAE": "{:,.1f}", "MASE": "{:.4f}", "sMAPE": "{:.3f}", R2_POOL: "{:.4f}", R2_MEDIAN: "{:.4f}",
     **{column: "{:+.2f}" for column in GAINS},
@@ -274,7 +269,9 @@ def main() -> int:
 
     out_dir = ROOT / cfg["output"]["dir"]
     per_path, summary_path = out_dir / "per_series.csv", out_dir / "summary.csv"
-    before = pd.read_csv(per_path, **EXACT)
+    # Точное чтение (`read_results`) нужно и здесь: иначе переписанный файл сменил бы
+    # последние разряды прежних колонок, а сверка сводок споткнулась бы о шум разбора.
+    before = read_results(per_path)
     failed = refused(before)
     print(f"\n{shown(per_path)}: строк {len(before)}, моделей {before['model'].nunique()}, "
           f"рядов {before['mo'].nunique()}, фолды {sorted(before['fold'].unique().tolist())}, "
@@ -293,7 +290,7 @@ def main() -> int:
 
     summary = summarise(filled)
     if summary_path.exists():
-        check_same(pd.read_csv(summary_path, index_col=0, **EXACT), summary, summary_path)
+        check_same(read_results(summary_path, index_col=0), summary, summary_path)
         print(f"{shown(summary_path)}: прежние колонки совпадают ({len(summary)} моделей)")
 
     h_dir = ROOT / hcfg["output"]["dir"]
@@ -302,9 +299,9 @@ def main() -> int:
     h_paths = {"summary": h_dir / f"{prefix}_summary.csv", "folds": h_dir / f"{prefix}_folds.csv"}
     h_tables, missing = {}, []
     if h_per_path.exists():
-        # Разбор по умолчанию — как в scripts/horizons.py::main: сводка горизонтов
-        # пересчитывается из тех же чисел, из которых её посчитал прогон.
-        h_per = pd.read_csv(h_per_path)
+        # Тем же чтением, что в scripts/horizons.py::main: сводка горизонтов
+        # пересчитывается из тех же чисел, из которых её считает прогон.
+        h_per = read_results(h_per_path)
         missing = [column for column in ("r2", *PARTS) if column not in h_per.columns]
         by_fold, by_horizon = horizons.summarise(h_per)
         h_tables = {"summary": (by_horizon, ["horizon", "model"]),
@@ -315,7 +312,7 @@ def main() -> int:
         for name, (table, keys) in h_tables.items():
             path = h_paths[name]
             if path.exists():
-                check_same(pd.read_csv(path, **EXACT).set_index(keys), table.set_index(keys), path)
+                check_same(read_results(path).set_index(keys), table.set_index(keys), path)
             filled_r2 = int(table[R2_POOL].notna().sum())
             print(f"{shown(path)}: прежние колонки совпадают; R² пул заполнен "
                   f"в {filled_r2} строках из {len(table)}, выигрыш к Prophet и к наивной — по MAE")

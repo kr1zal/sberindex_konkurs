@@ -25,7 +25,7 @@ from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.models.two_stage import TwoStage, TwoStageNews  # noqa: E402
 from src.results_guard import (  # noqa: E402
-    check_plan, check_same_panel, failure_reason, refused, uneven_series,
+    check_plan, check_same_panel, failure_reason, read_results, refused, uneven_series,
 )
 from src.split import rolling_origin  # noqa: E402
 
@@ -341,11 +341,12 @@ def merge_results(per_path: Path, fresh: pd.DataFrame) -> pd.DataFrame:
 
     Замена честна, только если партия считана на тех же рядах и фолдах, что весь
     файл: сверка идёт до отбрасывания строк и до записи, при несовпадении файл
-    не меняется (src/results_guard.py).
+    не меняется (src/results_guard.py). Файл читается точно (`read_results`): строки
+    остальных моделей записываются обратно теми же числами до последнего разряда.
     """
     merged = fresh
     if per_path.exists():
-        previous = pd.read_csv(per_path)
+        previous = read_results(per_path)
         check_same_panel(previous, fresh, path=per_path)
         kept = previous[~previous["model"].isin(fresh["model"].unique())]
         merged = pd.concat([kept, fresh], ignore_index=True)
@@ -383,7 +384,7 @@ def main() -> int:
     if per_path.exists():
         # Перед записью партия сверяется с файлом ещё раз, но там несовпадение
         # всплывает, когда часы счёта уже потрачены, а результаты некуда деть.
-        check_plan(pd.read_csv(per_path), wide.columns, [f.index for f in folds], path=per_path)
+        check_plan(read_results(per_path), wide.columns, [f.index for f in folds], path=per_path)
 
     workers = int(cfg.get("compute", {}).get("workers", 0)) or max(1, (os.cpu_count() or 2) - 1)
     print(f"параллельно процессов: {workers}\n")

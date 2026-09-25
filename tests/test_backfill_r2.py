@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 from src import run  # noqa: E402
 from src.metrics import mae, mase, r2, smape  # noqa: E402
 from src.models.naive import NaiveLast, SeasonalNaive  # noqa: E402
+from src.results_guard import read_results  # noqa: E402
 from src.split import Fold, rolling_origin  # noqa: E402
 
 # scripts/ — не пакет: скрипт грузится по пути, как в tests/test_horizons.py.
@@ -128,7 +129,7 @@ class BackfillTest(unittest.TestCase):
         hz = horizons_per_series()
         hz.to_csv(self.results / "horizons_per_series.csv", index=False)
         # Сводки горизонтов прогон считает по файлу, прочитанному обратно, — как здесь.
-        by_fold, by_horizon = backfill.horizons.summarise(pd.read_csv(self.results / "horizons_per_series.csv"))
+        by_fold, by_horizon = backfill.horizons.summarise(read_results(self.results / "horizons_per_series.csv"))
         by_fold.drop(columns=NEW_IN_SUMMARY).to_csv(self.results / "horizons_folds.csv", index=False)
         by_horizon.drop(columns=NEW_IN_SUMMARY).to_csv(self.results / "horizons_summary.csv", index=False)
         self.config = {"data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
@@ -259,7 +260,7 @@ class BackfillTest(unittest.TestCase):
 
     def test_distorted_r2_fails_the_reconstruction_and_writes_nothing(self):
         path = self.results / "per_series.csv"
-        frame = pd.read_csv(path)
+        frame = read_results(path)  # только задуманное искажение, без шума разбора
         row = frame.index[(frame["model"] == "naive_last") & (frame["mo"] == "мо_3") & (frame["fold"] == 2)]
         frame.loc[row, "r2"] = frame.loc[row, "r2"] - 1e-3
         frame.to_csv(path, index=False)
@@ -273,7 +274,7 @@ class BackfillTest(unittest.TestCase):
 
     def test_changed_old_summary_stops_before_writing(self):
         path = self.results / "summary.csv"
-        summary = pd.read_csv(path, index_col=0)
+        summary = read_results(path, index_col=0)
         summary.loc["drift", "MAE"] += 1.0
         summary.to_csv(path)
         before = self.digests()
