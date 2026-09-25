@@ -4144,7 +4144,7 @@ z-index: 1000;
 </section>
 <section id="первая-находка-ловушка-годовой-сезонности" class="slide level2">
 <h2>Первая находка: ловушка годовой сезонности</h2>
-<div id="252c7b93" class="cell" data-execution_count="2">
+<div id="e20f22e9" class="cell" data-execution_count="2">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -4197,7 +4197,7 @@ z-index: 1000;
 </section>
 <section id="сравнение-моделей-прогнозирования" class="slide level2">
 <h2>Сравнение моделей прогнозирования</h2>
-<div id="32365e8d" class="cell" data-execution_count="3">
+<div id="b78b8d55" class="cell" data-execution_count="3">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -4207,6 +4207,88 @@ z-index: 1000;
 </div>
 </div>
 <p>Классические модели сбиты в плотную группу — это <strong>потолок подхода «моделируем каждый ряд отдельно»</strong>.</p>
+</section>
+<section id="метрики-рядом-mae-mase-r²" class="slide level2 smaller">
+<h2>Метрики рядом: MAE, MASE, R²</h2>
+<div id="1007f1d5" class="cell" data-execution_count="4">
+<div class="cell-output cell-output-display cell-output-markdown" data-execution_count="4">
+<table class="caption-top">
+<colgroup>
+<col style="width: 31%">
+<col style="width: 11%">
+<col style="width: 9%">
+<col style="width: 11%">
+<col style="width: 16%">
+<col style="width: 18%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">модель</th>
+<th style="text-align: right;">MAE, ₽</th>
+<th style="text-align: right;">MASE</th>
+<th style="text-align: right;">R² пул</th>
+<th style="text-align: right;">R² медиана</th>
+<th style="text-align: right;">к Prophet, %</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">фактор + категории рядами</td>
+<td style="text-align: right;">1 217</td>
+<td style="text-align: right;">0,62</td>
+<td style="text-align: right;">0,978</td>
+<td style="text-align: right;">0,31</td>
+<td style="text-align: right;">+23,0</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">двухэтапная</td>
+<td style="text-align: right;">1 393</td>
+<td style="text-align: right;">0,75</td>
+<td style="text-align: right;">0,974</td>
+<td style="text-align: right;">−0,40</td>
+<td style="text-align: right;">+11,9</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">базовая панельная</td>
+<td style="text-align: right;">1 466</td>
+<td style="text-align: right;">0,73</td>
+<td style="text-align: right;">0,970</td>
+<td style="text-align: right;">−0,13</td>
+<td style="text-align: right;">+7,3</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">эталон конкурса</td>
+<td style="text-align: right;">1 581</td>
+<td style="text-align: right;">0,84</td>
+<td style="text-align: right;">0,961</td>
+<td style="text-align: right;">−0,57</td>
+<td style="text-align: right;">0,0</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">дообученный Chronos</td>
+<td style="text-align: right;">1 606</td>
+<td style="text-align: right;">0,84</td>
+<td style="text-align: right;">0,970</td>
+<td style="text-align: right;">−0,36</td>
+<td style="text-align: right;">−1,6</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">наивная</td>
+<td style="text-align: right;">1 852</td>
+<td style="text-align: right;">1,01</td>
+<td style="text-align: right;">0,935</td>
+<td style="text-align: right;">−1,01</td>
+<td style="text-align: right;">−17,2</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="5722159b" class="cell" data-execution_count="5">
+<div class="cell-output cell-output-display cell-output-markdown" data-execution_count="5">
+<p>Среднее R² по парам ряд × фолд в таблицы не идёт: на трёх тестовых точках оно вырождено — от −39,0 до −7,3, и лучшей по нему выходит наивная модель, худшая по MAE.</p>
+</div>
+</div>
 </section>
 <section id="что-дало-выигрыш" class="slide level2">
 <h2>Что дало выигрыш</h2>
@@ -4521,7 +4603,7 @@ z-index: 1000;
 </section>
 <section id="интерпретация-на-реальных-данных" class="slide level2">
 <h2>Интерпретация на реальных данных</h2>
-<div id="3547a800" class="cell" data-execution_count="4">
+<div id="ef09fccc" class="cell" data-execution_count="6">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
