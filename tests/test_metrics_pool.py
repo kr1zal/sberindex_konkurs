@@ -21,7 +21,7 @@ from src.metrics import (  # noqa: E402
 
 PROPHET, NAIVE = "к Prophet, %", "к наивной, %"
 # Уровни рядов различаются на порядки, как у муниципалитетов: пул держится
-# на разбросе уровней, а R² отдельного ряда — на трёх точках вокруг своего среднего.
+# на разбросе уровней, а R² пары ряд × фолд — на трёх точках вокруг своего среднего.
 LEVELS = [100.0, 1_000.0, 5_000.0, 20_000.0]
 NOISE = {"best": 0.01, "prophet": 0.05, "naive_last": 0.08}
 
@@ -127,7 +127,7 @@ class PoolTest(unittest.TestCase):
         self.assertTrue(table[[PROPHET, NAIVE]].notna().all().all())
 
     def test_median_comes_from_r2_even_without_pool_parts(self):
-        # Раскладка per_series.csv до слагаемых: r2 по рядам есть, пула не собрать.
+        # Раскладка per_series.csv до слагаемых: r2 пар ряд × фолд есть, пула не собрать.
         # Медиана от слагаемых не зависит и считается; NaN — только пул.
         old = self.ok.drop(columns=["sse", "sst", "n", "y_sum", "y_sq"])
         table = by_model(old)

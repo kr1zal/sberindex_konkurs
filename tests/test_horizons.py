@@ -231,7 +231,7 @@ class SummariseTest(unittest.TestCase):
                     self.assertAlmostEqual(folds.loc[(horizon, "naive_last", fold), "R² пул"],
                                            pooled([fold_points]), places=12)
         self.assertEqual(summary.loc[(3, "naive_last"), "R² медиана"], h3["r2"].median())
-        # На горизонте 1 в тесте ряда одна точка: SST ряда ноль, R² строки не определён,
+        # На горизонте 1 в тесте пары ряд × фолд одна точка: её SST ноль, R² строки не определён,
         # и медиана — NaN по построению. Пул определён: его SST — вокруг среднего всех точек.
         self.assertTrue(h1["r2"].isna().all())
         self.assertTrue(np.isnan(summary.loc[(1, "naive_last"), "R² медиана"]))

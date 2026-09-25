@@ -222,7 +222,7 @@ class SummariseTest(unittest.TestCase):
         self.assertEqual(summary.loc["best", "отказов"], 1)
 
     def test_file_with_r2_but_without_parts_gives_median_and_nan_pool(self):
-        # Строки старой раскладки: r2 по рядам есть, слагаемых пула нет.
+        # Строки старой раскладки: r2 пар ряд × фолд есть, слагаемых пула нет.
         per_series = pd.concat([frame(["naive_last"], SERIES), frame(["drift"], SERIES, mae=2.0)],
                                ignore_index=True)
         per_series.loc[per_series["model"] == "drift", "r2"] = np.linspace(-3.0, 0.5, 15)
