@@ -298,11 +298,12 @@ def main() -> int:
             pair = {"model": name, "horizon": horizon}
             merge_into(per_path, part, pair, same_panel=True)
             merge_into(steps_path, steps, pair)
-            ok = part.loc[part["error"].isna()]
+            is_refusal = refused(part)  # то же правило, что в сводке
+            ok = part.loc[~is_refusal]
             by_fold = ok.groupby("fold")["mae"].mean()
             print(f"{name} h={horizon}: MAE {ok['mae'].mean():,.0f} | по фолдам "
                   + ", ".join(f"{v:,.0f}" for v in by_fold)
-                  + f" | отказов {int(part['error'].notna().sum())} | {time.perf_counter() - started:.0f} с")
+                  + f" | отказов {int(is_refusal.sum())} | {time.perf_counter() - started:.0f} с")
         print()
 
     per_series = pd.read_csv(per_path)

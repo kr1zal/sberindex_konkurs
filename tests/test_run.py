@@ -22,13 +22,22 @@ from src import run  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 SERIES = ["мо_0", "мо_1", "мо_2", "мо_3", "мо_4"]
+METRICS = ["mae", "r2", "smape", "mase"]
 
 
 def frame(models: list[str], series: list[str], mae: float = 1.0) -> pd.DataFrame:
+    """Строки ряд × фолд в полной раскладке `per_series.csv` — на ней работает `main()`."""
     return pd.DataFrame([
-        {"model": m, "fold": f, "mo": s, "mae": mae, "error": None}
+        {"model": m, "fold": f, "mo": s, "mae": mae, "r2": 0.0, "smape": 1.0, "mase": 1.0,
+         "error": None}
         for m in models for s in series for f in (0, 1, 2)
     ])
+
+
+def matrix(series: list[str]) -> pd.DataFrame:
+    """24 месяца × ряды с трендом и колебанием: у наивной модели конечные метрики."""
+    t = np.arange(24, dtype=float)
+    return pd.DataFrame({s: 100 + (i + 1) * t + 5 * np.sin(t) for i, s in enumerate(series)})
 
 
 def digest(path: Path) -> str:
@@ -65,6 +74,16 @@ class _Silent:
         raise AssertionError()
 
 
+class _NoHistory:
+    """Панельная модель, которой не хватило истории на признаки: прогноз — NaN."""
+
+    def fit(self, full, train_end, horizon):
+        return self
+
+    def predict(self, subset, train_end, horizon):
+        return np.full((subset.shape[1], horizon), np.nan)
+
+
 class FailureTextTest(unittest.TestCase):
     """Пустой текст отказа уходит в CSV пустым полем и читается обратно как успех."""
 
@@ -74,6 +93,22 @@ class FailureTextTest(unittest.TestCase):
         with mock.patch.object(run, "_build_model", return_value=_Silent()):
             rows = run._score_series(task)
         self.assertEqual([row["error"] for row in rows], ["AssertionError: "])
+
+    def test_failure_rows_carry_empty_metrics(self):
+        # Без колонок метрик партия из одних отказов остаётся без `mae`, и сводка
+        # падает с KeyError ещё до слияния.
+        with self.subTest("модель по рядам"):
+            folds = rolling_origin(24, 3, 1)
+            task = ("silent", "мо_0", np.arange(24, dtype=float), pd.RangeIndex(24), folds, 3)
+            with mock.patch.object(run, "_build_model", return_value=_Silent()):
+                row = run._score_series(task)[0]
+            self.assertTrue(all(np.isnan(row[metric]) for metric in METRICS))
+        with self.subTest("панельная модель без истории для признаков"):
+            wide = matrix(SERIES[:2])
+            with mock.patch.dict(run.GLOBAL_MODELS, {"no_history": _NoHistory}):
+                part = run.evaluate_global(wide, wide, "no_history", 3, 1)
+            self.assertEqual(set(part["error"]), {"недостаточно истории для признаков"})
+            self.assertTrue(part[METRICS].isna().all().all())
 
 
 class SummariseTest(unittest.TestCase):
@@ -126,43 +161,106 @@ def _model_started(*args, **kwargs):
     raise AssertionError("модель запущена до сверки плана с файлом")
 
 
-class MainStopsBeforeModelsTest(unittest.TestCase):
-    """`main()` целиком: загрузка подменена, модели — ловушки, которые падают при вызове."""
+def run_main(root: Path, models: list[str], wide: pd.DataFrame, **patches) -> str:
+    """`run.main()` во временном каталоге `root`: загрузка панели подменена, модели —
+    настоящие, если их не подменили в `patches`. Возвращает напечатанное."""
+    config = root / "config.yaml"
+    config.write_text(yaml.safe_dump({
+        "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
+        "split": {"horizon": 3, "n_folds": 3},
+        "sample": {"n_series": None, "seed": 1},
+        "models": models,
+        "output": {"dir": "results"},
+        "compute": {"workers": 1},
+    }, allow_unicode=True), encoding="utf-8")
+    replaced = {
+        "ROOT": root,
+        "load_panel": mock.Mock(return_value=None),
+        "build_matrix": mock.Mock(return_value=(wide, _Report())),
+        "build_context": mock.Mock(return_value=None),
+        **patches,
+    }
+    out = io.StringIO()
+    with contextlib.ExitStack() as stack:
+        for name, value in replaced.items():
+            stack.enter_context(mock.patch.object(run, name, value))
+        stack.enter_context(mock.patch.object(sys, "argv", ["run.py", "--config", str(config)]))
+        stack.enter_context(contextlib.redirect_stdout(out))
+        run.main()
+    return out.getvalue()
+
+
+class MainTest(unittest.TestCase):
+    """`main()` целиком на синтетике: от плана до записанных файлов."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.per_path = self.root / "results" / "per_series.csv"
+        self.per_path.parent.mkdir()
 
     def test_plan_on_other_series_stops_before_any_model(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            per_path = root / "results" / "per_series.csv"
-            per_path.parent.mkdir()
-            frame(["naive_last", "drift"], SERIES).to_csv(per_path, index=False)
-            before = digest(per_path)
-            config = root / "config.yaml"
-            config.write_text(yaml.safe_dump({
-                "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
-                "split": {"horizon": 3, "n_folds": 3},
-                "sample": {"n_series": None, "seed": 1},
-                "models": ["naive_last"],
-                "output": {"dir": "results"},
-                "compute": {"workers": 1},
-            }, allow_unicode=True), encoding="utf-8")
-            # Матрица на 3 рядах из 5, что лежат в файле: пилот против полной панели.
-            wide = pd.DataFrame(np.ones((24, 3)), columns=SERIES[:3])
-            with (
-                mock.patch.object(run, "ROOT", root),
-                mock.patch.object(run, "load_panel", return_value=None),
-                mock.patch.object(run, "build_matrix", return_value=(wide, _Report())),
-                mock.patch.object(run, "build_context", return_value=None),
-                mock.patch.object(run, "evaluate", side_effect=_model_started) as evaluate,
-                mock.patch.object(run, "evaluate_global", side_effect=_model_started) as panel,
-                mock.patch.object(sys, "argv", ["run.py", "--config", str(config)]),
-                contextlib.redirect_stdout(io.StringIO()),
-            ):
-                with self.assertRaises(ValueError) as caught:
-                    run.main()
-            self.assertIn("модели не запускались", str(caught.exception))
-            evaluate.assert_not_called()
-            panel.assert_not_called()
-            self.assertEqual(digest(per_path), before)
+        frame(["naive_last", "drift"], SERIES).to_csv(self.per_path, index=False)
+        before = digest(self.per_path)
+        evaluate, panel = mock.Mock(side_effect=_model_started), mock.Mock(side_effect=_model_started)
+        # Матрица на 3 рядах из 5, что лежат в файле: пилот против полной панели.
+        with self.assertRaises(ValueError) as caught:
+            run_main(self.root, ["naive_last"], matrix(SERIES[:3]),
+                     evaluate=evaluate, evaluate_global=panel)
+        self.assertIn("модели не запускались", str(caught.exception))
+        evaluate.assert_not_called()
+        panel.assert_not_called()
+        self.assertEqual(digest(self.per_path), before)
+
+    def test_batch_replaces_its_models_keeps_the_rest_and_writes_summary(self):
+        frame(["naive_last"], SERIES[:3], mae=999.0).to_csv(self.per_path, index=False)
+        frame(["drift"], SERIES[:3], mae=5.0).to_csv(self.per_path, index=False, mode="a", header=False)
+        real_build = run._build_model
+        # theta отказывает на каждом ряду и фолде — через настоящий _score_series.
+        build = mock.Mock(side_effect=lambda name: _Silent() if name == "theta" else real_build(name))
+        run_main(self.root, ["naive_last", "theta"], matrix(SERIES[:3]), _build_model=build)
+        build.assert_called()
+
+        on_disk = pd.read_csv(self.per_path)
+        naive = on_disk[on_disk["model"] == "naive_last"]
+        self.assertEqual(len(naive), 9)
+        self.assertTrue(naive["error"].isna().all())
+        self.assertFalse((naive["mae"] == 999.0).any())
+        self.assertEqual(on_disk.loc[on_disk["model"] == "drift", "mae"].tolist(), [5.0] * 9)
+        theta = on_disk[on_disk["model"] == "theta"]
+        self.assertEqual(len(theta), 9)
+        self.assertTrue(theta["mae"].isna().all())
+        self.assertTrue(theta["error"].str.startswith("AssertionError").all())
+
+        summary = pd.read_csv(self.root / "results" / "summary.csv", index_col=0)
+        self.assertEqual(summary.loc["theta", "отказов"], 9)
+        self.assertEqual(summary.loc["theta", "серий"], 0)
+        self.assertEqual(summary["серий"].dtype.kind, "i")  # целые, а не дробные из-за NaN
+        self.assertTrue(np.isnan(summary.loc["theta", "MAE"]))
+        self.assertEqual(summary.loc["drift", "MAE"], 5.0)
+
+    def test_identical_models_warning_is_printed_once(self):
+        # Раньше сводка считалась и по одной партии до слияния (результат не читался),
+        # и после: предупреждение о совпадающих прогнозах печаталось дважды.
+        frame(["drift"], SERIES[:3], mae=5.0).to_csv(self.per_path, index=False)
+        real_build = run._build_model
+        twin = mock.Mock(side_effect=lambda name: real_build("naive_last" if name == "theta" else name))
+        out = run_main(self.root, ["naive_last", "theta"], matrix(SERIES[:3]), _build_model=twin)
+        self.assertEqual(out.count("naive_last и theta дали идентичные прогнозы"), 1)
+
+    def test_batch_of_only_refusals_is_written_and_summarised(self):
+        # Первый прогон в пустой каталог, и модель отказала везде: раньше KeyError: 'mae'.
+        build = mock.Mock(return_value=_Silent())
+        run_main(self.root, ["theta"], matrix(SERIES[:3]), _build_model=build)
+        build.assert_called()
+        on_disk = pd.read_csv(self.per_path)
+        self.assertEqual(len(on_disk), 9)
+        self.assertTrue(on_disk["mae"].isna().all())
+        summary = pd.read_csv(self.root / "results" / "summary.csv", index_col=0)
+        self.assertEqual(summary.loc["theta", "отказов"], 9)
+        self.assertEqual(summary.loc["theta", "серий"], 0)
+        self.assertEqual(summary["серий"].dtype.kind, "i")
 
 
 if __name__ == "__main__":

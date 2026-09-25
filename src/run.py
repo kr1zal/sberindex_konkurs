@@ -115,6 +115,15 @@ def refused(per_series: pd.DataFrame) -> pd.Series:
     return per_series["error"].notna() | per_series["mae"].isna()
 
 
+def _failure(model_name: str, fold: int, col: str, reason: str) -> dict:
+    """Строка отказа. Метрики — NaN, а не отсутствующие ключи: у партии из одних
+    отказов иначе нет колонки `mae`, и сводка падает с KeyError ещё до слияния."""
+    return {
+        "model": model_name, "fold": fold, "mo": col,
+        "mae": np.nan, "r2": np.nan, "smape": np.nan, "mase": np.nan, "error": reason,
+    }
+
+
 def _score_series(task: tuple) -> list[dict]:
     """Считает одну пару ряд-модель по всем фолдам. Верхнего уровня — чтобы пиклилось."""
     model_name, col, series, index, folds, horizon = task
@@ -129,10 +138,7 @@ def _score_series(task: tuple) -> list[dict]:
         try:
             y_pred = model.fit(y_train).predict(horizon)
         except Exception as exc:  # одна упавшая подгонка не должна ронять прогон
-            out.append(
-                {"model": model_name, "fold": fold.index, "mo": col,
-                 "error": failure_reason(exc)[:120]}
-            )
+            out.append(_failure(model_name, fold.index, col, failure_reason(exc)[:120]))
             continue
 
         out.append(
@@ -175,10 +181,7 @@ def evaluate_global(
             y_test = values[i, fold.test_start : fold.test_end]
             y_train = values[i, : fold.train_end]
             if np.isnan(y_pred).any():
-                rows.append(
-                    {"model": model_name, "fold": fold.index, "mo": col,
-                     "error": "недостаточно истории для признаков"}
-                )
+                rows.append(_failure(model_name, fold.index, col, "недостаточно истории для признаков"))
                 continue
             rows.append(
                 {
@@ -230,6 +233,9 @@ def summarise(per_series: pd.DataFrame) -> pd.DataFrame:
             "отказов": per_series.loc[refusals].groupby("model").size(),
         }
     )
+    # Модель из одних отказов в `ok` не встречается: без заполнения её `серий` — NaN,
+    # и вся колонка сводки становится дробной.
+    summary["серий"] = summary["серий"].fillna(0).astype(int)
     summary["отказов"] = summary["отказов"].fillna(0).astype(int)
 
     _warn_identical(ok)
@@ -420,7 +426,6 @@ def main() -> int:
         print(f"{name}: {time.perf_counter() - started:.1f} с")
 
     per_series = pd.concat(parts, ignore_index=True)
-    summary = summarise(per_series)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     per_series = merge_results(per_path, per_series)

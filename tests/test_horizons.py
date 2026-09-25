@@ -33,10 +33,15 @@ SERIES = ["мо_0", "мо_1", "мо_2"]
 PAIR = {"model": "m", "horizon": 3}
 
 
+def _train_end(horizon: int, folds: list[int], fold: int) -> int:
+    """Длина обучения фолда — как у `rolling_origin` на 24 точках."""
+    return 24 - (len(folds) - fold) * horizon
+
+
 def per_series(model: str, horizon: int, folds: list[int], series=SERIES, mae=1.0) -> pd.DataFrame:
     """Строки ряд × фолд в раскладке `horizons_per_series.csv`."""
     return pd.DataFrame([
-        {"model": model, "horizon": horizon, "fold": f, "train_end": 12 + f * horizon, "mo": s,
+        {"model": model, "horizon": horizon, "fold": f, "train_end": _train_end(horizon, folds, f), "mo": s,
          "mae": mae, "smape": 1.0, "mase": 1.0, "error": np.nan}
         for s in series for f in folds
     ])
@@ -45,7 +50,7 @@ def per_series(model: str, horizon: int, folds: list[int], series=SERIES, mae=1.
 def steps(model: str, horizon: int, folds: list[int], mae=1.0) -> pd.DataFrame:
     """Строки фолд × шаг в раскладке `horizons_steps.csv`: колонки `mo` в нём нет."""
     return pd.DataFrame([
-        {"model": model, "horizon": horizon, "fold": f, "train_end": 12 + f * horizon,
+        {"model": model, "horizon": horizon, "fold": f, "train_end": _train_end(horizon, folds, f),
          "step": k + 1, "mae": mae, "серий": len(SERIES)}
         for f in folds for k in range(horizon)
     ])
@@ -154,44 +159,140 @@ def _model_started(*args, **kwargs):
     raise AssertionError("модель запущена до сверки плана с файлом")
 
 
-class MainStopsBeforeModelsTest(unittest.TestCase):
-    """`main()` целиком: загрузка подменена, модели — ловушки, которые падают при вызове."""
+# Настоящий прогон моделей по рядам: подмены ниже его оборачивают, а не заменяют.
+_evaluate_series_models = horizons.evaluate_series_models
+
+
+def matrix(series: list[str]) -> pd.DataFrame:
+    """24 месяца × ряды с трендом и колебанием: у наивной модели конечные метрики."""
+    t = np.arange(24, dtype=float)
+    return pd.DataFrame({s: 100 + (i + 1) * t + 5 * np.sin(t) for i, s in enumerate(series)})
+
+
+def run_main(root: Path, plan: dict, wide: pd.DataFrame, **patches) -> str:
+    """`horizons.main()` во временном каталоге `root`: загрузка панели подменена, модели —
+    настоящие, если их не подменили в `patches`. `plan` — горизонты и модели конфига.
+    Возвращает напечатанное."""
+    config = root / "config.yaml"
+    config.write_text(yaml.safe_dump({
+        "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
+        "sample": {"n_series": None, "seed": 1},
+        "output": {"dir": "results", "prefix": "horizons"},
+        "compute": {"workers": 1},
+        **plan,
+    }, allow_unicode=True), encoding="utf-8")
+    replaced = {
+        "ROOT": root,
+        "load_panel": mock.Mock(return_value=None),
+        "build_matrix": mock.Mock(return_value=(wide, _Report())),
+        "build_context": mock.Mock(return_value=None),
+        **patches,
+    }
+    out = io.StringIO()
+    with contextlib.ExitStack() as stack:
+        # main() глушит предупреждения и меняет формат печати pandas глобально.
+        stack.enter_context(warnings.catch_warnings())
+        stack.enter_context(pd.option_context("display.float_format", None))
+        for name, value in replaced.items():
+            stack.enter_context(mock.patch.object(horizons, name, value))
+        stack.enter_context(mock.patch.object(sys, "argv", ["horizons.py", "--config", str(config)]))
+        stack.enter_context(contextlib.redirect_stdout(out))
+        horizons.main()
+    return out.getvalue()
+
+
+H3 = {"horizons": [{"horizon": 3, "n_folds": 3}], "models": ["naive_last"]}
+
+
+class MainTest(unittest.TestCase):
+    """`main()` целиком на синтетике: от плана до записанных файлов."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.per_path = self.root / "results" / "horizons_per_series.csv"
+        self.steps_path = self.root / "results" / "horizons_steps.csv"
+        self.per_path.parent.mkdir()
+
+    def write_files(self, series: list[str]) -> None:
+        """В файлах — naive_last и drift на горизонте 3, как после прошлого прогона."""
+        pd.concat([per_series("naive_last", 3, [0, 1, 2], series=series, mae=999.0),
+                   per_series("drift", 3, [0, 1, 2], series=series, mae=5.0)],
+                  ignore_index=True).to_csv(self.per_path, index=False)
+        pd.concat([steps("naive_last", 3, [0, 1, 2], mae=999.0), steps("drift", 3, [0, 1, 2], mae=5.0)],
+                  ignore_index=True).to_csv(self.steps_path, index=False)
 
     def test_plan_on_other_series_stops_before_any_model(self):
         five = [f"мо_{i}" for i in range(5)]
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            per_path = root / "results" / "horizons_per_series.csv"
-            per_path.parent.mkdir()
-            per_series("m", 3, [0, 1, 2], series=five).to_csv(per_path, index=False)
-            before = per_path.read_bytes()
-            config = root / "config.yaml"
-            config.write_text(yaml.safe_dump({
-                "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
-                "horizons": [{"horizon": 3, "n_folds": 3}],
-                "sample": {"n_series": None, "seed": 1},
-                "models": ["naive_last"],
-                "output": {"dir": "results", "prefix": "horizons"},
-                "compute": {"workers": 1},
-            }, allow_unicode=True), encoding="utf-8")
-            wide = pd.DataFrame(np.ones((24, 3)), columns=five[:3])
-            with (
-                warnings.catch_warnings(),  # main() глушит предупреждения глобально
-                mock.patch.object(horizons, "ROOT", root),
-                mock.patch.object(horizons, "load_panel", return_value=None),
-                mock.patch.object(horizons, "build_matrix", return_value=(wide, _Report())),
-                mock.patch.object(horizons, "build_context", return_value=None),
-                mock.patch.object(horizons, "evaluate_series_models", side_effect=_model_started) as series,
-                mock.patch.object(horizons, "evaluate_panel_model", side_effect=_model_started) as panel,
-                mock.patch.object(sys, "argv", ["horizons.py", "--config", str(config)]),
-                contextlib.redirect_stdout(io.StringIO()),
-            ):
-                with self.assertRaises(ValueError) as caught:
-                    horizons.main()
-            self.assertIn("модели не запускались", str(caught.exception))
-            series.assert_not_called()
-            panel.assert_not_called()
-            self.assertEqual(per_path.read_bytes(), before)
+        self.write_files(five)
+        before = self.per_path.read_bytes()
+        series, panel = mock.Mock(side_effect=_model_started), mock.Mock(side_effect=_model_started)
+        with self.assertRaises(ValueError) as caught:
+            run_main(self.root, H3, matrix(five[:3]),
+                     evaluate_series_models=series, evaluate_panel_model=panel)
+        self.assertIn("модели не запускались", str(caught.exception))
+        series.assert_not_called()
+        panel.assert_not_called()
+        self.assertEqual(self.per_path.read_bytes(), before)
+
+    def test_merges_existing_and_new_horizon_and_writes_steps(self):
+        self.write_files(SERIES)
+        runner = mock.Mock(wraps=_evaluate_series_models)
+        plan = {"horizons": [{"horizon": 3, "n_folds": 3}, {"horizon": 1, "n_folds": 9}],
+                "models": ["naive_last"]}
+        run_main(self.root, plan, matrix(SERIES), evaluate_series_models=runner)
+        self.assertEqual(runner.call_count, 2)  # горизонт 3 из файла и новый горизонт 1
+
+        on_disk = pd.read_csv(self.per_path)
+        self.assertEqual(pairs(on_disk), [("drift", 3), ("naive_last", 1), ("naive_last", 3)])
+        naive3 = on_disk[(on_disk["model"] == "naive_last") & (on_disk["horizon"] == 3)]
+        self.assertEqual(len(naive3), len(SERIES) * 3)
+        self.assertFalse((naive3["mae"] == 999.0).any())
+        naive1 = on_disk[(on_disk["model"] == "naive_last") & (on_disk["horizon"] == 1)]
+        self.assertEqual(len(naive1), len(SERIES) * 9)
+        self.assertEqual(on_disk.loc[on_disk["model"] == "drift", "mae"].unique().tolist(), [5.0])
+
+        steps_on_disk = pd.read_csv(self.steps_path)
+        self.assertEqual(pairs(steps_on_disk), [("drift", 3), ("naive_last", 1), ("naive_last", 3)])
+        new_steps = steps_on_disk[steps_on_disk["model"] == "naive_last"]
+        self.assertFalse((new_steps["mae"] == 999.0).any())
+        self.assertEqual(len(new_steps), 3 * 3 + 9 * 1)  # фолды × шаги горизонта
+        self.assertEqual(steps_on_disk.loc[steps_on_disk["model"] == "drift", "mae"].unique().tolist(), [5.0])
+
+        summary = pd.read_csv(self.root / "results" / "horizons_summary.csv")
+        self.assertEqual(sorted(zip(summary["model"], summary["horizon"])),
+                         [("drift", 3), ("naive_last", 1), ("naive_last", 3)])
+        self.assertTrue((self.root / "results" / "horizons_folds.csv").exists())
+
+    def test_batch_on_other_series_is_stopped_before_writing(self):
+        # План сходится с файлом, а партия — нет: прогон потерял ряд. Ранняя сверка
+        # такого не видит, поздняя в merge_into ловит до записи обоих файлов.
+        self.write_files(SERIES)
+        before = self.per_path.read_bytes(), self.steps_path.read_bytes()
+
+        def lossy(wide, name, horizon, folds, workers):
+            return _evaluate_series_models(wide.iloc[:, :2], name, horizon, folds, workers)
+
+        runner = mock.Mock(side_effect=lossy)
+        with self.assertRaises(ValueError) as caught:
+            run_main(self.root, H3, matrix(SERIES), evaluate_series_models=runner)
+        runner.assert_called()
+        self.assertIn("в файл ничего не записано", str(caught.exception))
+        self.assertEqual((self.per_path.read_bytes(), self.steps_path.read_bytes()), before)
+
+    def test_progress_line_counts_refusal_without_text(self):
+        self.write_files(SERIES)
+
+        def hidden_refusal(wide, name, horizon, folds, workers):
+            part, per_fold_steps = _evaluate_series_models(wide, name, horizon, folds, workers)
+            part.loc[0, ["mae", "smape", "mase"]] = np.nan  # отказ без текста: error пуст
+            return part, per_fold_steps
+
+        out = run_main(self.root, H3, matrix(SERIES),
+                       evaluate_series_models=mock.Mock(side_effect=hidden_refusal))
+        self.assertIn("naive_last h=3:", out)
+        self.assertIn("| отказов 1 |", out)
 
 
 if __name__ == "__main__":
