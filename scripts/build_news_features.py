@@ -14,11 +14,14 @@
    снятого и пять самых частых снятых слов; сверяет доли тем по старому словарю
    с файлом до 25.09 и печатает корреляцию старого и нового месячного ряда ДКП.
    «Старое» — всегда словарь и файл до 25.09, а не прошлая пересборка: после первой
-   пересборки исходный `national.parquet` лежит в копии, и сверка идёт с ней;
-3. собирает оба файла заново и сверяет колонки и типы со старыми — до всякой записи;
-4. пишет таблицу в `results/news_dictionary.csv`, копирует старые файлы
-   в `results/backup_2026-09-25/` (копию, которая там уже есть, не трогает)
-   и записывает новые.
+   пересборки исходный `national.parquet` лежит в копии, и сверка идёт с ней. Нет копии —
+   исходником считается `data/news`, только если старый словарь его воспроизводит;
+   иначе (чистый клон, где там уже пересборка) сверка пропускается;
+3. собирает оба файла заново и сверяет со старыми колонки, типы и колонки не из
+   словаря — до всякой записи;
+4. пишет таблицу в `results/news_dictionary.csv`, копирует исходные файлы
+   в `results/backup_2026-09-25/` (копию, которая там уже есть, не трогает; не исходные
+   под эту дату не кладёт) и записывает новые.
 
 `--dry-run` печатает всё и ничего не пишет.
 
@@ -167,9 +170,16 @@ def aligned(new: pd.DataFrame, old: pd.DataFrame, name: str) -> pd.DataFrame:
             "ничего не записано"
         )
     # Словарь меняет только доли тем: всё остальное обязано совпасть со старым файлом.
+    # Не совпало — пересобирается не то (так выглядела бы группировка по категориям
+    # в monthly_features), и писать такое нельзя.
     keys = [c for c in old.columns if not c.startswith("t_")]
     same = out[keys].reset_index(drop=True).equals(old[keys].reset_index(drop=True))
     print(f"  колонки не из словаря ({', '.join(keys)}) совпадают со старыми: {'да' if same else 'НЕТ'}")
+    if not same:
+        raise SystemExit(
+            f"{name}: колонки не из словаря разошлись со старым файлом — скрипт пересобирает словарь "
+            "тем, а не корпус; ничего не записано"
+        )
     return out
 
 
@@ -186,13 +196,23 @@ def main(argv: list[str] | None = None) -> int:
 
     hits = topic_hits(frame["norm"])
     shares = legacy_shares(hits[0], headlines["date"])
-    # Файл до 25.09: после первой пересборки в data/news лежит уже она, а исходный — в копии.
-    original = backup / "national.parquet"
-    if not original.exists():
-        original = news_dir / "national.parquet"
-    gap = legacy_gap(shares, pd.read_parquet(original))
-    print(f"старые доли тем воспроизводятся старым словарём: {'да' if gap < 1e-12 else 'НЕТ'} "
-          f"(наибольшее расхождение с {original.relative_to(ROOT)} {gap:.3g})")
+    # Исходный файл до 25.09 — копия в results/backup_…, а пока её нет — data/news, но только
+    # если его воспроизводит старый словарь. На чистом клоне в data/news уже пересборка:
+    # сверять с ней «до» бессмысленно, а положить её в копию под датой до 25.09 — значит
+    # подменить исходник, и сверка потом не сойдётся никогда. Решение по национальному
+    # файлу: оба файла пересобираются вместе.
+    news_is_original = legacy_gap(shares, old["national.parquet"]) < 1e-12
+    copy = backup / "national.parquet"
+    if copy.exists():
+        gap = legacy_gap(shares, pd.read_parquet(copy))
+        print(f"старые доли тем воспроизводятся старым словарём: {'да' if gap < 1e-12 else 'НЕТ'} "
+              f"(наибольшее расхождение с {copy.relative_to(ROOT)} {gap:.3g})")
+    elif news_is_original:
+        print(f"старые доли тем воспроизводятся старым словарём: да "
+              f"(исходный файл — {NEWS / 'national.parquet'}, копии ещё нет)")
+    else:
+        print(f"копии исходного файла нет — сверка воспроизведения пропущена "
+              f"(в {NEWS} не исходный файл: старый словарь его не воспроизводит)")
     table = dictionary_table(frame["norm"], hits)
 
     monthly = aligned(monthly_features(frame), old["monthly.parquet"], "monthly.parquet")
@@ -215,19 +235,22 @@ def main(argv: list[str] | None = None) -> int:
 
     table_path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(table_path, index=False)
-    backup.mkdir(parents=True, exist_ok=True)
     for name in FILES:
         target = backup / name
         if target.exists():
             print(f"копия {target.relative_to(ROOT)} уже есть — не трогаю")
-        else:
+        elif news_is_original:
+            backup.mkdir(parents=True, exist_ok=True)
             shutil.copy2(news_dir / name, target)
             print(f"старый {name} скопирован в {target.relative_to(ROOT)}")
+        else:
+            print(f"копию {name} не создаю: в {NEWS} не исходный файл, а под датой до 25.09 должен лежать исходный")
     save_datasets(None, monthly, news_dir, national=national)
     for name in FILES:
         written = pd.read_parquet(news_dir / name)
         if written.dtypes.to_dict() != old[name].dtypes.to_dict():
-            raise SystemExit(f"{name}: перечитанный файл не совпал по типам со старым; старый — в {BACKUP}")
+            where = BACKUP / name if (backup / name).exists() else "истории git"
+            raise SystemExit(f"{name}: перечитанный файл не совпал по типам со старым; старый — в {where}")
     print(f"\nзаписано: {TABLE}, {NEWS / 'monthly.parquet'}, {NEWS / 'national.parquet'}; "
           "перечитаны — колонки и типы как в старых файлах")
     return 0

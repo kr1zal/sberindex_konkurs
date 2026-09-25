@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import shutil
 import sys
 import tempfile
 import unittest
@@ -141,18 +142,45 @@ class MainTest(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual((self.backup / name).read_bytes(), before[f"data/news/{name}"])
 
+    def test_without_the_original_copy_the_check_is_skipped_and_nothing_is_backed_up(self):
+        # Чистый клон: копии нет, а в data/news уже пересобранные файлы. Сверять с ними «до»
+        # бессмысленно, а положить их в копию под датой до 25.09 — значит подменить исходник.
+        self.run_main()
+        shutil.rmtree(self.backup)
+        rebuilt = pd.read_parquet(self.news_dir / "national.parquet")
+        out = self.run_main("--dry-run")
+        self.assertIn("копии исходного файла нет — сверка воспроизведения пропущена", out)
+        self.assertNotIn("НЕТ", out)
+        out = self.run_main()
+        self.assertIn("не создаю", out)
+        self.assertFalse(self.backup.exists())
+        pd.testing.assert_frame_equal(pd.read_parquet(self.news_dir / "national.parquet"), rebuilt)
+
+    def test_non_dictionary_columns_that_differ_stop_before_any_write(self):
+        # Словарь меняет только доли тем. Разошлись остальные колонки — пересобирается не то
+        # (так выглядела бы ловушка категорий в monthly_features): отказ до всякой записи.
+        national = pd.read_parquet(self.news_dir / "national.parquet")
+        national["n_articles"] += 1
+        national.to_parquet(self.news_dir / "national.parquet", index=False)
+        before = self.files()
+        with self.assertRaises(SystemExit):
+            self.run_main()
+        self.assertEqual(self.files(), before)
+
     def test_existing_backup_is_not_overwritten(self):
-        # Копия от прошлого запуска — исходный файл, а в data/news лежит уже другой:
-        # перезапиши сборщик копию, байты бы разошлись.
+        # Копии от прошлого запуска — исходные файлы, а в data/news лежит уже другой:
+        # перезапиши сборщик копии, байты бы разошлись.
         self.backup.mkdir(parents=True)
-        earlier = (self.news_dir / "national.parquet").read_bytes()
-        (self.backup / "national.parquet").write_bytes(earlier)
+        earlier = {name: (self.news_dir / name).read_bytes() for name in ("monthly.parquet", "national.parquet")}
+        for name, content in earlier.items():
+            (self.backup / name).write_bytes(content)
         current = pd.read_parquet(self.news_dir / "national.parquet")
         current["t_dkp"] = 0.0
         current.to_parquet(self.news_dir / "national.parquet", index=False)
         self.run_main()
-        self.assertEqual((self.backup / "national.parquet").read_bytes(), earlier)
-        self.assertTrue((self.backup / "monthly.parquet").exists())
+        for name, content in earlier.items():
+            with self.subTest(name):
+                self.assertEqual((self.backup / name).read_bytes(), content)
 
     def test_columns_other_than_before_stop_before_any_write(self):
         national = pd.read_parquet(self.news_dir / "national.parquet")
