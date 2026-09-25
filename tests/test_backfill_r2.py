@@ -11,6 +11,8 @@ import contextlib
 import hashlib
 import importlib.util
 import io
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -272,6 +274,21 @@ class BackfillTest(unittest.TestCase):
         self.assertEqual(self.digests(), before)
         self.assertFalse((self.results / "backup_2026-09-25").exists())
 
+    def test_known_forecast_without_a_number_fails_instead_of_passing(self):
+        # NaN в панели там, где прогон видел числа, но только во входе известного прогноза:
+        # окна теста целы, выведенный sse конечен, а прямой SSE — NaN. Такая строка
+        # не сверена, и скрипт должен упасть, а не счесть её совпавшей.
+        self.wide.iloc[14, 0] = np.nan  # мо_0: вход naive_last на фолде 0 (конец обучения)
+        self.wide.iloc[3, 1] = np.nan  # мо_1: вход seasonal_naive на фолде 0 (год назад)
+        before = self.digests()
+        with self.assertRaises(ValueError) as caught:
+            self.run_backfill()
+        message = str(caught.exception)
+        self.assertIn("naive_last: 1", message)
+        self.assertIn("seasonal_naive: 1", message)
+        self.assertEqual(self.digests(), before)
+        self.assertFalse((self.results / "backup_2026-09-25").exists())
+
     def test_changed_old_summary_stops_before_writing(self):
         path = self.results / "summary.csv"
         summary = read_results(path, index_col=0)
@@ -290,6 +307,30 @@ class BackfillTest(unittest.TestCase):
             self.run_backfill()
         self.assertIn("мо_4", str(caught.exception))
         self.assertEqual(self.digests(), before)
+
+
+class HorizonsImportTest(unittest.TestCase):
+    """`scripts/horizons.py` грузится по пути, а не через пакет `scripts`."""
+
+    def test_foreign_scripts_package_does_not_shadow_horizons(self):
+        # Обычный пакет `scripts` где угодно на sys.path перекрывает неявный пакет
+        # пространства имён: `from scripts import horizons` искал бы модуль в чужом пакете.
+        code = (
+            "import importlib.util, sys; "
+            "spec = importlib.util.spec_from_file_location('backfill_r2', sys.argv[1]); "
+            "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+            "print(module.horizons.__file__)"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "scripts").mkdir()
+            (Path(tmp) / "scripts" / "__init__.py").write_text("", encoding="utf-8")
+            done = subprocess.run(
+                [sys.executable, "-c", code, str(ROOT / "scripts" / "backfill_r2.py")],
+                capture_output=True, text=True, timeout=120, env={**os.environ, "PYTHONPATH": tmp},
+            )
+        self.assertEqual(done.returncode, 0, done.stderr[-1500:])
+        loaded = Path(done.stdout.strip()).resolve()
+        self.assertEqual(loaded, (ROOT / "scripts" / "horizons.py").resolve())
 
 
 class InvariantsTest(unittest.TestCase):

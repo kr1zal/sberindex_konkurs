@@ -52,6 +52,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import shutil
 import sys
 from pathlib import Path
@@ -63,12 +64,20 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts import horizons  # noqa: E402
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.metrics import GAINS, R2_MEDIAN, R2_POOL, target_sums  # noqa: E402
 from src.results_guard import read_results, refused  # noqa: E402
 from src.run import REGISTRY, summarise  # noqa: E402
 from src.split import Fold, rolling_origin  # noqa: E402
+
+# scripts/ — не пакет: horizons.py грузится по пути, как в тестах. `from scripts import
+# horizons` держался бы на неявном пакете пространства имён, и обычный пакет `scripts`
+# где угодно на sys.path его перекрыл бы.
+_spec = importlib.util.spec_from_file_location(
+    "horizons", Path(__file__).resolve().parent / "horizons.py"
+)
+horizons = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(horizons)
 
 # Слагаемые пула в порядке строк прогона (`src.metrics.ROW_METRICS`).
 PARTS = ("sse", "sst", "n", "y_sum", "y_sq")
@@ -141,11 +150,12 @@ def check_known(filled: pd.DataFrame, wide: pd.DataFrame, folds: list[Fold]) -> 
     """Сверка выведенного sse с SSE по известному прогнозу, строка за строкой.
 
     Печатает число сверенных строк и наибольшее относительное расхождение по каждой
-    модели и падает, если хоть в одной строке оно больше `TOLERANCE`. Строки с NaN sse
-    (ровный тест) сверять не с чем — они посчитаны отдельно."""
+    модели и падает, если хоть в одной строке оно больше `TOLERANCE` или не посчитано:
+    NaN или бесконечность в прямом SSE значит, что в панели нет числа там, где прогон
+    его видел. Строки с NaN sse (ровный тест) сверять не с чем — они посчитаны отдельно."""
     by_index = {fold.index: fold for fold in folds}
     usable = ~refused(filled) & filled["sse"].notna()
-    worst, worst_row = 0.0, None
+    worst, worst_row, uncounted = 0.0, None, {}
     for model in KNOWN:
         rows = filled.loc[usable & (filled["model"] == model)]
         if rows.empty:
@@ -157,12 +167,31 @@ def check_known(filled: pd.DataFrame, wide: pd.DataFrame, folds: list[Fold]) -> 
         ])
         derived = rows["sse"].to_numpy(dtype=float)
         scale = np.maximum(np.abs(direct), np.abs(derived))
-        deviation = np.divide(np.abs(derived - direct), scale, out=np.zeros_like(scale), where=scale > 0)
-        at = int(np.argmax(deviation))
-        print(f"  {model}: сверено {len(rows)} строк, максимальное расхождение {deviation[at]:.2e}")
+        # Оба SSE — нули: совпали. Неконечное отклонение — провал, а не ноль: деление
+        # с маской `scale > 0` молча превращало NaN в совпавшую строку.
+        with np.errstate(invalid="ignore", divide="ignore"):
+            both_zero = (direct == 0) & (derived == 0)
+            deviation = np.where(both_zero, 0.0, np.abs(derived - direct) / scale)
+        counted = np.isfinite(deviation)
+        if not counted.all():
+            uncounted[model] = int((~counted).sum())
+        if not counted.any():
+            print(f"  {model}: SSE прогноза не посчитать ни в одной из {len(rows)} строк")
+            continue
+        at = int(np.flatnonzero(counted)[np.argmax(deviation[counted])])
+        tail = f"; SSE прогноза не посчитать ещё в {uncounted[model]}" if model in uncounted else ""
+        print(f"  {model}: сверено {int(counted.sum())} строк, "
+              f"максимальное расхождение {deviation[at]:.2e}{tail}")
         if deviation[at] >= worst:
             row = rows.iloc[at]
             worst, worst_row = float(deviation[at]), (model, row["mo"], row["fold"], derived[at], direct[at])
+    if uncounted:
+        raise ValueError(
+            f"SSE известного прогноза не посчитать в {sum(uncounted.values())} строках ("
+            + ", ".join(f"{model}: {count}" for model, count in uncounted.items())
+            + "): в панели NaN или бесконечность там, где прогон видел числа, — файл посчитан "
+            "не на этой панели. В файл ничего не записано."
+        )
     if worst_row is None:
         raise ValueError(
             f"проверять нечем: в файле нет успешных строк {', '.join(KNOWN)} с sse. "
