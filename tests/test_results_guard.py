@@ -18,9 +18,14 @@ from src.results_guard import check_plan, check_same_panel, uneven_series  # noq
 
 PATH = Path("results/per_series.csv")
 SERIES = ["мо_0", "мо_1", "мо_2", "мо_3", "мо_4"]
+INTENTIONAL = (
+    "Если протокол сменён намеренно, задайте в конфиге другой `output.dir` "
+    "(для horizons.py — другой `output.prefix`), а не убирайте из каталога один файл "
+    "по рядам: у `horizons_steps.csv` своей сверки нет, и новые шаги слились бы со старыми"
+)
 HINT = (
     "партия считана на другом протоколе или выборке (например, `configs/baseline.yaml` "
-    "с 300 рядами); в файл ничего не записано"
+    "с 300 рядами); в файл ничего не записано. " + INTENTIONAL
 )
 
 
@@ -122,6 +127,7 @@ class CheckPlanTest(unittest.TestCase):
         self.assertIn("фолды в плане: {0, 1, 2}", message)
         self.assertIn("configs/baseline.yaml", message)
         self.assertIn("модели не запускались", message)
+        self.assertIn(INTENTIONAL, message)
 
     def test_plan_with_other_folds_is_rejected(self):
         with self.assertRaises(ValueError) as caught:
