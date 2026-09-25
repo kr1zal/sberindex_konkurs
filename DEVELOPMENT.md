@@ -22,6 +22,7 @@ scripts/fetch_sberindex.py  выгрузка длинных рядов из ка
 scripts/check_no_leakage.py проверка, что модели не читают данные после origin
 scripts/training_length_sweep.py  как ценность переноса зависит от длины обучения
 scripts/horizons.py               прогон по пяти горизонтам, ошибка по шагам горизонта
+scripts/backfill_r2.py            разовый бэкфилл слагаемых R² пула в результаты до 25.09; прогоны пишут их сами
 scripts/news_event_study.py       новостной фон в месяцы массовых изломов
 scripts/error_decomposition.py    смещение против разброса между рядами
 scripts/news_national.py          новости на национальном уровне, 48 гипотез
