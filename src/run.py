@@ -24,6 +24,7 @@ from src.models.foundation import Chronos, ChronosPanel, Moirai, TimesFM  # noqa
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.models.two_stage import TwoStage, TwoStageNews  # noqa: E402
+from src.results_guard import check_same_panel, uneven_series  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
 REGISTRY = {
@@ -242,6 +243,27 @@ def _warn_identical(ok: pd.DataFrame) -> None:
                 )
 
 
+def _warn_uneven(per_series: pd.DataFrame) -> None:
+    """Кричит, если модели в файле гонялись на разном числе рядов.
+
+    Сигнал, а не блокер: через `check_same_panel` такой файл уже не собрать,
+    расхождение остаётся от прогонов до проверки — 21.09 `naive_last` на выборке
+    из 300 рядов затёр свои полнопанельные строки. Сводка пишется всё равно.
+    """
+    uneven = uneven_series(per_series)
+    if uneven is None:
+        return
+    by_count: dict[int, list[str]] = {}
+    for model, n in uneven.items():
+        by_count.setdefault(int(n), []).append(model)
+    print(
+        "ВНИМАНИЕ: модели гонялись на разном числе рядов (считая отказы), и сводка "
+        "сравнивает их на разных множествах — "
+        + "; ".join(f"{n}: {', '.join(models)}" for n, models in sorted(by_count.items()))
+        + ". Модели с меньшим числом рядов стоит перегнать."
+    )
+
+
 def build_context(panel: pd.DataFrame, wide: pd.DataFrame, cfg: dict) -> PanelContext:
     """Данные, общие для всех панельных моделей: категории трат и длинные ряды.
 
@@ -304,7 +326,11 @@ def _series_regions(wide: pd.DataFrame) -> dict[str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Прогон моделей по единому протоколу")
-    parser.add_argument("--config", default="configs/baseline.yaml")
+    parser.add_argument(
+        "--config", default="configs/full.yaml",
+        help="протокол оценки, по умолчанию %(default)s — полная панель. Пилот на выборке "
+             "из 300 рядов — configs/baseline.yaml, у него собственный каталог результатов",
+    )
     parser.add_argument("--models", nargs="*", default=None, help="переопределить список моделей")
     args = parser.parse_args()
 
@@ -359,14 +385,18 @@ def main() -> int:
     # гоняются частями (дорогие отдельно от дешёвых), и перезапись молча оставляла
     # бы в итоговой таблице только последнюю партию. Строки одной и той же модели
     # заменяются новыми — повторный прогон обновляет, а не дублирует.
+    # Замена честна, только если партия считана на тех же рядах и фолдах, что весь
+    # файл: сверка идёт до отбрасывания строк и до записи (src/results_guard.py).
     per_path = out_dir / "per_series.csv"
     if per_path.exists():
         previous = pd.read_csv(per_path)
+        check_same_panel(previous, per_series, path=per_path)
         previous = previous[~previous["model"].isin(per_series["model"].unique())]
         per_series = pd.concat([previous, per_series], ignore_index=True)
 
     per_series.to_csv(per_path, index=False)
     summary = summarise(per_series)
+    _warn_uneven(per_series)
     summary.to_csv(out_dir / "summary.csv")
 
     print("\n" + summary.to_string(float_format=lambda v: f"{v:,.2f}"))

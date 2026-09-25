@@ -5,8 +5,8 @@ venv/
 .env
 .DS_Store
 .ipynb_checkpoints/
-results/*.csv
-results/*.json
+results/**/*.csv
+results/**/*.json
 !results/.gitkeep
 # SQLite в режиме WAL создаёт рядом -wal и -shm: правило на голое имя
 # их не ловит, и они уезжают в коммит

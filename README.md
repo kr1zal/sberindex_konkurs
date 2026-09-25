@@ -75,8 +75,11 @@
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python src/run.py --config configs/baseline.yaml
+.venv/bin/python src/run.py
 ```
+
+Без флага `run.py` гоняет полную панель (`configs/full.yaml`). Пилот на выборке
+из 300 рядов — `--config configs/baseline.yaml`, он пишет в `results/baseline/`.
 
 Модели, переносящие сезонность с длинных рядов, дополнительно требуют выгрузки
 федеральных и отраслевых рядов из каталога СберИндекса:
@@ -92,20 +95,31 @@ python -m venv .venv
 ```
 
 Результаты пишутся в `results/`: `per_series.csv` — метрики по каждой паре ряд-фолд,
-`summary.csv` — сводка по моделям.
+`summary.csv` — сводка по моделям. Повторный прогон модели заменяет её строки, остальные
+остаются. Если партия считана на другом множестве рядов или фолдов, чем файл, слияние
+останавливается до записи и файл не меняется (`src/results_guard.py`).
+
+Тесты не гоняют моделей и не трогают `results/`:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+```
 
 ## Структура
 
 ```
-configs/baseline.yaml   протокол: данные, разбиение, выборка, список моделей
+configs/full.yaml       протокол: данные, разбиение, выборка, список моделей; полная панель
+configs/baseline.yaml   тот же протокол на выборке из 300 рядов, пишет в results/baseline/
 src/data.py             загрузка панели, восстановление сущностей, пропуски
 src/split.py            скользящий origin
 src/metrics.py          MAE, R², sMAPE, MASE
 src/external.py         длинные ряды СберИндекса, перенос общего фактора
 src/models/             модели за единым интерфейсом fit/predict
 src/run.py              прогон и сводка
+src/results_guard.py    сверка партии результатов с файлом до слияния: те же ряды и фолды
 scripts/                выгрузка рядов, проверка утечки, развёртки, разложение ошибки,
                         проверка новостей, выкачка тел статей
+tests/                  тесты на синтетических кадрах
 ```
 
 Новая модель подключается реализацией `fit(y) -> self` и `predict(horizon) -> np.ndarray`
