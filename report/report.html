@@ -2264,6 +2264,7 @@ overflow-x: visible;
   <li><a href="#что-из-этого-следует" id="toc-что-из-этого-следует" class="nav-link" data-scroll-target="#что-из-этого-следует">Что из этого следует</a></li>
   <li><a href="#глобальная-модель" id="toc-глобальная-модель" class="nav-link" data-scroll-target="#глобальная-модель">Глобальная модель</a></li>
   </ul></li>
+  <li><a href="#пять-горизонтов-наукаст-и-1-3-6-12-месяцев" id="toc-пять-горизонтов-наукаст-и-1-3-6-12-месяцев" class="nav-link" data-scroll-target="#пять-горизонтов-наукаст-и-1-3-6-12-месяцев">Пять горизонтов: наукаст и 1, 3, 6, 12 месяцев</a></li>
   <li><a href="#перенос-с-длинных-рядов" id="toc-перенос-с-длинных-рядов" class="nav-link" data-scroll-target="#перенос-с-длинных-рядов">Перенос с длинных рядов</a>
   <ul class="collapse">
   <li><a href="#чего-именно-не-хватает-короткому-ряду" id="toc-чего-именно-не-хватает-короткому-ряду" class="nav-link" data-scroll-target="#чего-именно-не-хватает-короткому-ряду">Чего именно не хватает короткому ряду</a></li>
@@ -2326,12 +2327,13 @@ overflow-x: visible;
 
 <section id="краткое-резюме" class="level2">
 <h2 class="anchored" data-anchor-id="краткое-резюме">Краткое резюме</h2>
-<p>Мы прогнозируем потребительские безналичные расходы 2190 муниципальных образований России на горизонт в три месяца и обнаруживаем в этих рядах точки структурных изменений.</p>
+<p>Мы прогнозируем потребительские безналичные расходы 2190 муниципальных образований России — основной разбор на горизонте в три месяца, сравнение на наукасте и горизонтах 1, 3, 6 и 12 месяцев — и обнаруживаем в этих рядах точки структурных изменений.</p>
 <p><strong>Главный вывод: задача только выглядит как прогноз двух тысяч муниципалитетов. На деле это прогноз одного числа и разнос его по территориям.</strong> Межрядовая составляющая ошибки не двигается ни одной моделью, а модель, вообще не смотрящая на отдельные ряды, выигрывает там, где истории меньше всего. Подробно — в разделе <a href="#результаты">Результаты</a>.</p>
 <p><strong>Остальные результаты, и большая их часть отрицательные.</strong></p>
 <ol type="1">
 <li><p><strong>Ловушка, в которую легко попасть на месячных данных.</strong> Насильно включённая годовая сезонность на пятнадцати точках выдаёт отрицательное потребление и удорожает подгонку в десятки раз. Рассуждение «данные месячные, значит нужна годовая сезонность» здесь стоит дорого — и Prophet от него защищается сам: его режим по умолчанию годовую сезонность на такой истории не включает и выводит предупреждение. Эталон конкурса работает как надо.</p></li>
 <li><p><strong>Выигрыш даёт не более хитрая модель отдельного ряда, а информация со стороны.</strong> Все классические подходы упираются в один и тот же потолок. Проходят его два источника: сезонность, перенесённая с длинных федеральных рядов, и шесть категорий трат, поданные как отдельные обучающие ряды. Вместе с глобальной моделью по панели это даёт <strong>23,0% против эталона</strong> вместо 7,3%.</p></li>
+<li><p><strong>Лучшая модель зависит от горизонта, и это та же зависимость от длины истории.</strong> На наукасте лучшая связка даёт 839 рублей против 1 550 у эталона — 45,9%. На год вперёд панельные модели не имеют обучающих примеров вовсе, и единственная, кто обходит и наивную модель, и эталон, — двухэтапная: 1 642 против 2 691 и 2 722, около сорока процентов. Ошибка при этом растёт не с расстоянием от origin, а с календарём: от декабря наивная модель ошибается на 7 036 в январе и на 1 211 в августе. Раздел [Пять горизонтов].</p></li>
 <li><p><strong>Переносится не всё и не как угодно.</strong> Из пяти конструкций переноса работают две. Те же данные, поданные как внешние регрессоры, ухудшают прогноз на треть; предобучение на отраслевых рядах не даёт ничего. Разница не в данных, а в том, на какой вопрос источник отвечает.</p></li>
 <li><p><strong>Ценность переноса падает до нуля по мере накопления истории.</strong> Измерено на десяти длинах обучения: ранговая корреляция выигрыша с длиной <strong>0,96</strong>. При двенадцати месяцах перенос снимает с модели 7 590 рублей ошибки, при двадцати одном добавляет 281. Та же развёртка показывает, во что упирается вся работа: <strong>девять дополнительных месяцев данных улучшают панельную модель в 10,4 раза</strong>, чего не даёт ни один внешний источник.</p></li>
 <li><p><strong>Фундаментальные модели: zero-shot проигрывает наивной, дообучение почти отыгрывает.</strong> Два семейства, Chronos и TimesFM, сходятся на том, что без дообучения модель хуже наивной. Дообучение Chronos даёт минус 39% и выводит его на уровень эталона конкурса, но панельной модели он не достаёт в полтора раза.</p></li>
@@ -2345,7 +2347,7 @@ overflow-x: visible;
 <p><strong>Задача только выглядит как прогноз двух тысяч муниципалитетов. На деле это прогноз одного числа и разнос его по территориям.</strong></p>
 </blockquote>
 <p>Это главный вывод работы. Он получен двумя независимыми способами, и оба приведены ниже: сначала измерением, потом конструкцией.</p>
-<div id="8c32180b" class="cell" data-execution_count="2">
+<div id="5295b2d4" class="cell" data-execution_count="2">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="2">
 <p><strong>Измерение.</strong> Ошибку прогноза можно разделить на две части: промах мимо общего движения страны и разброс между муниципалитетами. Вторая часть укладывается в <strong>695–849 ₽ по всем 18 сочетаниям модели и фолда</strong> при стандартном отклонении 47. Первая гуляет от 67 до 2 711, и вместе с ней MAE — от 781 до 3 535. Всё, что отличает хорошую модель от плохой на этих данных, — попадание в общее движение. Остальное не сдвинула ни одна из 29 моделей.</p>
 <p><strong>Конструкция.</strong> Двухэтапная модель прогнозирует <strong>один</strong> федеральный ряд по его собственной длинной истории и разносит результат долями. На отдельные ряды при прогнозе динамики она не смотрит вовсе — и на фолде с самой короткой историей оказывается <strong>лучшей из всех</strong>, обходя в том числе наивную модель, которую там не обошёл никто другой.</p>
@@ -2356,7 +2358,7 @@ overflow-x: visible;
 <h3 class="anchored" data-anchor-id="закон-перенос-замещает-недостающую-историю-ровно-в-той-мере-в-какой-её-недостаёт">Закон: перенос замещает недостающую историю ровно в той мере, в какой её недостаёт</h3>
 <p>Двадцать четыре точки на ряд — корневое ограничение задачи. Мы перепробовали пять конструкций, чтобы обойти его чужими данными, и обнаружили не рецепт, а зависимость.</p>
 <p>Протокол даёт три фолда, три точки — мало для закономерности. Поэтому то же самое посчитано на всех origin’ах, которые панель допускает: обучение от 12 до 21 месяца, десять длин (<code>scripts/training_length_sweep.py</code>).</p>
-<div id="ddf1c024" class="cell" data-execution_count="3">
+<div id="d1467fb4" class="cell" data-execution_count="3">
 <div class="cell-output cell-output-display" data-execution_count="3">
 <div>
 
@@ -2492,7 +2494,7 @@ overflow-x: visible;
 </div>
 </div>
 <p>Столбцы источников — это <strong>выигрыш к базовой панельной модели</strong>: отрицательное число означает, что источник помогает.</p>
-<div id="7dd9f935" class="cell" data-execution_count="4">
+<div id="4f39309d" class="cell" data-execution_count="4">
 <div class="cell-output cell-output-display" data-execution_count="4">
 <div>
 
@@ -2543,7 +2545,7 @@ overflow-x: visible;
 <h3 class="anchored" data-anchor-id="механизм-ошибка-состоит-из-двух-частей-и-двигается-только-одна">Механизм: ошибка состоит из двух частей, и двигается только одна</h3>
 <p>Почему закон устроен именно так, видно из разложения ошибки (<code>scripts/error_decomposition.py</code>).</p>
 <p>Средняя ошибка не говорит, ошибается ли модель по-разному в разных муниципалитетах или одинаково во всех сразу. А это разные болезни. Разделить их можно так: домножить прогноз на один множитель, подобранный задним числом по факту, — то есть угадать общее движение страны идеально, ничего не узнав про отдельные территории. Насколько упадёт ошибка, настолько она и состояла из <strong>общего смещения</strong>; остаток — <strong>разброс между рядами</strong>.</p>
-<div id="3cac80b6" class="cell" data-execution_count="5">
+<div id="0e3613b7" class="cell" data-execution_count="5">
 <div class="cell-output cell-output-display" data-execution_count="5">
 <div>
 
@@ -2634,7 +2636,7 @@ overflow-x: visible;
 <p><strong>Разброс между рядами не двигается вообще.</strong> По всем пятнадцати сочетаниям модели и фолда он укладывается в диапазон от 695 до 849 рублей при стандартном отклонении 45. При этом сама MAE на тех же пятнадцати сочетаниях гуляет от 805 до 3 535.</p>
 <p><strong>Значит всё, что отличает хорошую модель от плохой на этих данных, — это попадание в общее движение страны.</strong> Остальное — предел информации, который не сдвинула ни одна из двадцати пяти проверенных моделей. Задача только выглядит как «спрогнозировать две тысячи муниципалитетов»; на деле это «спрогнозировать одно общероссийское число и разнести его по территориям».</p>
 <p>Вот как выглядит промах в общем движении на первом фолде. Обучение кончается мартом 2024, прогнозируем апрель-июнь:</p>
-<div id="dcea1545" class="cell" data-execution_count="6">
+<div id="6d1efad4" class="cell" data-execution_count="6">
 <div class="cell-output cell-output-display" data-execution_count="6">
 <div>
 
@@ -2721,7 +2723,7 @@ overflow-x: visible;
 <h3 class="anchored" data-anchor-id="конструктивная-проверка-прогноз-одного-числа-и-разнос">Конструктивная проверка: прогноз одного числа и разнос</h3>
 <p>Разложение ошибки — измерение. Оно показывает, что смещение решает всё, но не доказывает, что на одном общем движении можно <strong>построить</strong> прогноз: в панельной модели общий фактор заходит нормировкой цели, и бустинг волен им не пользоваться.</p>
 <p>Двухэтапная модель проверяет тезис в лоб. Она прогнозирует <strong>один</strong> федеральный ряд по его собственной истории в 64–70 месяцев — ровно та длина, нехватка которой всё и определяет, — и разносит результат долями <code>y_i(t) / F(t)</code>, оценёнными по обучающей части. На динамику отдельных рядов она при этом не смотрит вовсе.</p>
-<div id="c23f9e04" class="cell" data-execution_count="7">
+<div id="4ccf9cb1" class="cell" data-execution_count="7">
 <div class="cell-output cell-output-display" data-execution_count="7">
 <div>
 
@@ -2791,7 +2793,7 @@ overflow-x: visible;
 </section>
 <section id="таблица-по-фолдам-среднее-скрывает-полную-перемену-мест" class="level3">
 <h3 class="anchored" data-anchor-id="таблица-по-фолдам-среднее-скрывает-полную-перемену-мест">Таблица по фолдам: среднее скрывает полную перемену мест</h3>
-<div id="15bad4e8" class="cell" data-execution_count="8">
+<div id="551f6093" class="cell" data-execution_count="8">
 <div class="cell-output cell-output-display" data-execution_count="8">
 <div>
 
@@ -2969,7 +2971,7 @@ overflow-x: visible;
 <h3 class="anchored" data-anchor-id="что-из-этого-следует-для-практики">Что из этого следует для практики</h3>
 <p>Вывод неудобный, и мы приводим его первым, а не прячем в ограничения.</p>
 <p>Конкурсная оценка усредняет три фолда, и по среднему выигрывает связка «общий фактор плюс категории рядами». Но прогнозировать в реальности предстоит <strong>вперёд от конца данных</strong>, то есть с двадцатью четырьмя месяцами обучения — а это дальше правого края нашей развёртки, где перенос уже не помогает.</p>
-<div id="96e2b6e2" class="cell" data-execution_count="9">
+<div id="8b471b79" class="cell" data-execution_count="9">
 <div class="cell-output cell-output-display" data-execution_count="9">
 <div>
 
@@ -3065,6 +3067,7 @@ overflow-x: visible;
 <li><strong>двадцать месяцев и больше</strong> — брать простую панельную модель с долями категорий трат. Перенос здесь добавляет сложность и риск, не добавляя точности.</li>
 </ul>
 <p>Разница между «лучшая в таблице» и «лучшая для задачи» здесь настоящая, и умалчивать о ней было бы нечестно.</p>
+<p>По горизонтам рекомендация раздваивается тем же образом: до шести месяцев вперёд — панельная модель, на год вперёд — двухэтапная, потому что у панельных моделей на таком горизонте не остаётся обучающих примеров, а федеральный ряд знает и сезонность, и годовой рост. Числа — в разделе [Пять горизонтов].</p>
 </section>
 <section id="находки-полезные-независимо-от-нашей-модели" class="level3">
 <h3 class="anchored" data-anchor-id="находки-полезные-независимо-от-нашей-модели">Находки, полезные независимо от нашей модели</h3>
@@ -3156,7 +3159,7 @@ overflow-x: visible;
 <section id="источник" class="level3">
 <h3 class="anchored" data-anchor-id="источник">Источник</h3>
 <p>Потребительские безналичные расходы на уровне муниципальных образований, <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>. Помесячно, январь 2023 — декабрь 2024, шесть категорий трат.</p>
-<div id="2edae155" class="cell" data-execution_count="10">
+<div id="e898a4c3" class="cell" data-execution_count="10">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.data <span class="im">import</span> load_panel, build_matrix</span>
@@ -3225,6 +3228,7 @@ overflow-x: visible;
 </table>
 <p><strong>Насколько это важно.</strong> Глобальная модель на фолдах 1–2 даёт MAE около 1 040, а в среднем по всем трём — около 1 490. Фолд с обучением в пятнадцать точек радикально тяжелее остальных; три дополнительных месяца истории меняют качество сильнее, чем переход от наивной модели к градиентному бустингу.</p>
 <p><strong>Метрики.</strong> MAE обязательна по условиям конкурса. Рядом считаются R², sMAPE и MASE. MASE добавлена потому, что уровни расходов по муниципалитетам различаются на порядок — от примерно десяти тысяч рублей на человека до семидесяти четырёх, — и средний по панели MAE без неё перекошен в сторону крупных территорий.</p>
+<p><strong>Пять горизонтов.</strong> По уточнению организаторов та же конструкция разбиения применена отдельно к наукасту (горизонт 1) и горизонтам 3, 6 и 12; число фолдов на каждом — сколько допускают двадцать четыре точки: девять, три, два и один. Таблицы и разбор — в разделе [Пять горизонтов].</p>
 </section>
 <section id="базовая-модель-конкурса-и-ловушка-годовой-сезонности" class="level2">
 <h2 class="anchored" data-anchor-id="базовая-модель-конкурса-и-ловушка-годовой-сезонности">Базовая модель конкурса и ловушка годовой сезонности</h2>
@@ -3232,7 +3236,7 @@ overflow-x: visible;
 <p><strong>Сначала о том, чего здесь нет.</strong> Эталон конкурса не сломан и чинить его не требуется. Prophet по умолчанию задаёт <code>yearly_seasonality=&#39;auto&#39;</code>, и эта логика сама выключает годовую сезонность, когда истории меньше 730 дней. Наши окна обучения — 425, 517 и 609 дней, то есть сезонность выключается на всех трёх фолдах. Больше того, на пятнадцати месяцах Prophet не включает вообще <strong>ни одной</strong> сезонной компоненты.</p>
 <p>Проверено прямо: голый <code>Prophet()</code> и <code>Prophet(yearly_seasonality=False)</code> дают на наших рядах одинаковый прогноз с точностью до нуля. Поэтому строка <code>prophet</code> в таблице сравнения — это Prophet как есть, без единого нашего аргумента.</p>
 <p><strong>Ловушка же вот в чём.</strong> Практик, глядя на месячные данные, естественно рассуждает: месячные ряды — значит нужна годовая сезонность. Включает её явно — и получает следующее.</p>
-<div id="693ce1c9" class="cell" data-execution_count="11">
+<div id="2dbede95" class="cell" data-execution_count="11">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> logging</span>
@@ -3287,7 +3291,7 @@ overflow-x: visible;
 </div>
 </div>
 </div>
-<div id="12184825" class="cell" data-execution_count="12">
+<div id="0f80a1b7" class="cell" data-execution_count="12">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -3303,7 +3307,7 @@ overflow-x: visible;
 </section>
 <section id="сравнение-моделей-прогнозирования" class="level2">
 <h2 class="anchored" data-anchor-id="сравнение-моделей-прогнозирования">Сравнение моделей прогнозирования</h2>
-<div id="8ce6f2f0" class="cell" data-execution_count="13">
+<div id="3851a3f3" class="cell" data-execution_count="13">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>summary <span class="op">=</span> table(<span class="st">&quot;../results/summary.csv&quot;</span>, index_col<span class="op">=</span><span class="dv">0</span>)</span>
@@ -3322,6 +3326,14 @@ overflow-x: visible;
 <th data-quarto-table-cell-role="th">sMAPE</th>
 <th data-quarto-table-cell-role="th">серий</th>
 <th data-quarto-table-cell-role="th">отказов</th>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">model</th>
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th"></th>
 </tr>
 </thead>
 <tbody>
@@ -3563,7 +3575,7 @@ overflow-x: visible;
 </div>
 </div>
 </div>
-<div id="70a43a4f" class="cell" data-execution_count="14">
+<div id="0b2ffb88" class="cell" data-execution_count="14">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -3587,14 +3599,664 @@ overflow-x: visible;
 <p><strong>Почему не LightGBM.</strong> Он требует системной библиотеки OpenMP, которой на чистой macOS нет, и запуск у проверяющего упирается в установку пакета через менеджер системы. Для воспроизводимости такая зависимость того не стоит. Взят гистограммный бустинг из scikit-learn: алгоритм тот же, зависимость уже есть.</p>
 </section>
 </section>
+<section id="пять-горизонтов-наукаст-и-1-3-6-12-месяцев" class="level2">
+<h2 class="anchored" data-anchor-id="пять-горизонтов-наукаст-и-1-3-6-12-месяцев">Пять горизонтов: наукаст и 1, 3, 6, 12 месяцев</h2>
+<p>Организаторы в ответе от 24 сентября уточнили постановку: сравнить модели для наукастинга и ещё как минимум на четырёх горизонтах — 1, 3, 6 и 12 месяцев. Вся работа выше сделана на горизонте 3. Здесь та же конструкция разбиения — скользящий origin с расширяющимся окном, шаг равен горизонту — применена к каждому горизонту отдельно (<code>configs/horizons.yaml</code>, <code>scripts/horizons.py</code>). Столбец горизонта 3 в таблицах ниже — это ровно те три фолда, что и в остальном отчёте, числа совпадают до рубля.</p>
+<p><strong>Что здесь называется наукастом.</strong> Внутримесячных данных в панели нет, поэтому наукаст месяца t — это прогноз по данным до t−1, то есть горизонт 1. В узком смысле слова наукаст на месячных данных от прогноза на месяц не отличается, и мы не делаем вид, что отличается. Один способ отличить всё же есть. Федеральный индекс потребительских расходов СберИндекс публикует регулярно и с коротким лагом, а муниципальный разрез выложен разово, к конкурсу; в настоящей задаче наукаста агрегат за текущий месяц уже известен, когда муниципальных значений ещё нет, и прогнозировать надо только разнос. Строка «разнос известного агрегата» считает ровно это: доли по прошлому, как у двухэтапной модели, а множитель — опубликованное значение. На горизонте 1 это наукаст. На горизонтах длиннее — уже оракул: общее движение страны на весь горизонт считается известным, и в ошибке остаётся межрядовая часть. Это та самая нижняя граница из разложения ошибки, только построенная заранее, а не вычтенная задним числом. Строгой границей она не является: правило оценки доли по-прежнему выбирается внутренним бэктестом, и на первом фолде горизонта 3 оно выбрано иначе, чем у прогнозной модели, — 1 021 против 781. Это единственная модель в проекте, которая читает ряд после origin, и делает она это по условию задачи, а не по недосмотру.</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>горизонт</th>
+<th>фолдов</th>
+<th>обучение</th>
+<th>тест</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1, наукаст</td>
+<td>9</td>
+<td>15, 16, …, 23</td>
+<td>месяцы 16..24 по одному</td>
+</tr>
+<tr class="even">
+<td>3</td>
+<td>3</td>
+<td>15, 18, 21</td>
+<td>основной протокол</td>
+</tr>
+<tr class="odd">
+<td>6</td>
+<td>2</td>
+<td>12, 18</td>
+<td>13..18 и 19..24</td>
+</tr>
+<tr class="even">
+<td>12</td>
+<td>1</td>
+<td>12</td>
+<td>13..24, весь 2024 год</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Во что упирается протокол на двадцати четырёх точках.</strong> На горизонте 12 фолд ровно один, обучение — двенадцать месяцев, доверительного интервала нет и быть не может. Число фолдов задаёт и длину обучения в первом из них, поэтому на горизонтах 6 и 12 приходится начинать с двенадцати месяцев, а на 1 и 3 первый origin тот же, что в основном протоколе. Прямая многошаговая стратегия панельного бустинга на горизонте 12 не имеет обучающих примеров по построению: чтобы обучить модель шага 7 на двенадцати месяцах, нужна пара «момент t и месяц t+7» внутри обучения, а с учётом шести лагов признаков её нет. Мы не чиним это костылём вроде рекурсивной подстановки, а фиксируем как результат: отказ модели попадает в таблицу прочерком.</p>
+<p>Протокол вскрыл и ошибку в самой панельной модели, которая на основном разбиении не проявлялась: набор признаков запоминался один на все шаги горизонта, а при двенадцати месяцах обучения у шага 6 всего одна обучающая пара, и в ней ещё нет сдвига долей категорий. Модель шага 1 получала шестнадцать колонок вместо двадцати одной. Исправлено — колонки хранятся по шагам; на трёх фолдах основного протокола числа не изменились ни на рубль.</p>
+<div class="cell" data-tbl-cap="MAE по горизонтам, полная панель. Прочерк — модель на этом горизонте не имеет обучающих примеров." data-execution_count="16">
+<div class="cell-output cell-output-display" data-execution_count="16">
+<div>
+
+
+<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
+<caption>MAE по горизонтам, полная панель. Прочерк — модель на этом горизонте не имеет обучающих примеров.</caption>
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th">h = 1, фолдов: 9</th>
+<th data-quarto-table-cell-role="th">h = 3, фолдов: 3</th>
+<th data-quarto-table-cell-role="th">h = 6, фолдов: 2</th>
+<th data-quarto-table-cell-role="th">h = 12, фолдов: 1</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">наивная: оставить как в прошлом месяце</th>
+<td>1 611</td>
+<td>1 852</td>
+<td>2 632</td>
+<td>2 691</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">сезонно-наивная: как год назад</th>
+<td>4 404</td>
+<td>4 404</td>
+<td>4 076</td>
+<td>4 076</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">эталон конкурса (Prophet по умолчанию)</th>
+<td>1 550</td>
+<td>1 581</td>
+<td>2 137</td>
+<td>2 722</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">двухэтапная: одно число и разнос долями</th>
+<td>1 018</td>
+<td>1 393</td>
+<td>1 749</td>
+<td>1 642</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">разнос известного агрегата: наукаст, дальше оракул</th>
+<td>996</td>
+<td>1 263</td>
+<td>1 405</td>
+<td>1 356</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная модель, без внешних источников</th>
+<td>969</td>
+<td>1 466</td>
+<td>4 307</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">панельная + доли категорий</th>
+<td>914</td>
+<td>1 273</td>
+<td>4 263</td>
+<td>—</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная + фактор + категории рядами</th>
+<td>839</td>
+<td>1 217</td>
+<td>1 442</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">Chronos-Bolt, дообученный</th>
+<td>1 950</td>
+<td>1 772</td>
+<td>3 450</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+
+</div>
+</div>
+</div>
+<div class="cell" data-tbl-cap="MASE по горизонтам: ошибка в долях от ошибки одношагового наивного прогноза внутри обучения. Больше единицы — хуже, чем «оставить как есть» на один шаг." data-execution_count="17">
+<div class="cell-output cell-output-display" data-execution_count="17">
+<div>
+
+
+<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
+<caption>MASE по горизонтам: ошибка в долях от ошибки одношагового наивного прогноза внутри обучения. Больше единицы — хуже, чем «оставить как есть» на один шаг.</caption>
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th">h = 1, фолдов: 9</th>
+<th data-quarto-table-cell-role="th">h = 3, фолдов: 3</th>
+<th data-quarto-table-cell-role="th">h = 6, фолдов: 2</th>
+<th data-quarto-table-cell-role="th">h = 12, фолдов: 1</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">наивная: оставить как в прошлом месяце</th>
+<td>0,89</td>
+<td>1,01</td>
+<td>1,57</td>
+<td>1,72</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">сезонно-наивная: как год назад</th>
+<td>2,38</td>
+<td>2,31</td>
+<td>2,40</td>
+<td>2,64</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">эталон конкурса (Prophet по умолчанию)</th>
+<td>0,85</td>
+<td>0,84</td>
+<td>1,24</td>
+<td>1,69</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">двухэтапная: одно число и разнос долями</th>
+<td>0,55</td>
+<td>0,75</td>
+<td>1,04</td>
+<td>1,05</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">разнос известного агрегата: наукаст, дальше оракул</th>
+<td>0,54</td>
+<td>0,66</td>
+<td>0,81</td>
+<td>0,87</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная модель, без внешних источников</th>
+<td>0,50</td>
+<td>0,73</td>
+<td>2,73</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">панельная + доли категорий</th>
+<td>0,48</td>
+<td>0,64</td>
+<td>2,66</td>
+<td>—</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная + фактор + категории рядами</th>
+<td>0,46</td>
+<td>0,62</td>
+<td>0,87</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">Chronos-Bolt, дообученный</th>
+<td>1,05</td>
+<td>0,94</td>
+<td>1,83</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+
+</div>
+</div>
+</div>
+<p><strong>Наукаст.</strong> Лучшая связка даёт <strong>839 рублей</strong> против 1 550 у эталона — выигрыш 45,9%, вдвое больше, чем на горизонте 3. Эталон же на горизонте 1 обходит наивную модель всего на 3,8%: на один месяц вперёд «оставить как есть» почти так же хорошо, как тренд Prophet. Девять фолдов делают видимым то, что три прятали: ошибка любой модели без сезонности определяется тем, какой месяц выпал в тест. Декабрьский фолд — 5 728 у наивной и 4 634 у эталона против 902 у базовой панельной модели и 1 143 у двухэтапной. Панельная модель к декабрю 2024-го уже видела один декабрь в обучении; двухэтапная знает его из федерального ряда, где декабрей шесть.</p>
+<div class="cell" data-tbl-cap="Наукаст (горизонт 1) по фолдам. В шапке — длина обучения в месяцах; тестовый месяц на один больше." data-execution_count="18">
+<div class="cell-output cell-output-display" data-execution_count="18">
+<div>
+
+
+<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
+<caption>Наукаст (горизонт 1) по фолдам. В шапке — длина обучения в месяцах; тестовый месяц на один больше.</caption>
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th">15</th>
+<th data-quarto-table-cell-role="th">16</th>
+<th data-quarto-table-cell-role="th">17</th>
+<th data-quarto-table-cell-role="th">18</th>
+<th data-quarto-table-cell-role="th">19</th>
+<th data-quarto-table-cell-role="th">20</th>
+<th data-quarto-table-cell-role="th">21</th>
+<th data-quarto-table-cell-role="th">22</th>
+<th data-quarto-table-cell-role="th">23</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">наивная: оставить как в прошлом месяце</th>
+<td>780</td>
+<td>741</td>
+<td>863</td>
+<td>984</td>
+<td>695</td>
+<td>2 425</td>
+<td>1 605</td>
+<td>680</td>
+<td>5 728</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">сезонно-наивная: как год назад</th>
+<td>4 791</td>
+<td>4 409</td>
+<td>4 751</td>
+<td>4 456</td>
+<td>4 459</td>
+<td>3 765</td>
+<td>4 451</td>
+<td>3 848</td>
+<td>4 705</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">эталон конкурса (Prophet по умолчанию)</th>
+<td>881</td>
+<td>932</td>
+<td>985</td>
+<td>1 133</td>
+<td>979</td>
+<td>2 283</td>
+<td>991</td>
+<td>1 132</td>
+<td>4 634</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">двухэтапная: одно число и разнос долями</th>
+<td>651</td>
+<td>657</td>
+<td>717</td>
+<td>661</td>
+<td>1 111</td>
+<td>2 068</td>
+<td>1 245</td>
+<td>908</td>
+<td>1 143</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">разнос известного агрегата: наукаст, дальше оракул</th>
+<td>553</td>
+<td>699</td>
+<td>778</td>
+<td>786</td>
+<td>843</td>
+<td>1 845</td>
+<td>1 412</td>
+<td>833</td>
+<td>1 221</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная модель, без внешних источников</th>
+<td>2 351</td>
+<td>689</td>
+<td>842</td>
+<td>905</td>
+<td>684</td>
+<td>828</td>
+<td>783</td>
+<td>733</td>
+<td>902</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">панельная + доли категорий</th>
+<td>1 937</td>
+<td>672</td>
+<td>941</td>
+<td>770</td>
+<td>636</td>
+<td>841</td>
+<td>738</td>
+<td>839</td>
+<td>855</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная + фактор + категории рядами</th>
+<td>537</td>
+<td>672</td>
+<td>729</td>
+<td>674</td>
+<td>674</td>
+<td>893</td>
+<td>1 303</td>
+<td>760</td>
+<td>1 307</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">Chronos-Bolt, дообученный</th>
+<td>3 078</td>
+<td>1 508</td>
+<td>901</td>
+<td>804</td>
+<td>614</td>
+<td>2 807</td>
+<td>1 791</td>
+<td>824</td>
+<td>5 225</td>
+</tr>
+</tbody>
+</table>
+
+</div>
+</div>
+</div>
+<p><strong>Известный агрегат почти ничего не добавляет на месяц вперёд.</strong> 996 против 1 018 у прогнозного варианта — двадцать два рубля. Движение страны на один месяц предсказуемо из её собственной сезонности, и знать его точно почти не нужно. Оставшаяся тысяча — межрядовый разброс, тот самый, который в разложении ошибки не двигала ни одна модель. Наукаст в узком смысле упирается в него же.</p>
+<p><strong>На длинных горизонтах панельные модели теряют обучающие примеры, и остаётся двухэтапная.</strong> На горизонте 6 базовая панельная модель при двенадцати месяцах обучения даёт 7 200 — это левый край развёртки по длине обучения, воспроизведённый на другом горизонте, — а перенос сезонности возвращает её к 1 845, ровно как развёртка и предсказывала. На горизонте 12 панельных моделей не остаётся вовсе, и <strong>двухэтапная модель — единственная, кто обходит оба ориентира: 1 642 против 2 691 у наивной и 2 722 у эталона</strong>, около сорока процентов к обоим. Оракул агрегата на том же горизонте даёт 1 356: даже точно зная движение страны на год вперёд, разнести его по территориям точнее, чем на 1 350 рублей, нельзя.</p>
+<div class="cell" data-tbl-cap="Длинные горизонты по фолдам. Обучение 12 месяцев — единственный origin, с которого горизонт 12 вообще возможен." data-execution_count="19">
+<div class="cell-output cell-output-display" data-execution_count="19">
+<div>
+
+
+<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
+<caption>Длинные горизонты по фолдам. Обучение 12 месяцев — единственный origin, с которого горизонт 12 вообще возможен.</caption>
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th">h = 6, обучение 12</th>
+<th data-quarto-table-cell-role="th">h = 6, обучение 18</th>
+<th data-quarto-table-cell-role="th">h = 12, обучение 12</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">наивная: оставить как в прошлом месяце</th>
+<td>3 253</td>
+<td>2 011</td>
+<td>2 691</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">сезонно-наивная: как год назад</th>
+<td>3 872</td>
+<td>4 281</td>
+<td>4 076</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">эталон конкурса (Prophet по умолчанию)</th>
+<td>2 399</td>
+<td>1 875</td>
+<td>2 722</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">двухэтапная: одно число и разнос долями</th>
+<td>1 835</td>
+<td>1 662</td>
+<td>1 642</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">разнос известного агрегата: наукаст, дальше оракул</th>
+<td>1 249</td>
+<td>1 560</td>
+<td>1 356</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная модель, без внешних источников</th>
+<td>7 200</td>
+<td>1 414</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">панельная + доли категорий</th>
+<td>6 756</td>
+<td>1 770</td>
+<td>—</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная + фактор + категории рядами</th>
+<td>1 845</td>
+<td>1 040</td>
+<td>—</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">Chronos-Bolt, дообученный</th>
+<td>—</td>
+<td>3 450</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+
+</div>
+</div>
+</div>
+<p>Сезонно-наивная модель здесь показывает, в чём именно состоит выигрыш. «Как год назад» на горизонте 12 — это 4 076, худший результат таблицы: 2024 год лежит на пятнадцать-двадцать процентов выше 2023-го, и повтор прошлого года систематически занижает. Двухэтапная модель — это тот же сезонный рисунок, только взятый из федерального ряда и умноженный на его же годовой рост. На двенадцати месяцах вся её сила в этом множителе.</p>
+<p><strong>Подтверждает ли таблица закон про длину ряда?</strong> Частично, и оговорка здесь обязательна: в такой конструкции горизонт и длина обучения движутся вместе. Горизонты 6 и 12 начинаются с двенадцати месяцев обучения, поэтому «разрыв растёт с горизонтом» и «разрыв растёт с укорочением истории» в первом фолде неразличимы. Чисто можно сказать три вещи. При равном обучении в восемнадцать месяцев переход от горизонта 3 к горизонту 6 увеличивает ошибку наивной модели с 1 218 до 2 011, лучшей панельной — с 845 до 1 040: разрыв между ними растёт с 373 до 971. При двенадцати месяцах перенос — единственное, что удерживает панельную модель от развала, и это прямое предсказание развёртки. И двухэтапная модель держится в коридоре 1 000–1 750 на всех четырёх горизонтах, тогда как наивная уходит с 1 611 на 2 691. На самых же длинных обучениях наукаста — 21, 22 и 23 месяца — связка с переносом проигрывает базовой панельной модели (1 303, 760, 1 307 против 783, 733, 902): правый край развёртки на другом горизонте.</p>
+<p><strong>Ошибка растёт не с расстоянием от origin, а с календарём.</strong> Средняя по горизонту цифра прячет это, поэтому ниже ошибка по каждому шагу от одного origin.</p>
+<div class="cell" data-tbl-cap="Ошибка по шагам горизонта от origin в декабре 2023 (обучение 12 месяцев, горизонт 12). Шаг 1 — январь 2024, шаг 12 — декабрь 2024." data-execution_count="20">
+<div class="cell-output cell-output-display" data-execution_count="20">
+<div>
+
+
+<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
+<caption>Ошибка по шагам горизонта от origin в декабре 2023 (обучение 12 месяцев, горизонт 12). Шаг 1 — январь 2024, шаг 12 — декабрь 2024.</caption>
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th">1</th>
+<th data-quarto-table-cell-role="th">2</th>
+<th data-quarto-table-cell-role="th">3</th>
+<th data-quarto-table-cell-role="th">4</th>
+<th data-quarto-table-cell-role="th">5</th>
+<th data-quarto-table-cell-role="th">6</th>
+<th data-quarto-table-cell-role="th">7</th>
+<th data-quarto-table-cell-role="th">8</th>
+<th data-quarto-table-cell-role="th">9</th>
+<th data-quarto-table-cell-role="th">10</th>
+<th data-quarto-table-cell-role="th">11</th>
+<th data-quarto-table-cell-role="th">12</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">наивная: оставить как в прошлом месяце</th>
+<td>7 036</td>
+<td>4 567</td>
+<td>1 820</td>
+<td>2 366</td>
+<td>2 083</td>
+<td>1 644</td>
+<td>1 360</td>
+<td>1 211</td>
+<td>2 656</td>
+<td>1 412</td>
+<td>1 436</td>
+<td>4 705</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">сезонно-наивная: как год назад</th>
+<td>2 316</td>
+<td>3 188</td>
+<td>3 776</td>
+<td>4 791</td>
+<td>4 409</td>
+<td>4 751</td>
+<td>4 456</td>
+<td>4 459</td>
+<td>3 765</td>
+<td>4 451</td>
+<td>3 848</td>
+<td>4 705</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">эталон конкурса (Prophet по умолчанию)</th>
+<td>4 455</td>
+<td>2 571</td>
+<td>1 340</td>
+<td>1 880</td>
+<td>2 063</td>
+<td>2 085</td>
+<td>2 135</td>
+<td>2 228</td>
+<td>3 971</td>
+<td>3 301</td>
+<td>3 724</td>
+<td>2 911</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">двухэтапная: одно число и разнос долями</th>
+<td>2 429</td>
+<td>833</td>
+<td>1 245</td>
+<td>1 043</td>
+<td>1 136</td>
+<td>1 091</td>
+<td>1 293</td>
+<td>1 765</td>
+<td>3 175</td>
+<td>2 332</td>
+<td>1 948</td>
+<td>1 418</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">разнос известного агрегата: наукаст, дальше оракул</th>
+<td>2 102</td>
+<td>827</td>
+<td>1 161</td>
+<td>1 104</td>
+<td>1 161</td>
+<td>1 142</td>
+<td>1 220</td>
+<td>1 306</td>
+<td>2 387</td>
+<td>1 374</td>
+<td>1 365</td>
+<td>1 119</td>
+</tr>
+</tbody>
+</table>
+
+</div>
+</div>
+</div>
+<div class="cell" data-tbl-cap="То же от origin в июне 2024 (обучение 18 месяцев, горизонт 6). Шаг 1 — июль, шаг 6 — декабрь." data-execution_count="21">
+<div class="cell-output cell-output-display" data-execution_count="21">
+<div>
+
+
+<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
+<caption>То же от origin в июне 2024 (обучение 18 месяцев, горизонт 6). Шаг 1 — июль, шаг 6 — декабрь.</caption>
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th"></th>
+<th data-quarto-table-cell-role="th">1</th>
+<th data-quarto-table-cell-role="th">2</th>
+<th data-quarto-table-cell-role="th">3</th>
+<th data-quarto-table-cell-role="th">4</th>
+<th data-quarto-table-cell-role="th">5</th>
+<th data-quarto-table-cell-role="th">6</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">наивная: оставить как в прошлом месяце</th>
+<td>984</td>
+<td>1 265</td>
+<td>1 404</td>
+<td>1 102</td>
+<td>1 341</td>
+<td>5 973</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">сезонно-наивная: как год назад</th>
+<td>4 456</td>
+<td>4 459</td>
+<td>3 765</td>
+<td>4 451</td>
+<td>3 848</td>
+<td>4 705</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">эталон конкурса (Prophet по умолчанию)</th>
+<td>1 133</td>
+<td>1 178</td>
+<td>2 015</td>
+<td>1 211</td>
+<td>1 448</td>
+<td>4 268</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">двухэтапная: одно число и разнос долями</th>
+<td>661</td>
+<td>1 169</td>
+<td>2 930</td>
+<td>1 946</td>
+<td>1 742</td>
+<td>1 526</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">разнос известного агрегата: наукаст, дальше оракул</th>
+<td>786</td>
+<td>1 212</td>
+<td>2 755</td>
+<td>1 617</td>
+<td>1 587</td>
+<td>1 403</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная модель, без внешних источников</th>
+<td>905</td>
+<td>1 112</td>
+<td>1 367</td>
+<td>1 279</td>
+<td>1 786</td>
+<td>2 034</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">панельная + доли категорий</th>
+<td>770</td>
+<td>1 153</td>
+<td>1 359</td>
+<td>1 164</td>
+<td>4 431</td>
+<td>1 745</td>
+</tr>
+<tr class="even">
+<th data-quarto-table-cell-role="th">панельная + фактор + категории рядами</th>
+<td>669</td>
+<td>783</td>
+<td>1 009</td>
+<td>946</td>
+<td>1 167</td>
+<td>1 663</td>
+</tr>
+<tr class="odd">
+<th data-quarto-table-cell-role="th">Chronos-Bolt, дообученный</th>
+<td>1 815</td>
+<td>2 545</td>
+<td>1 008</td>
+<td>2 726</td>
+<td>3 265</td>
+<td>9 342</td>
+</tr>
+</tbody>
+</table>
+
+</div>
+</div>
+</div>
+<p>От декабря 2023-го наивная модель ошибается на 7 036 в январе, на 1 211 в августе и на 4 705 в декабре: восьмой шаг вперёд точнее первого в шесть раз. Ошибка — функция не расстояния, а того, какой месяц прогнозируется: январь и декабрь — сезонные развороты, и модель без сезонности промахивается на них на любом расстоянии. У эталона та же форма плюс уход тренда осенью: 3 301–3 971 на шагах с девятого по одиннадцатый. У двухэтапной модели январь стоит 2 429, февраль-июль — около тысячи, а сентябрь — 3 175. Сентябрь тяжёл и для оракула, 2 387: в этом месяце сдвинулись сами доли территорий, единственное место в году, где двигалась межрядовая часть.</p>
+<p>От июня 2024-го, с восемнадцатью месяцами обучения, лучшая панельная модель растёт с шагом мягко — 669 на первом, 1 663 на шестом, и шестой шаг — снова декабрь. У наивной модели пять шагов держатся в пределах 984–1 404, а шестой даёт 5 973.</p>
+<p><strong>Что из этого следует.</strong> Для наукаста и горизонта 3 — панельная модель с переносом при коротком обучении и простая панельная при длинном, как и сказано в разделе о практике. Для горизонта 6 — та же связка, если обучения хотя бы двенадцать месяцев. Для горизонта 12 на этих данных единственный рабочий выбор — двухэтапная модель, и это не компромисс: она обходит эталон на сорок процентов и опирается на восемьдесят месяцев федеральной истории вместо двенадцати муниципальных. Рекомендация, стало быть, зависит от горизонта ровно в той же мере, что и от длины истории, и это одна и та же зависимость.</p>
+<p><strong>Дообученный Chronos на горизонтах.</strong> На наукасте — 1 950, хуже и наивной модели (1 611), и эталона (1 550): из девяти фолдов он выигрывает у наивной три, а декабрь промахивает почти так же, как она, — 5 225 против 5 728. На горизонте 3 — 1 772. Дальше дообучение упирается в длину обучения: ему нужно окно контекста, окно цели и окно валидации по времени, то есть обучение не короче трёх горизонтов. При восемнадцати месяцах и горизонте 6 дообучение пропускается, модель остаётся zero-shot и даёт 3 450 против 2 011 у наивной на том же фолде; при двенадцати месяцах и на горизонте 12 — отказ, и он в таблице прочерком.</p>
+<p>Тот же прогон вскрыл, что результат дообучения не воспроизводится между запусками: на трёх фолдах основного протокола он дал 1 772 против 1 606 в разделе о фундаментальных моделях — 2 043 / 1 131 / 2 142 против 2 027 / 1 203 / 1 587, на том же коде и тех же данных. Причина и что с ней сделано — в оговорке того раздела.</p>
+</section>
 <section id="перенос-с-длинных-рядов" class="level2">
 <h2 class="anchored" data-anchor-id="перенос-с-длинных-рядов">Перенос с длинных рядов</h2>
 <p>Двадцать четыре точки на ряд — корневое ограничение всей работы, и обойти его внутри панели нечем. Собственный муниципальный набор СберИндекса ровно такой же длины, более ранних данных по муниципалитетам не существует. Зато в том же каталоге лежат федеральные ряды за семь-девять лет, собранные той же методикой по тем же транзакциям.</p>
 <section id="чего-именно-не-хватает-короткому-ряду" class="level3">
 <h3 class="anchored" data-anchor-id="чего-именно-не-хватает-короткому-ряду">Чего именно не хватает короткому ряду</h3>
 <p>Видно на первом фолде. Обучение кончается мартом 2024-го, прогнозируем апрель-июнь. Признаки требуют шести точек истории, поэтому целевыми месяцами в обучении оказываются только июль-декабрь 2023-го и январь-март 2024-го.</p>
-<div id="aad49900" class="cell" data-execution_count="15">
-<div class="cell-output cell-output-display" data-execution_count="15">
+<div id="5e96f82f" class="cell" data-execution_count="22">
+<div class="cell-output cell-output-display" data-execution_count="22">
 <div>
 
 
@@ -3638,8 +4300,8 @@ overflow-x: visible;
 <section id="пять-конструкций-переноса-работают-две" class="level3">
 <h3 class="anchored" data-anchor-id="пять-конструкций-переноса-работают-две">Пять конструкций переноса, работают две</h3>
 <p>Длинные ряды федеральные: в месяце <em>t</em> значение одно и то же для всех 2028 муниципалитетов. Это определяет, что с ними можно сделать, а что нельзя.</p>
-<div id="09f5c43f" class="cell" data-execution_count="16">
-<div class="cell-output cell-output-display" data-execution_count="16">
+<div id="c56b79b9" class="cell" data-execution_count="23">
+<div class="cell-output cell-output-display" data-execution_count="23">
 <div>
 
 
@@ -3731,8 +4393,8 @@ overflow-x: visible;
 </div>
 </div>
 <p><strong>Как внешние регрессоры — хуже на треть.</strong> Темпы роста федеральных рядов, добавленные к признакам модели, ухудшают прогноз резко и однозначно. Причина структурная, а не алгоритмическая: признак, одинаковый для всех рядов в момент <em>t</em>, различает не муниципалитеты, а моменты времени, и на обучающей части фолда принимает ровно столько значений, сколько там моментов.</p>
-<div id="90c04249" class="cell" data-execution_count="17">
-<div class="cell-output cell-output-display" data-execution_count="17">
+<div id="2706b613" class="cell" data-execution_count="24">
+<div class="cell-output cell-output-display" data-execution_count="24">
 <div>
 
 
@@ -3884,8 +4546,8 @@ overflow-x: visible;
 <section id="как-это-выглядит-по-фолдам-и-по-длине-обучения" class="level3">
 <h3 class="anchored" data-anchor-id="как-это-выглядит-по-фолдам-и-по-длине-обучения">Как это выглядит по фолдам и по длине обучения</h3>
 <p>Все пять конструкций ведут себя одинаково по форме: на первом фолде помогают сильно, на втором слабее, на третьем мешают. Измеренная на десяти длинах обучения, эта зависимость оказалась главным результатом работы — она разобрана в разделе <a href="#результаты">Результаты</a> вместе с разложением ошибки, которое объясняет механизм, и с таблицей по фолдам. Здесь — только парные разницы к базовой модели внутри каждого фолда, потому что именно они показывают, что форма одинакова у всех источников, а не только у лучшего.</p>
-<div id="33e2061f" class="cell" data-execution_count="18">
-<div class="cell-output cell-output-display" data-execution_count="18">
+<div id="74fc5a50" class="cell" data-execution_count="25">
+<div class="cell-output cell-output-display" data-execution_count="25">
 <div>
 
 
@@ -4020,7 +4682,7 @@ overflow-x: visible;
 </section>
 <section id="точки-структурных-изменений-на-реальных-данных" class="level3">
 <h3 class="anchored" data-anchor-id="точки-структурных-изменений-на-реальных-данных">Точки структурных изменений на реальных данных</h3>
-<div id="8968a6fd" class="cell" data-execution_count="19">
+<div id="cd477261" class="cell" data-execution_count="26">
 <details class="code-fold">
 <summary>Показать код</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.changepoints <span class="im">import</span> detect_pelt</span>
@@ -4035,7 +4697,7 @@ overflow-x: visible;
 <span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>share <span class="op">=</span> pd.Series(counts <span class="op">/</span> wide.shape[<span class="dv">1</span>] <span class="op">*</span> <span class="dv">100</span>, index<span class="op">=</span>wide.index.strftime(<span class="st">&quot;%Y-%m&quot;</span>), name<span class="op">=</span><span class="st">&quot;доля МО, %&quot;</span>)</span>
 <span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>share[share <span class="op">&gt;</span> <span class="dv">5</span>].<span class="bu">round</span>(<span class="dv">1</span>).to_frame()</span></code></pre></div><button title="Скопировать текст" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
-<div class="cell-output cell-output-display" data-execution_count="19">
+<div class="cell-output cell-output-display" data-execution_count="26">
 <div>
 
 
@@ -4077,7 +4739,7 @@ overflow-x: visible;
 </div>
 </div>
 </div>
-<div id="850e0fd4" class="cell" data-execution_count="21">
+<div id="c430cdd4" class="cell" data-execution_count="28">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -4120,7 +4782,7 @@ overflow-x: visible;
 </tbody>
 </table>
 <p>Январь 2024 — месяц с сильнейшим изменением реальной ставки за весь период. Октябрь 2023 по величине изменения лишь одиннадцатый, но это точка разворота: ставка достигла минимума и пошла вверх.</p>
-<div id="f655a598" class="cell" data-execution_count="22">
+<div id="3b18cef2" class="cell" data-execution_count="29">
 <div class="cell-output cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -4146,14 +4808,15 @@ overflow-x: visible;
 <h3 class="anchored" data-anchor-id="дообучение-главное-что-меняет-вывод">Дообучение: главное, что меняет вывод</h3>
 <p>Отрицательный результат по zero-shot был бы преждевременным без очевидного следующего шага. Chronos-Bolt дообучен на нашей панели — одна модель на фолд, а не своя на каждый из 2028 рядов: две тысячи дообучений на пятнадцати точках каждое были бы не дообучением, а переобучением.</p>
 <p><strong>Валидация оказалась важнее скорости обучения.</strong> Сначала ранняя остановка делалась по отложенным рядам: муниципалитетов две тысячи, десятой части не жалко, а каждый из пятнадцати месяцев на счету. Потеря на отложенных рядах уверенно падала — а MAE на тестовых месяцах росла. Причина в том, что сдвиг здесь во времени, а не в сечении: отложенные ряды живут в тех же месяцах, что и обучающие, и увидеть, что модель заучивает декабрьско-январские переходы и потащит их в апрель, они не могут в принципе. После переноса валидации на последние месяцы обучающей части дообучение стало улучшать прогноз на всех трёх фолдах.</p>
+<p><strong>Оговорка о воспроизводимости, найденная позже.</strong> Повторное дообучение на тех же трёх фолдах — в прогоне по горизонтам, тем же кодом и на тех же данных — дало 1 772 против 1 606 здесь: 2 043 / 1 131 / 2 142 против 2 027 / 1 203 / 1 587. Причина в том, что сид задавался только выборке батчей, а dropout внутри модели в режиме обучения берёт глобальный генератор torch, который не сидировался. Исправлено — генератор сидируется целиком, включая MPS, — но числа в этом разделе получены до исправления, и перепрогон с сидом ещё предстоит. До него результат дообучения надо читать как одну реализацию с разбросом не меньше 166 рублей по среднему и 555 на отдельном фолде — то есть сопоставимым с самим выигрышем дообученной модели над наивной (246). Вывод «дообучение выводит на уровень эталона, но панельную модель не достаёт» этот разброс не меняет; вывод «на уровне эталона» точнее читать как «между наивной моделью и эталоном».</p>
 </section>
 <section id="второе-и-третье-семейства" class="level3">
 <h3 class="anchored" data-anchor-id="второе-и-третье-семейства">Второе и третье семейства</h3>
 <p>По одному семейству нельзя отличить «фундаментальные модели не годятся для таких рядов» от «не годится именно Chronos». Взяты ещё два, и архитектуры у всех трёх разные: Chronos-Bolt — энкодер-декодер на патчах поверх T5, TimesFM 2.5 — декодер на патчах с квантильным выходом, Moirai 1.1-R — маскированный энкодер с вероятностным выходом в виде выборки.</p>
 <p>Дообучения у этих двух нет намеренно: публичный интерфейс его не предоставляет, а самодельный цикл поверх внутренностей сравнивался бы не с той моделью, которую может воспроизвести проверяющий.</p>
 <p>У Moirai размер патча выбирается по <strong>отложенным месяцам обучающей части</strong> — origin сдвигается на горизонт назад, кандидаты сравниваются на месяцах, которых модель при этом не видит. Выбор оказался не формальностью: на первом фолде патч 8 даёт 3 138, патч 16 — 1 824, и по тесту его подбирать было бы нельзя.</p>
-<div id="90e9c35c" class="cell" data-execution_count="23">
-<div class="cell-output cell-output-display" data-execution_count="23">
+<div id="5eac4f7c" class="cell" data-execution_count="30">
+<div class="cell-output cell-output-display" data-execution_count="30">
 <div>
 
 
@@ -4302,8 +4965,8 @@ overflow-x: visible;
 <p><strong>Общероссийская</strong> — три месяца против двадцати одного по среднему по регионам. Значимость считается точным перестановочным тестом: троек из 24 месяцев ровно 2024 штуки, их можно перебрать все и получить точное p-значение вместо теории, которая на трёх наблюдениях не работает.</p>
 <p><strong>Региональная, главная</strong> — по панели регион × месяц с поправкой на месяц. Общероссийская проверка не отличает «новости предсказывают излом» от «в этот месяц и новостей много, и изломов много, потому что это декабрь». Поэтому и признак, и отклик центрируются по месяцу, и сравниваются регионы <strong>внутри одного месяца</strong>: если в регионе новостной фон необычен для этого месяца, чаще ли там ломаются ряды, чем у соседей в тот же месяц.</p>
 <p>Семь признаков на трёх сдвигах — двадцать одна гипотеза, порог Бонферрони 0,0024 объявлен до расчёта.</p>
-<div id="42ba4ab3" class="cell" data-execution_count="24">
-<div class="cell-output cell-output-display" data-execution_count="24">
+<div id="c37fb724" class="cell" data-execution_count="31">
+<div class="cell-output cell-output-display" data-execution_count="31">
 <div>
 
 
@@ -4381,8 +5044,8 @@ overflow-x: visible;
 <p>Три предыдущие проверки искали <strong>региональный</strong> новостной сигнал против <strong>муниципальных</strong> рядов. Разложение ошибки объяснило, почему они не могли ничего найти: межрядовая составляющая не двигается ничем, а всё, что двигается, — это общероссийское движение. Мы искали сигнал там, где изменчивости почти нет.</p>
 <p>Поэтому корпус свёрнут в один национальный ряд и проверен против того самого федерального агрегата, который прогнозирует первый этап двухэтапной модели. Добавлена отдельная тема денежно-кредитной политики — ставка, ЦБ, инфляция, регулятор: три найденных излома совпали с разворотами ставки, и если новости реагируют хоть на что-то, то на это.</p>
 <p>Восемь признаков, две проверки — объясняют ли новости остаток прогноза агрегата и отличается ли фон в месяцы изломов, — три горизонта и три сдвига. <strong>Сорок восемь гипотез, порог Бонферрони 0,00104, объявлен до расчёта.</strong></p>
-<div id="720e9779" class="cell" data-execution_count="25">
-<div class="cell-output cell-output-display" data-execution_count="25">
+<div id="cdf38ebc" class="cell" data-execution_count="32">
+<div class="cell-output cell-output-display" data-execution_count="32">
 <div>
 
 
@@ -4483,8 +5146,8 @@ overflow-x: visible;
 <section id="конструктивная-проверка-тоже-ничего-не-дала" class="level3">
 <h3 class="anchored" data-anchor-id="конструктивная-проверка-тоже-ничего-не-дала">Конструктивная проверка тоже ничего не дала</h3>
 <p>Тезис проверен не только гипотезами, но и моделью: <code>two_stage_news</code> правит прогноз агрегата новостями, причём признак выбирается перекрёстной проверкой с выбрасыванием по одному и только на месяцах до origin.</p>
-<div id="5adebccc" class="cell" data-execution_count="26">
-<div class="cell-output cell-output-display" data-execution_count="26">
+<div id="f239e64b" class="cell" data-execution_count="33">
+<div class="cell-output cell-output-display" data-execution_count="33">
 <div>
 
 
@@ -4531,8 +5194,8 @@ overflow-x: visible;
 <section id="сколько-теряется-на-заголовках" class="level3">
 <h3 class="anchored" data-anchor-id="сколько-теряется-на-заголовках">Сколько теряется на заголовках</h3>
 <p>Остаётся возражение: весь корпус — это заголовки, а тема в заголовке может не называться. Статья про решение по ставке вполне называется «Что будет с ипотекой». Проверено выборкой в двадцать тысяч статей, у которых скачаны тела.</p>
-<div id="6ecc9c7b" class="cell" data-execution_count="27">
-<div class="cell-output cell-output-display" data-execution_count="27">
+<div id="d8d141fd" class="cell" data-execution_count="34">
+<div class="cell-output cell-output-display" data-execution_count="34">
 <div>
 
 
@@ -4635,8 +5298,9 @@ overflow-x: visible;
 <h2 class="anchored" data-anchor-id="воспроизводимость">Воспроизводимость</h2>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> venv .venv</span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">.venv/bin/pip</span> install <span class="at">-r</span> requirements.txt</span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="ex">.venv/bin/python</span> <span class="at">-u</span> src/run.py <span class="at">--config</span> configs/full.yaml</span></code></pre></div><button title="Скопировать текст" class="code-copy-button"><i class="bi"></i></button></div>
-<p>Протокол оценки целиком вынесен в <code>configs/baseline.yaml</code>: ни горизонта, ни правил разбиения в коде моделей нет. Смена постановки — правка одного файла, а не переписывание.</p>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="ex">.venv/bin/python</span> <span class="at">-u</span> src/run.py <span class="at">--config</span> configs/full.yaml</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="ex">.venv/bin/python</span> <span class="at">-u</span> scripts/horizons.py</span></code></pre></div><button title="Скопировать текст" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Протокол оценки целиком вынесен в <code>configs/baseline.yaml</code>: ни горизонта, ни правил разбиения в коде моделей нет. Смена постановки — правка одного файла, а не переписывание. Пять горизонтов заданы так же — в <code>configs/horizons.yaml</code>; вторая команда считает их и сохраняет ошибку по каждому шагу горизонта.</p>
 <p>Данные лежат в репозитории: панель СберИндекса, справочник муниципальных образований и собранный новостной датасет. Повторение не требует ни обращения к сайтам, ни развёртывания базы данных.</p>
 <p>Каркас содержит автоматическую проверку на модели-двойники: если две модели дали совпадающие прогнозы на всех рядах, прогон сообщает об этом. Условие вида «включать сезонность при наличии 24 точек» на рядах длиной 24 не выполняется никогда, и модель молча становится копией соседней. Мы поймали такое трижды.</p>
 </section>
@@ -4644,6 +5308,7 @@ overflow-x: visible;
 <h2 class="anchored" data-anchor-id="ограничения-и-что-дальше">Ограничения и что дальше</h2>
 <p>Результаты — в начале документа. Здесь то, чего они не покрывают.</p>
 <p><strong>Двадцать четыре точки на ряд определяют всё.</strong> Отсюда и неидентифицируемость годовой сезонности, и потолок индивидуальных моделей, и невозможность отделить январскую сезонность от январского шока, и неустойчивость весов ансамбля. Если бы нам дали выбирать между более сложной моделью и более длинным рядом, мы бы выбрали ряд — и это, пожалуй, самый практически значимый вывод работы.</p>
+<p><strong>Год вперёд держится на одном фолде.</strong> На горизонте 12 из двадцати четырёх точек получается единственное разбиение с двенадцатью месяцами обучения. Сорок процентов выигрыша двухэтапной модели над эталоном там — одно число без интервала, и подтвердить его можно будет только на более длинной панели.</p>
 <p><strong>Трёх событий мало для причинности.</strong> Совпадение найденных изломов с разворотами денежной политики выглядит убедительно, но статистически на трёх точках ничего не доказывается. Это гипотеза, требующая проверки на более длинной истории.</p>
 <p><strong>Январь неотделим от сезонности.</strong> Ряд начинается в январе 2023, и обнаружить изменение в первом январе физически нельзя — детектируемый январь у нас ровно один.</p>
 <p><strong>Новостной сигнал разрешением не совпадает с задачей.</strong> Новости привязаны к региону, а прогнозируем мы муниципалитеты: тридцать с лишним территорий одной области получают один и тот же признак. Проверка на муниципальных источниках могла бы дать другой результат, но таких источников с датированными архивами мы не нашли.</p>
