@@ -19,6 +19,10 @@
 горизонта), а не по границам обучения `train_end`. Смену `split.horizon` в `run.py`
 или удлинение панели при том же числе фолдов она пропустит — штампа протокола
 в файлах нет. Прогон на намеренно другом протоколе пишется в другой `output.dir`.
+
+Здесь же правило отказа (`refused`, `failure_reason`) — одно на прогоны и отчёт.
+Модуль лёгкий, только pandas и стандартная библиотека: отчёт берёт правило отсюда,
+не поднимая `src.run` со всеми моделями.
 """
 from __future__ import annotations
 
@@ -113,6 +117,18 @@ def uneven_series(per_series: pd.DataFrame) -> pd.Series | None:
     """
     counts = per_series.groupby("model")["mo"].nunique()
     return counts if counts.nunique() > 1 else None
+
+
+def failure_reason(exc: Exception) -> str:
+    """Текст отказа с типом исключения. Голый `assert` в библиотеке падает без текста:
+    пустое поле уходит в CSV, читается обратно как NaN — и отказ выглядит успехом."""
+    return f"{type(exc).__name__}: {exc}"
+
+
+def refused(per_series: pd.DataFrame) -> pd.Series:
+    """Строки-отказы: с текстом отказа или без MAE. Строка без MAE — отказ, даже если
+    текст пуст: по одной колонке `error` такой отказ после CSV неотличим от успеха."""
+    return per_series["error"].notna() | per_series["mae"].isna()
 
 
 def _folds(frame: pd.DataFrame, by_horizon: bool) -> dict:

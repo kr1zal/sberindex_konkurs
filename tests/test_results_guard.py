@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src import results_guard  # noqa: E402
 from src.results_guard import check_plan, check_same_panel, uneven_series  # noqa: E402
 
 PATH = Path("results/per_series.csv")
@@ -177,6 +179,40 @@ class UnevenSeriesTest(unittest.TestCase):
             ignore_index=True,
         )
         self.assertIsNone(uneven_series(per_series))
+
+
+class RefusalRuleTest(unittest.TestCase):
+    """Правило отказа живёт в лёгком модуле: отчёт читает по нему файлы результатов,
+    и импорт правила не должен поднимать `src.run` со всеми моделями."""
+
+    def test_rule_imports_without_run_and_models(self):
+        # В отдельном процессе: в этом `src.run` уже загружен другими тестами.
+        code = (
+            "import sys; sys.path.insert(0, sys.argv[1]); "
+            "from src.results_guard import failure_reason, refused; "
+            "heavy = ('src.run', 'src.models', 'torch'); "
+            "print(' '.join(sorted(m for m in sys.modules if m.startswith(heavy))))"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "")
+
+    def test_run_keeps_exporting_the_same_rule(self):
+        # `src.run.refused` и импорт в scripts/horizons.py должны работать как раньше.
+        from src import run
+
+        self.assertIs(run.refused, results_guard.refused)
+        self.assertIs(run.failure_reason, results_guard.failure_reason)
+
+    def test_row_without_mae_or_with_text_is_a_refusal(self):
+        frame = pd.DataFrame({"mae": [1.0, float("nan"), 2.0], "error": [None, None, "ValueError: x"]})
+        self.assertEqual(results_guard.refused(frame).tolist(), [False, True, True])
+
+    def test_failure_reason_names_exception_type(self):
+        self.assertEqual(results_guard.failure_reason(AssertionError()), "AssertionError: ")
+        self.assertEqual(results_guard.failure_reason(ValueError("мало точек")), "ValueError: мало точек")
 
 
 if __name__ == "__main__":

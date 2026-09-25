@@ -24,7 +24,9 @@ from src.models.foundation import Chronos, ChronosPanel, Moirai, TimesFM  # noqa
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
 from src.models.naive import Drift, NaiveLast, SeasonalDrift, SeasonalNaive  # noqa: E402
 from src.models.two_stage import TwoStage, TwoStageNews  # noqa: E402
-from src.results_guard import check_plan, check_same_panel, uneven_series  # noqa: E402
+from src.results_guard import (  # noqa: E402
+    check_plan, check_same_panel, failure_reason, refused, uneven_series,
+)
 from src.split import rolling_origin  # noqa: E402
 
 REGISTRY = {
@@ -101,18 +103,6 @@ def _build_model(name: str):
     if name not in REGISTRY:
         raise KeyError(f"модель не зарегистрирована: {name}")
     return REGISTRY[name]()
-
-
-def failure_reason(exc: Exception) -> str:
-    """Текст отказа с типом исключения. Голый `assert` в библиотеке падает без текста:
-    пустое поле уходит в CSV, читается обратно как NaN — и отказ выглядит успехом."""
-    return f"{type(exc).__name__}: {exc}"
-
-
-def refused(per_series: pd.DataFrame) -> pd.Series:
-    """Строки-отказы: с текстом отказа или без MAE. Строка без MAE — отказ, даже если
-    текст пуст: по одной колонке `error` такой отказ после CSV неотличим от успеха."""
-    return per_series["error"].notna() | per_series["mae"].isna()
 
 
 def _failure(model_name: str, fold: int, col: str, reason: str) -> dict:
