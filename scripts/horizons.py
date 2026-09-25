@@ -47,7 +47,9 @@ from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.metrics import mae, mase, smape  # noqa: E402
 from src.models.two_stage import TwoStageKnownAggregate  # noqa: E402
 from src.results_guard import check_same_panel  # noqa: E402
-from src.run import GLOBAL_MODELS, _build_model, build_context  # noqa: E402
+from src.run import (  # noqa: E402
+    GLOBAL_MODELS, _build_model, build_context, failure_reason, refused,
+)
 from src.split import Fold, rolling_origin  # noqa: E402
 
 # Модели только этого прогона. В основной реестр не входят: оракул агрегата
@@ -77,12 +79,6 @@ def _failure(model_name: str, horizon: int, fold: Fold, col: str, reason: str) -
     }
 
 
-def _reason(exc: Exception) -> str:
-    """Текст отказа с типом исключения. Голый `assert` в библиотеке падает без текста,
-    пустое поле уходит в CSV, читается обратно как NaN — и отказ выглядит успехом."""
-    return f"{type(exc).__name__}: {exc}"
-
-
 def _score_series(task: tuple) -> tuple[list[dict], list[tuple]]:
     """Одна пара ряд-модель по всем фолдам одного горизонта. Верхнего уровня — чтобы пиклилось."""
     model_name, col, series, index, folds, horizon = task
@@ -96,7 +92,7 @@ def _score_series(task: tuple) -> tuple[list[dict], list[tuple]]:
         try:
             y_pred = np.asarray(model.fit(y_train).predict(horizon), dtype=float)
         except Exception as exc:  # одна упавшая подгонка не должна ронять прогон
-            rows.append(_failure(model_name, horizon, fold, col, _reason(exc)))
+            rows.append(_failure(model_name, horizon, fold, col, failure_reason(exc)))
             continue
         rows.append(_record(model_name, horizon, fold, col, y_train, y_test, y_pred))
         steps.append((fold.index, np.abs(y_test - y_pred)))
@@ -140,7 +136,7 @@ def evaluate_panel_model(
             model.fit(full, fold.train_end, horizon)
             predicted = model.predict(subset, fold.train_end, horizon)
         except Exception as exc:
-            reason = _reason(exc)
+            reason = failure_reason(exc)
             print(f"  h={horizon} фолд {fold.index} (обучение {fold.train_end}): ОТКАЗ — {reason[:100]}")
             rows.extend(_failure(model_name, horizon, fold, col, reason) for col in subset.columns)
             continue
@@ -215,11 +211,9 @@ def merge_into(
 
 def summarise(per_series: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Сводки по фолдам и по горизонтам. Отказ модели на фолде виден числом отказов."""
-    # Строка без MAE — отказ, даже если текст отказа пуст: по одной колонке `error`
-    # такой отказ после CSV неотличим от успеха (см. `_reason`).
-    refused = per_series["error"].notna() | per_series["mae"].isna()
-    ok = per_series.loc[~refused]
-    failed = per_series.loc[refused]
+    refusals = refused(per_series)  # правило одно на run.py и этот скрипт
+    ok = per_series.loc[~refusals]
+    failed = per_series.loc[refusals]
 
     def _summary(group_keys: list[str]) -> pd.DataFrame:
         grouped = ok.groupby(group_keys)

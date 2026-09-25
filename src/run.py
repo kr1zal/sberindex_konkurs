@@ -103,6 +103,18 @@ def _build_model(name: str):
     return REGISTRY[name]()
 
 
+def failure_reason(exc: Exception) -> str:
+    """Текст отказа с типом исключения. Голый `assert` в библиотеке падает без текста:
+    пустое поле уходит в CSV, читается обратно как NaN — и отказ выглядит успехом."""
+    return f"{type(exc).__name__}: {exc}"
+
+
+def refused(per_series: pd.DataFrame) -> pd.Series:
+    """Строки-отказы: с текстом отказа или без MAE. Строка без MAE — отказ, даже если
+    текст пуст: по одной колонке `error` такой отказ после CSV неотличим от успеха."""
+    return per_series["error"].notna() | per_series["mae"].isna()
+
+
 def _score_series(task: tuple) -> list[dict]:
     """Считает одну пару ряд-модель по всем фолдам. Верхнего уровня — чтобы пиклилось."""
     model_name, col, series, index, folds, horizon = task
@@ -118,7 +130,8 @@ def _score_series(task: tuple) -> list[dict]:
             y_pred = model.fit(y_train).predict(horizon)
         except Exception as exc:  # одна упавшая подгонка не должна ронять прогон
             out.append(
-                {"model": model_name, "fold": fold.index, "mo": col, "error": str(exc)[:120]}
+                {"model": model_name, "fold": fold.index, "mo": col,
+                 "error": failure_reason(exc)[:120]}
             )
             continue
 
@@ -205,7 +218,8 @@ def evaluate(
 def summarise(per_series: pd.DataFrame) -> pd.DataFrame:
     """Сводка по моделям. R² считается по объединённому пулу точек, а не усреднением по рядам:
     на трёх точках горизонта R² отдельного ряда неустойчив и его среднее ничего не значит."""
-    ok = per_series.loc[per_series["error"].isna()]
+    refusals = refused(per_series)
+    ok = per_series.loc[~refusals]
     grouped = ok.groupby("model")
     summary = pd.DataFrame(
         {
@@ -213,7 +227,7 @@ def summarise(per_series: pd.DataFrame) -> pd.DataFrame:
             "MASE": grouped["mase"].mean(),
             "sMAPE": grouped["smape"].mean(),
             "серий": grouped["mo"].nunique(),
-            "отказов": per_series.loc[per_series["error"].notna()].groupby("model").size(),
+            "отказов": per_series.loc[refusals].groupby("model").size(),
         }
     )
     summary["отказов"] = summary["отказов"].fillna(0).astype(int)
