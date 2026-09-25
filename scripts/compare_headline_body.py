@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.external import CANDIDATES, choose_model, load_aggregate  # noqa: E402
-from src.news import NATIONAL_TOPICS, repair_encoding, transliterate  # noqa: E402
+from src.news import NATIONAL_TOPICS, repair_encoding, topic_pattern, transliterate  # noqa: E402
 
 BODIES = ROOT / "data" / "news" / "bodies_sample.jsonl"
 HORIZONS = (1, 2, 3)
@@ -72,9 +72,11 @@ def read_jsonl(path: Path) -> pd.DataFrame:
 
 
 def topic_hits(text: pd.Series) -> pd.DataFrame:
+    """Попадания в темы тем же паттерном, что у признаков корпуса (`topic_pattern`):
+    иначе заголовки и тела сравнивались бы разными словарями."""
     normalised = text.fillna("").map(repair_encoding).map(transliterate)
     return pd.DataFrame({
-        topic: normalised.str.contains("|".join(roots), regex=True, na=False)
+        topic: normalised.str.contains(topic_pattern(roots), regex=True, na=False)
         for topic, roots in NATIONAL_TOPICS.items()
     })
 

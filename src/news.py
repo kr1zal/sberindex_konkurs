@@ -38,16 +38,36 @@ TRANSLIT = {
 # Темы, за которыми мы следим. Ключи — что это значит экономически, значения —
 # корни в латинице, потому что сравнение идёт после транслитерации.
 # Корни даны в нескольких вариантах написания намеренно. Движки сайтов
-# транслитерируют по-разному: «цены» встречается как tsen (6282 раза),
-# czen (2097) и cen (1748). Один вариант ловил бы шестую часть случаев.
+# транслитерируют по-разному: «цены» в начале слова встречается как czen
+# (5 986 заголовков), tsen (1 431) и cen (156); один czen терял бы 21% случаев.
+#
+# Корень — начало слова: границу перед ним ставит `topic_pattern`. Слова, которые
+# начинаются так же, но значат другое, отсекаются отрицательным просмотром в самом
+# корне: cen(?!tr) — не «центр», dolg(?!o) — не «долго», bank(?!et) — не «банкет».
 TOPICS = {
-    "ceny": ["cen", "czen", "tsen", "podorozh", "infl", "deshev", "tarif"],
+    "ceny": ["cen(?!tr)", "czen(?!tr)", "tsen(?!tr)", "podorozh", "infl", "deshev", "tarif"],
     "dohody": ["zarplat", "dohod", "pensi", "vyplat", "posobi"],
     "zanjatost": ["rabot", "uvol", "vakans", "sokrash", "bezrabot"],
     "proizvodstvo": ["zavod", "predprijati", "proizvodstv", "fabrik", "cekh", "ceh"],
-    "kredit": ["kredit", "ipotek", "bank", "dolg", "stavk"],
+    "kredit": ["kredit", "ipotek", "bank(?!et)", "dolg(?!o)", "stavk"],
     "torgovlja": ["magazin", "torgov", "rynok", "rynk", "otkry", "zakry"],
 }
+
+# Граница начала слова: перед корнем не строчная латинская буква. Этого достаточно,
+# потому что ищем по тексту после `transliterate`: она сначала понижает регистр,
+# потом переводит кириллицу в латиницу, и буква русского слова там — всегда a-z.
+WORD_START = r"(?<![a-z])"
+
+
+def topic_pattern(roots: list[str]) -> str:
+    r"""Регулярка темы — одна на все места, где ищутся темы.
+
+    Корень должен начинать слово. До 25.09 корни искались как подстроки в любом
+    месте слова, и тема ловила чужие слова: `stavk` — «выставку», «отставку»,
+    «поставку» и «доставку», это 61% попаданий темы ДКП; `cen` и `czen` — «центр».
+    Корни, уже начинающиеся с `\b` (`\bczb\b`), остаются как есть: граница у них своя.
+    """
+    return "|".join(root if root.startswith(r"\b") else WORD_START + root for root in roots)
 
 
 CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁ]")
@@ -117,8 +137,7 @@ def monthly_features(headlines: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     for topic, roots in TOPICS.items():
-        pattern = "|".join(roots)
-        headlines[f"t_{topic}"] = headlines["norm"].str.contains(pattern, regex=True, na=False)
+        headlines[f"t_{topic}"] = headlines["norm"].str.contains(topic_pattern(roots), regex=True, na=False)
 
     topic_cols = [f"t_{t}" for t in TOPICS]
     grouped = headlines.groupby(["domain", "region_name", "month"])
@@ -140,17 +159,28 @@ def monthly_features(headlines: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index()
 
 
-def save_datasets(headlines: pd.DataFrame, features: pd.DataFrame, out_dir: str | Path) -> None:
-    """Сохраняет оба слоя. Сжатие zstd выбрано не из вкуса: без него файл заголовков
+def save_datasets(
+    headlines: pd.DataFrame | None, features: pd.DataFrame, out_dir: str | Path,
+    national: pd.DataFrame | None = None,
+) -> None:
+    """Сохраняет слои. Сжатие zstd выбрано не из вкуса: без него файл заголовков
     весит 56 МБ и GitHub предупреждает о превышении рекомендуемого порога.
     Колонка с адресом оставлена намеренно — она даёт прослеживаемость каждого
-    заголовка до первоисточника, а это прямо работает на воспроизводимость."""
+    заголовка до первоисточника, а это прямо работает на воспроизводимость.
+
+    `headlines=None` — слой заголовков не переписывается. Так пересобирает признаки
+    `scripts/build_news_features.py`: заголовков она не меняет, а их файл записан
+    pandas 3, и перезапись из .venv поменяла бы его побайтно при тех же данных.
+    `national` — национальный ряд (`national_features`), пишется рядом."""
     out = Path(out_dir)
-    frame = headlines.copy()
-    for col in ("region_name", "domain"):
-        frame[col] = frame[col].astype("category")
-    frame.to_parquet(out / "headlines.parquet", compression="zstd", index=False)
+    if headlines is not None:
+        frame = headlines.copy()
+        for col in ("region_name", "domain"):
+            frame[col] = frame[col].astype("category")
+        frame.to_parquet(out / "headlines.parquet", compression="zstd", index=False)
     features.to_parquet(out / "monthly.parquet", index=False)
+    if national is not None:
+        national.to_parquet(out / "national.parquet", index=False)
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +233,7 @@ def national_features(headlines: pd.DataFrame) -> pd.DataFrame:
     topic_cols = []
     for topic, roots in NATIONAL_TOPICS.items():
         column = f"t_{topic}"
-        frame[column] = frame["norm"].str.contains("|".join(roots), regex=True, na=False)
+        frame[column] = frame["norm"].str.contains(topic_pattern(roots), regex=True, na=False)
         topic_cols.append(column)
 
     by_outlet = frame.groupby(["domain", "month"], observed=True).size().rename("n").reset_index()

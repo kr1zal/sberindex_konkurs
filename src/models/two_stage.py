@@ -220,6 +220,13 @@ class TwoStageNews(TwoStage):
         return rows
 
     @staticmethod
+    def _candidates(columns) -> list[str]:
+        """Кандидаты поправки — доли тем. Интенсивности среди них нет: она нормирована
+        средним и разбросом числа публикаций издания за весь период, то есть заглядывает
+        вперёд, и ни разу не выбиралась."""
+        return [c for c in columns if c.startswith("t_")]
+
+    @staticmethod
     def _loo_gain(x: np.ndarray, y: np.ndarray) -> float:
         """Насколько регрессия лучше нуля при проверке с выбрасыванием по одному.
 
@@ -252,7 +259,7 @@ class TwoStageNews(TwoStage):
         origin = index[train_end - 1]
         model_name = self.notes[0].split("модель ")[1].split(" |")[0]
         residuals = self._residuals(origin, horizon, model_name)
-        features = [c for c in self.news.columns if c.startswith("t_")] + ["intensity"]
+        features = self._candidates(self.news.columns)
 
         chosen, gains = {}, {}
         for step in range(1, horizon + 1):
