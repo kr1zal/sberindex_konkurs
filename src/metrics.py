@@ -134,3 +134,31 @@ def r2_and_gains(ok: pd.DataFrame, summary_mae: pd.Series) -> pd.DataFrame:
             base = pd.Series(own.max(), index=table.index)
         out[column] = (100.0 * (base - table["MAE"]) / base).to_numpy()
     return out
+
+
+def warn_uneven_pairs(ok: pd.DataFrame) -> None:
+    """Печатает строку `ВНИМАНИЕ:`, если модели посчитаны на разных множествах пар
+    ряд × фолд. Одна функция на сводки src/run.py и scripts/horizons.py.
+
+    `ok` — успешные строки. R² пул и MAE сводки считаются по ним, и модель, отказавшая
+    на части пар, стоит в той же таблице на других точках: разница в пуле или MAE
+    может оказаться разницей точек, а не моделей. Сравниваются сами множества пар,
+    а не их число — модели с равным числом пар могут стоять на разных парах. В файле
+    горизонтов (есть колонка `horizon`) модели сравниваются внутри горизонта: число
+    фолдов у горизонтов разное по построению. Сигнал, а не блокер — сводка пишется всё равно.
+    """
+    groups = ok.groupby("horizon") if "horizon" in ok.columns else [(None, ok)]
+    for horizon, part in groups:
+        pairs = {model: frozenset(zip(rows["mo"], rows["fold"])) for model, rows in part.groupby("model")}
+        if len(set(pairs.values())) <= 1:
+            continue
+        by_count: dict[int, list[str]] = {}
+        for model, own in sorted(pairs.items()):
+            by_count.setdefault(len(own), []).append(model)
+        where = "" if horizon is None else f"горизонт {int(horizon)}: "
+        print(
+            f"ВНИМАНИЕ: {where}модели посчитаны на разных парах ряд × фолд, и R² пул и MAE "
+            "у них — на разных точках. Пар у модели: "
+            + "; ".join(f"{n} — {', '.join(models)}" for n, models in sorted(by_count.items()))
+            + f"; общих у всех {len(frozenset.intersection(*pairs.values()))}."
+        )

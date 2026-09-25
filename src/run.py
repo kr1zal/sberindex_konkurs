@@ -18,7 +18,9 @@ sys.path.insert(0, str(ROOT))
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
 from src.external import ExternalFeatures, load_aggregate, load_industry  # noqa: E402
 from src.regions import attach_regions, load_dictionary  # noqa: E402
-from src.metrics import ROW_METRICS, SUMMARY_COLUMNS, r2_and_gains, row_metrics  # noqa: E402
+from src.metrics import (  # noqa: E402
+    ROW_METRICS, SUMMARY_COLUMNS, r2_and_gains, row_metrics, warn_uneven_pairs,
+)
 from src.models.classical import ARIMA, ETS, Theta  # noqa: E402
 from src.models.foundation import Chronos, ChronosPanel, Moirai, TimesFM  # noqa: E402
 from src.models.global_model import GlobalGBM, PanelContext  # noqa: E402
@@ -206,7 +208,8 @@ def summarise(per_series: pd.DataFrame) -> pd.DataFrame:
     всех рядов и фолдов модели и медианой по парам ряд × фолд, а не средним: на трёх точках
     горизонта R² пары ряд × фолд неустойчив, и его среднее ничего не значит. Выигрыш к Prophet
     и к наивной — по MAE. Пул, медиана и выигрыш — `src.metrics.r2_and_gains`, одна
-    функция со сводками scripts/horizons.py."""
+    функция со сводками scripts/horizons.py. Модели, посчитанные на разных парах ряд × фолд,
+    отмечаются строкой `ВНИМАНИЕ:` (`src.metrics.warn_uneven_pairs`)."""
     refusals = refused(per_series)
     ok = per_series.loc[~refusals]
     grouped = ok.groupby("model")
@@ -226,6 +229,7 @@ def summarise(per_series: pd.DataFrame) -> pd.DataFrame:
     summary = summary.join(r2_and_gains(ok, summary["MAE"]))[SUMMARY_COLUMNS]
 
     _warn_identical(ok)
+    warn_uneven_pairs(ok)
     return summary.sort_values("MAE")
 
 

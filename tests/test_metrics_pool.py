@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import unittest
 from pathlib import Path
@@ -16,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.metrics import (  # noqa: E402
-    GAINS, R2_MEDIAN, R2_POOL, ROW_METRICS, r2, r2_and_gains, row_metrics,
+    GAINS, R2_MEDIAN, R2_POOL, ROW_METRICS, r2, r2_and_gains, row_metrics, warn_uneven_pairs,
 )
 
 PROPHET, NAIVE = "к Prophet, %", "к наивной, %"
@@ -178,6 +180,56 @@ class GainsTest(unittest.TestCase):
         table = r2_and_gains(pd.DataFrame(columns=["model", "mae"]), mae)
         self.assertTrue(np.isnan(table.loc["refused", PROPHET]))
         self.assertTrue(np.isnan(table.loc["refused", R2_POOL]))
+
+
+class UnevenPairsTest(unittest.TestCase):
+    """R² пул и MAE двух моделей сравнимы, только если они посчитаны на одних
+    и тех же парах ряд × фолд."""
+
+    @staticmethod
+    def printed(ok: pd.DataFrame) -> str:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            warn_uneven_pairs(ok)
+        return out.getvalue()
+
+    @staticmethod
+    def lose(ok: pd.DataFrame, model: str, mo: str, fold: int, **where) -> pd.DataFrame:
+        mask = (ok["model"] == model) & (ok["mo"] == mo) & (ok["fold"] == fold)
+        for column, value in where.items():
+            mask &= ok[column] == value
+        return ok.loc[~mask]
+
+    def test_same_pairs_print_nothing(self):
+        self.assertEqual(self.printed(rows(windows())), "")
+
+    def test_model_that_lost_a_pair_is_named_with_its_count(self):
+        ok = self.lose(rows(windows()), "best", "мо_0", 0)
+        text = self.printed(ok)
+        self.assertTrue(text.startswith("ВНИМАНИЕ:"))
+        self.assertIn("11 — best", text)  # 4 ряда × 3 фолда без одной пары
+        self.assertIn("12 — naive_last, prophet", text)
+        self.assertEqual(text.count("\n"), 1)  # одна строка
+
+    def test_same_count_on_different_pairs_is_still_reported(self):
+        # Число пар совпадает, а сами пары — нет: точки пула всё равно разные.
+        ok = self.lose(self.lose(rows(windows()), "best", "мо_0", 0), "prophet", "мо_1", 2)
+        text = self.printed(ok)
+        self.assertTrue(text.startswith("ВНИМАНИЕ:"))
+        self.assertIn("11 — best, prophet", text)
+        self.assertIn("общих у всех 10", text)
+
+    def test_pairs_are_compared_within_a_horizon(self):
+        # Число фолдов у горизонтов разное по построению — это не расхождение.
+        h1, h3 = rows(windows(n_folds=9)), rows(windows(n_folds=3))
+        h1.insert(1, "horizon", 1)
+        h3.insert(1, "horizon", 3)
+        ok = pd.concat([h1, h3], ignore_index=True)
+        self.assertEqual(self.printed(ok), "")
+        text = self.printed(self.lose(ok, "prophet", "мо_1", 2, horizon=3))
+        self.assertTrue(text.startswith("ВНИМАНИЕ: горизонт 3:"))
+        self.assertIn("11 — prophet", text)
+        self.assertNotIn("горизонт 1", text)
 
 
 if __name__ == "__main__":

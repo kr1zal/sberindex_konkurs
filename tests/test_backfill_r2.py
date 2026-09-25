@@ -230,7 +230,7 @@ class BackfillTest(unittest.TestCase):
         out = self.run_backfill()
         summary = pd.read_csv(self.results / "horizons_summary.csv")
         folds = pd.read_csv(self.results / "horizons_folds.csv")
-        self.assertEqual(list(summary.columns), ["horizon", "model", *SUMMARY, "фолдов"])
+        self.assertEqual(list(summary.columns), ["horizon", "model", *SUMMARY, "фолдов", "фолдов зачтено"])
         self.assertEqual(list(folds.columns), ["horizon", "model", "fold", "train_end", *SUMMARY])
         for new, old, keys in ((summary, old_summary, ["horizon", "model"]),
                                (folds, old_folds, ["horizon", "model", "fold", "train_end"])):

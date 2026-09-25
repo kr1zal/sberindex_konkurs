@@ -44,7 +44,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.data import build_matrix, load_panel, sample_series  # noqa: E402
-from src.metrics import ROW_METRICS, SUMMARY_COLUMNS, r2_and_gains, row_metrics  # noqa: E402
+from src.metrics import (  # noqa: E402
+    ROW_METRICS, SUMMARY_COLUMNS, r2_and_gains, row_metrics, warn_uneven_pairs,
+)
 from src.models.two_stage import TwoStageKnownAggregate  # noqa: E402
 from src.results_guard import check_plan, check_same_panel, read_results  # noqa: E402
 from src.run import (  # noqa: E402
@@ -219,10 +221,15 @@ def summarise(per_series: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     (`src.metrics.r2_and_gains`): R² пул — по всем рядам и фолдам модели на горизонте
     (в пофолдовой — на фолде), выигрыш к Prophet и к наивной — внутри горизонта
     (в пофолдовой — внутри горизонта и фолда). В файле, посчитанном до слагаемых пула,
-    колонок r2 и sse нет, и R²-колонки — NaN."""
+    колонок r2 и sse нет, и R²-колонки — NaN.
+
+    `фолдов` — плановое число фолдов пары горизонт × модель, `фолдов зачтено` — из скольких
+    фолдов её MAE, то есть с успешными строками. Модели, посчитанные внутри горизонта
+    на разных парах ряд × фолд, отмечаются строкой `ВНИМАНИЕ:` (`src.metrics.warn_uneven_pairs`)."""
     refusals = refused(per_series)  # правило одно на run.py и этот скрипт
     ok = per_series.loc[~refusals]
     failed = per_series.loc[refusals]
+    warn_uneven_pairs(ok)  # на уровне горизонта: пофолдовое сравнение в него входит
 
     def _summary(group_keys: list[str]) -> pd.DataFrame:
         grouped = ok.groupby(group_keys)
@@ -241,10 +248,12 @@ def summarise(per_series: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     by_fold = _summary(["horizon", "model", "fold", "train_end"])
     by_horizon = _summary(["horizon", "model"])
-    by_horizon["фолдов"] = (
-        by_fold.groupby(["horizon", "model"])["fold"].nunique()
-        .reindex(pd.MultiIndex.from_frame(by_horizon[["horizon", "model"]])).to_numpy()
-    )
+    keys = pd.MultiIndex.from_frame(by_horizon[["horizon", "model"]])
+    by_horizon["фолдов"] = by_fold.groupby(["horizon", "model"])["fold"].nunique().reindex(keys).to_numpy()
+    # Плановое число прячет отказ целого фолда: у модели, отказавшей на первом фолде h=6,
+    # «фолдов» 2, а MAE посчитана по одному.
+    counted = by_fold.loc[by_fold["серий"] > 0].groupby(["horizon", "model"])["fold"].nunique()
+    by_horizon["фолдов зачтено"] = counted.reindex(keys).fillna(0).astype(int).to_numpy()
     return by_fold.sort_values(["horizon", "fold", "MAE"]), by_horizon.sort_values(["horizon", "MAE"])
 
 

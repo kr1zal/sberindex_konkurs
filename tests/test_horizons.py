@@ -214,7 +214,39 @@ class SummariseTest(unittest.TestCase):
     def test_columns_in_order(self):
         by_fold, by_horizon = horizons.summarise(per_series("m", 3, [0, 1, 2]))
         self.assertEqual(list(by_fold.columns), ["horizon", "model", "fold", "train_end", *SUMMARY])
-        self.assertEqual(list(by_horizon.columns), ["horizon", "model", *SUMMARY, "фолдов"])
+        self.assertEqual(list(by_horizon.columns), ["horizon", "model", *SUMMARY, "фолдов", "фолдов зачтено"])
+
+    def test_counted_folds_leave_out_a_fold_of_only_refusals(self):
+        # chronos_ft на h=6: первый фолд с обучением 12 — отказ на всех рядах. «фолдов»
+        # остаётся плановым числом, «фолдов зачтено» — из скольких фолдов его MAE.
+        frame = pd.concat([per_series("naive_last", 6, [0, 1]), per_series("chronos_ft", 6, [0, 1]),
+                           per_series("global_gbm", 6, [0, 1])], ignore_index=True)
+        frame["error"] = frame["error"].astype(object)
+        refusals = ((frame["model"] == "chronos_ft") & (frame["fold"] == 0)) | (frame["model"] == "global_gbm")
+        frame.loc[refusals, ["mae", "smape", "mase"]] = np.nan
+        frame.loc[refusals, "error"] = "ValueError: нет обучающих окон"
+        with contextlib.redirect_stdout(io.StringIO()):  # пары у моделей разные — будет ВНИМАНИЕ
+            _, by_horizon = horizons.summarise(frame)
+        table = by_horizon.set_index("model")
+        self.assertEqual(table.loc["chronos_ft", "фолдов"], 2)
+        self.assertEqual(table.loc["chronos_ft", "фолдов зачтено"], 1)
+        self.assertEqual(table.loc["naive_last", "фолдов зачтено"], 2)
+        self.assertEqual(table.loc["global_gbm", "фолдов"], 2)
+        self.assertEqual(table.loc["global_gbm", "фолдов зачтено"], 0)
+        self.assertEqual(by_horizon["фолдов зачтено"].dtype.kind, "i")
+
+    def test_models_on_different_pairs_within_a_horizon_are_flagged(self):
+        frame = pd.concat([per_series("naive_last", 3, [0, 1, 2]), per_series("m", 3, [0, 1, 2]),
+                           per_series("naive_last", 1, [0, 1]), per_series("m", 1, [0, 1])],
+                          ignore_index=True)
+        lost = (frame["model"] == "m") & (frame["horizon"] == 3) & (frame["mo"] == "мо_0") & (frame["fold"] == 1)
+        frame.loc[lost, "mae"] = np.nan
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            horizons.summarise(frame)
+        self.assertTrue(out.getvalue().startswith("ВНИМАНИЕ: горизонт 3:"))
+        self.assertIn("8 — m", out.getvalue())
+        self.assertNotIn("горизонт 1", out.getvalue())
 
     def test_r2_pool_per_horizon_and_per_fold(self):
         wide = matrix(SERIES)
@@ -390,7 +422,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(steps_on_disk.loc[steps_on_disk["model"] == "drift", "mae"].unique().tolist(), [5.0])
 
         summary = pd.read_csv(self.root / "results" / "horizons_summary.csv")
-        self.assertEqual(list(summary.columns), ["horizon", "model", *SUMMARY, "фолдов"])
+        self.assertEqual(list(summary.columns), ["horizon", "model", *SUMMARY, "фолдов", "фолдов зачтено"])
         self.assertEqual(sorted(zip(summary["model"], summary["horizon"])),
                          [("drift", 3), ("naive_last", 1), ("naive_last", 3)])
         self.assertTrue((self.root / "results" / "horizons_folds.csv").exists())

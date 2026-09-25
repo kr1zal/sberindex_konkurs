@@ -231,6 +231,18 @@ class SummariseTest(unittest.TestCase):
         self.assertEqual(summary.loc["naive_last", "R² медиана"], 0.0)
         self.assertEqual(summary.loc["drift", "R² медиана"], float(np.median(np.linspace(-3.0, 0.5, 15))))
 
+    def test_models_on_different_pairs_are_flagged(self):
+        # drift отказал на одной паре: его пул и MAE — на других точках, чем у наивной.
+        per_series = pd.concat([frame(["naive_last"], SERIES), frame(["drift"], SERIES, mae=2.0)],
+                               ignore_index=True)
+        lost = (per_series["model"] == "drift") & (per_series["mo"] == "мо_0") & (per_series["fold"] == 0)
+        per_series.loc[lost, "mae"] = np.nan
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            run.summarise(per_series)
+        self.assertIn("ВНИМАНИЕ:", out.getvalue())
+        self.assertIn("14 — drift", out.getvalue())
+
     def test_row_without_mae_counts_as_refusal_even_with_empty_error(self):
         frame = pd.DataFrame({
             "model": ["m", "m"], "fold": [0, 0], "mo": ["мо_0", "мо_1"],
