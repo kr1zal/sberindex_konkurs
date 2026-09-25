@@ -135,11 +135,14 @@ def num(value: float, digits: int, sign: bool = False) -> str:
     """Число с `digits` знаками для текста и таблиц: разряды и запятая как в `rub`, минус «−»,
     с `sign` — «+» у положительных; NaN — прочерк: это отказ или метрика, которой в файле нет.
 
-    Ноль знака не получает: «+0,0» у эталона против самого себя читалось бы как выигрыш.
+    Знак решается по уже округлённому числу: что округлилось до нуля, печатается нулём
+    без знака. Иначе «+0,0» у эталона против самого себя читалось бы как выигрыш,
+    а «−0,000» — как проигрыш.
     """
     if not np.isfinite(value):
         return "—"
-    text = format(value, ("+" if sign and value != 0 else "") + f",.{digits}f")
+    value = round(float(value), digits) + 0.0  # + 0.0 превращает −0.0 в 0.0
+    text = format(value, ("+" if sign and value > 0 else "") + f",.{digits}f")
     return text.replace(",", "\u00a0").replace(".", ",").replace("-", "−")
 
 if "разброс" in _dec:
@@ -790,13 +793,22 @@ def _ranked(column: str) -> list:
     """Модели от лучшей к худшей по колонке R²: чем больше, тем лучше."""
     return list(_r2[column].sort_values(ascending=False).index)
 
+def _on_folds(k: int, n: int) -> str:
+    """«на 2 фолдах из 3» с согласованием; «все» и «ни одного» — словами."""
+    if k == 0:
+        return "ни на одном фолде"
+    if k == n:
+        return "на всех фолдах"
+    return f"на {k} {'фолде' if k == 1 else 'фолдах'} из {n}"
+
 if _r2_ready:
     _by_mae = list(_r2["MAE"].sort_values().index)
     _r2_n = _r2_rows.groupby("model")["r2"].count()
     _pairs = f"по {num(_r2_n.iloc[0], 0)} парам" if _r2_n.nunique() == 1 else "по парам"
-    if _ranked("R² среднее") == _by_mae[::-1]:
+    _mean_order = _ranked("R² среднее")
+    if _mean_order == _by_mae[::-1]:
         _mean_says = "ставит три модели в порядке, обратном MAE"
-    elif _ranked("R² среднее") != _by_mae:
+    elif _mean_order != _by_mae:
         _mean_says = "расставляет модели не так, как MAE"
     else:
         _mean_says = "ставит модели в том же порядке, что MAE"
@@ -822,6 +834,27 @@ if _r2_ready:
             f"в среднем {num(_flat_mean['naive_last'], 0)}, у лучшей "
             f"{num(_flat_mean[_r2_best], 0)}. "
         )
+    # Ровные окна лежат почти все на первом фолде, и перевёрнутый порядок — та же перемена
+    # мест, что в таблице по фолдам, а не свойство «десятой части пар» вообще.
+    _first = _r2_rows["fold"].min()
+    _best_rows = _r2_rows[_r2_rows["model"] == _r2_best]
+    _flat_best = _best_rows[_cv[_best_rows.index] <= _flat_cut]
+    _first_share = (_best_rows.loc[_best_rows["fold"] == _first, "r2"].sum()
+                    / _best_rows["r2"].sum())
+    _later = _r2_rows[_r2_rows["fold"] != _first].groupby("model")["r2"].mean()
+    if _mean_order != _by_mae and _best_rows["r2"].sum() < 0 and _first_share >= 0.5:
+        _later_says = ("идёт в порядке MAE"
+                       if list(_later.sort_values(ascending=False).index) == _by_mae
+                       else "всё равно расходится с MAE")
+        _flat_text += (
+            f"Переворот — {'почти целиком' if _first_share >= 0.9 else 'в основном'} эффект "
+            f"первого, календарно спокойного фолда (см. [таблицу по фолдам]"
+            f"(#таблица-по-фолдам-среднее-скрывает-полную-перемену-мест)): на нём лежат "
+            f"{num((_flat_best['fold'] == _first).sum(), 0)} из {num(len(_flat_best), 0)} "
+            f"ровных пар и {num(100 * _first_share, 1)}% суммы R² лучшей модели, а без него "
+            f"среднее {_later_says}: {num(_later['naive_last'], 2)} у наивной, "
+            f"{num(_later['prophet'], 2)} у эталона и {num(_later[_r2_best], 2)} у лучшей. "
+        )
     if _ranked("R² медиана") == _by_mae:
         _median_says = "Медиана к таким парам нечувствительна и порядок по MAE сохраняет"
     else:
@@ -839,7 +872,7 @@ if _r2_ready:
                   if _r2["R² пул"].min() > 0.9 else "R² пул")
     _r2_gap = _r2.loc[_r2_best, "R² пул"] - _r2.loc["naive_last", "R² пул"]
     _r2_gain = _r2.loc[_r2_best, "к наивной, %"]
-    _squeeze = (f" у лучшей модели он выше наивного на {num(_r2_gap, 3)} "
+    _squeeze = (f" у лучшей модели он выше, чем у наивной, на {num(_r2_gap, 3)} "
                 f"при MAE ниже на {num(_r2_gain, 1)}%")
     if _r2_gap > 0 and _r2_gain > 0 and _ranked("R² пул") == _by_mae:
         _level_text = f", и порядок по MAE пул сохраняет, но сжимает:{_squeeze}."
@@ -847,15 +880,41 @@ if _r2_ready:
         _level_text = f", и разница моделей в пуле сжата:{_squeeze}."
     else:
         _level_text = "."
+    # Вердикт — и по строке сводки, и по фолдам: «модель лучше» в этом проекте проверяется
+    # пофолдово. Пул и медиана фолда считаются из тех же строк и так же, как в сводке.
     _beats = {c: _r2.loc[_r2_best, c] > _r2.loc["prophet", c] for c in ("R² пул", "R² медиана")}
-    if all(_beats.values()):
-        _verdict = "Лучшая модель обходит эталон и по пулу, и по медиане."
-    elif _beats["R² пул"]:
-        _verdict = "Лучшая модель обходит эталон по пулу, но не по медиане."
-    elif _beats["R² медиана"]:
-        _verdict = "Лучшая модель обходит эталон по медиане, но не по пулу."
-    else:
-        _verdict = "По R² лучшая модель эталон не обходит — ни пулом, ни медианой."
+    _parts = (_r2_rows[_r2_rows["sse"].notna()]
+              .groupby(["fold", "model"])[["sse", "n", "y_sum", "y_sq"]].sum())
+    _fold_pool = (1 - _parts["sse"] / (_parts["y_sq"] - _parts["y_sum"] ** 2 / _parts["n"])).unstack()
+    _fold_median = _r2_rows.groupby(["fold", "model"])["r2"].median().unstack()
+    _fold_mae = _r2_rows.groupby(["fold", "model"])["mae"].mean().unstack()
+    _folds = list(_fold_pool.index)
+
+    def _ahead(fold, model, other) -> bool:
+        """`model` впереди `other` на фолде по обеим сводкам R² сразу."""
+        return bool(_fold_pool.loc[fold, model] > _fold_pool.loc[fold, other]
+                    and _fold_median.loc[fold, model] > _fold_median.loc[fold, other])
+
+    _r2_won = [f for f in _folds if _ahead(f, _r2_best, "prophet")]
+    _mae_won = [f for f in _folds if _fold_mae.loc[f, _r2_best] < _fold_mae.loc[f, "prophet"]]
+    _together = {(True, True): "и по пулу, и по медиане", (True, False): "по пулу, но не по медиане",
+                 (False, True): "по медиане, но не по пулу"}.get((_beats["R² пул"], _beats["R² медиана"]))
+    _verdict = (f"По всем фолдам вместе лучшая модель обходит эталон {_together}" if _together
+                else "По всем фолдам вместе лучшая модель эталон по R² не обходит — ни пулом, ни медианой")
+    _verdict += (f"; по отдельности{'' if all(_beats.values()) else ' по обеим сводкам сразу'} — "
+                 f"{_on_folds(len(_r2_won), len(_folds))}")
+    _verdict += (", как и по MAE" if _r2_won == _mae_won
+                 else f", а по MAE — {_on_folds(len(_mae_won), len(_folds))}")
+    _f0 = _folds[0]
+    if [f for f in _folds if f not in _r2_won] == [_f0] and _ahead(_f0, "prophet", _r2_best):
+        _verdict += (
+            f": на первом, с самым коротким обучением, эталон впереди "
+            f"{'и по R²' if _f0 not in _mae_won else 'по R²'} — пул "
+            f"{num(_fold_pool.loc[_f0, 'prophet'], 3)} против {num(_fold_pool.loc[_f0, _r2_best], 3)}, "
+            f"медиана {num(_fold_median.loc[_f0, 'prophet'], 2)} против "
+            f"{num(_fold_median.loc[_f0, _r2_best], 2)}"
+        )
+    _verdict += "."
 
     _r2_text = Markdown(
         f"**Почему R² сводится пулом и медианой, а не средним.** Среднее R² {_pairs} "
@@ -865,8 +924,8 @@ if _r2_ready:
         f"ниже нуля. {_flat_text}"
         f"{_median_says}: {_named('R² медиана', 2)}.\n\n"
         f"{_pool_says}: {_named('R² пул', 3)}. SST пула считается вокруг среднего всех "
-        f"тестовых точек, а уровни расходов по муниципалитетам различаются на порядок: "
-        f"на разницу уровней между муниципалитетами приходится {num(100 * _between, 1)}% "
+        f"тестовых точек: на разницу уровней между муниципалитетами приходится "
+        f"{num(100 * _between, 1)}% "
         f"этой суммы, на движение внутри тестовых окон — {num(100 * _windows, 1)}%, "
         f"остальное — сдвиг уровня ряда от фолда к фолду. Разницу уровней объясняет уже "
         f"последнее известное значение{_level_text} "
@@ -1028,8 +1087,8 @@ macOS нет, и запуск у проверяющего упирается в 
 скользящий origin с расширяющимся окном, шаг равен горизонту — применена
 к каждому горизонту отдельно (`configs/horizons.yaml`, `scripts/horizons.py`).
 Столбец горизонта 3 в таблицах ниже — это ровно те три фолда, что и в остальном
-отчёте. Числа совпадают с ним до рубля у всех моделей, которые есть и там, кроме
-дообученного Chronos: его разброс между прогонами разобран ниже в этом разделе.
+отчёте. Числа в нём совпадают с остальным отчётом до рубля у всех моделей, которые есть
+и там, кроме дообученного Chronos: его разброс между прогонами разобран ниже в этом разделе.
 
 **Что здесь называется наукастом.** Внутримесячных данных в панели нет, поэтому
 наукаст месяца t — это прогноз по данным до t−1, то есть горизонт 1. В узком
@@ -1125,7 +1184,7 @@ _hz_wide("MASE", lambda v: f"{v:.2f}".replace(".", ",")) if _hz_ready else _hz
 
 ```{python}
 #| echo: false
-#| tbl-cap: "R² пул по горизонтам: один R² по всем тестовым точкам горизонта, SST — вокруг среднего пула. Прочерк — модель на этом горизонте не имеет обучающих примеров."
+#| tbl-cap: "R² пул по горизонтам: один R² по всем тестовым точкам горизонта, SST — вокруг среднего пула. Прочерк — у модели на этом горизонте нет обучающих примеров или её строки посчитаны до появления слагаемых R² и ещё не перегнаны."
 # Файл горизонтов посчитан до слагаемых пула: колонка есть, но пуста. Пустой таблицы
 # не показываем — до перепрогона вместо неё фраза.
 _hz_r2 = _hz_ready and "R² пул" in _hz and bool(_hz["R² пул"].notna().any())

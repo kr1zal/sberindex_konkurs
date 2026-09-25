@@ -141,8 +141,12 @@ _ru = {
 
 def _num(value, digits, sign=False):
     """Как `num` отчёта: разряды, запятая и минус «−» — на одном числе, а не заменой
-    во всей строке; «+» у выигрыша, но не у нуля — у эталона против самого себя."""
-    text = format(value, ("+" if sign and value != 0 else "") + f",.{digits}f")
+    во всей строке; «+» у выигрыша. Знак — по округлённому числу, чтобы не было «+0,0»
+    и «−0,000»; NaN — прочерк."""
+    if not np.isfinite(value):
+        return "—"
+    value = round(float(value), digits) + 0.0  # + 0.0 превращает −0.0 в 0.0
+    text = format(value, ("+" if sign and value > 0 else "") + f",.{digits}f")
     return text.replace(",", "\u00a0").replace(".", ",").replace("-", "−")
 
 _sm = pd.read_csv("../results/summary.csv", index_col=0).loc[list(_ru)].sort_values("MAE")
