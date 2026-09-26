@@ -418,7 +418,7 @@ def _cp_col(mode, column, digits, sign=False):
 
 _cp_tab = pd.DataFrame({
     "обнаружено, %": _cp_col(_cp_mode, "обнаружено, %", 1),
-    "задержка, мес.": [_cp_n01(_cp_S.loc[(d, _cp_mode), "задержка, медиана"]) for d in _cp_dets],
+    "задержка, медиана, мес.": [_cp_n01(_cp_S.loc[(d, _cp_mode), "задержка, медиана"]) for d in _cp_dets],
     "ложных, %": _cp_col(_cp_mode, "ложных на чистых, %", 1),
     "J Юдена": _cp_col(_cp_mode, "J Юдена", 1, sign=True),
     "сырые: ложных, %": _cp_col("raw", "ложных на чистых, %", 1),
@@ -441,23 +441,24 @@ _cp_thesis = (all(_cp_S.loc[(d, _cp_mode), "J Юдена"] > _cp_S.loc[(d, "raw"
               and max(_cp_pen_J) - min(_cp_pen_J) < min(_cp_gain))
 _cp_best_key = _cp_S["J Юдена"].idxmax()
 _cp_best = _cp_S.loc[_cp_best_key]
+_cp_best_on = ("" if _cp_best_key[1] == _cp_mode else
+               " на сырых рядах" if _cp_best_key[1] == "raw" else " без профиля месяца")
 _cp_r = _cp_pr["обнаружено, %"] / _cp_best["обнаружено, %"]
 _cp_less = ({2: "вдвое", 3: "втрое", 4: "вчетверо"}.get(round(_cp_r)) if abs(_cp_r - round(_cp_r)) < 0.15
             else None) or f"в {_num(_cp_r, 1)} раза"
 Markdown(
-    f"Штраф {_cp_pen(_cp_sel)} выбран по стенду до реальных данных. Один и тот же PELT: на сырых "
-    f"рядах {_num(_cp_prw['ложных на чистых, %'], 1)}% ложных тревог, на темпах роста — "
-    f"{_num(_cp_pr['ложных на чистых, %'], 1)}%, J Юдена {_num(_cp_prw['J Юдена'], 1, sign=True)} → "
-    f"{_num(_cp_pr['J Юдена'], 1, sign=True)}. "
+    f"Штраф {_cp_pen(_cp_sel)} — по стенду, до реальных данных; задержка — медиана среди "
+    f"обнаруженных. PELT: на сырых рядах {_num(_cp_prw['ложных на чистых, %'], 1)}% ложных тревог, "
+    f"на темпах роста — {_num(_cp_pr['ложных на чистых, %'], 1)}%, J "
+    f"{_num(_cp_prw['J Юдена'], 1, sign=True)} → {_num(_cp_pr['J Юдена'], 1, sign=True)}. "
     + ("" if _cp_thesis else "**Заголовок слайда этим прогоном не подтверждается.** ")
     + (f"Лучший J — {_num(_cp_best['J Юдена'], 1, sign=True)} у {_CP_DET[_cp_best_key[0]]}"
-       f"{'' if _cp_best_key[1] == _cp_mode else ' на сырых рядах' if _cp_best_key[1] == 'raw' else ' без профиля месяца'}, но он "
-       f"находит {_cp_less} меньше PELT, с задержкой {_cp_n01(_cp_best['задержка, медиана'])} мес. "
-       f"против {_cp_n01(_cp_pr['задержка, медиана'])}"
+       f"{_cp_best_on}, но находок {_cp_less} меньше, задержка "
+       f"{_cp_n01(_cp_best['задержка, медиана'])} мес. против {_cp_n01(_cp_pr['задержка, медиана'])}"
        + (": уровень скромный." if _cp_best["J Юдена"] < 20 else ".")
        if _cp_best_key != ("pelt", _cp_mode) and _cp_r >= 1.15 else
        f"Лучший J — {_num(_cp_best['J Юдена'], 1, sign=True)} у {_CP_DET[_cp_best_key[0]]}"
-       f"{'' if _cp_best_key[1] == _cp_mode else ' на сырых рядах' if _cp_best_key[1] == 'raw' else ' без профиля месяца'}.")
+       f"{_cp_best_on}.")
 )
 ```
 
@@ -509,6 +510,17 @@ def _cp_ym(month, names=_CP_NOM):
 
 _cp_EV = _cpe.set_index(["penalty", "event"])
 
+def _cp_dec(p, e):
+    """Переход порога в декабре позже месяца события: доля декабря против месяцев между ними —
+    сигнал может давать сам декабрьский скачок."""
+    c = _cp_EV.loc[(p, e), "crossed_month"]
+    if not (isinstance(c, str) and c.endswith("-12") and c != e):
+        return ""
+    between = _cp_months[_cp_months.index(e):_cp_months.index(c)]
+    return (f" ({_num(_cp_RT.loc[c, p], 1)}% против "
+            f"{_and_join(_num(_cp_RT.loc[m, p], 1) for m in between)}% в "
+            f"{_and_join(_CP_IN[int(m[5:]) - 1] for m in between)} — сигнал в самом декабре)")
+
 def _cp_line(p):
     """Переходы порога при штрафе p: месяц и задержка, у непройденных — наибольшая доля."""
     cr = [e for e in _cp_events if isinstance(_cp_EV.loc[(p, e), "crossed_month"], str)]
@@ -516,8 +528,9 @@ def _cp_line(p):
     if not cr:
         return (f"порог {_num(_cp_thr, 0)}% не перейдён ни разу, наибольшая доля — "
                 f"{_num(_cp_RT[p].max(), 1)}% ({_cp_ym(_cp_RT[p].idxmax())})")
-    text = "; ".join(f"{_cp_ym(e)} — порог в {_cp_ym(_cp_EV.loc[(p, e), 'crossed_month'], _CP_IN)}, "
-                     f"задержка {int(_cp_EV.loc[(p, e), 'delay'])} мес." for e in cr)
+    text = "; ".join(f"{_cp_ym(e)} — порог в {_cp_ym(_cp_EV.loc[(p, e), 'crossed_month'], _CP_IN)}"
+                     + _cp_dec(p, e)
+                     + f", задержка {int(_cp_EV.loc[(p, e), 'delay'])} мес." for e in cr)
     if ms:
         text += (f"; {_and_join(_cp_ym(e) for e in ms)} — нет ("
                  + _and_join(_num(_cp_EV.loc[(p, e), "max_share"], 1) for e in ms) + "%)")
@@ -702,11 +715,14 @@ _cp_concl = (
     f"В реальном времени при выбранном штрафе "
     + (f"порог {_num(_cp_thr, 0)}% не перейдён ни разу" if not _cp_sel_cross else
        "порог перейдён: " + "; ".join(f"{_cp_ym(e)} — задержка {int(_cp_EV.loc[(_cp_sel, e), 'delay'])} мес."
+                                      + (", в самом декабре" if _cp_dec(_cp_sel, e) else "")
                                       for e in _cp_sel_cross))
     + (f"; при штрафе {_cp_pen(_cp_off_p)} — "
        + (("только " if len(_cp_cross) < len(_cp_events) else "")
           + "; ".join(f"{_cp_ym(e)}, с задержкой {int(_cp_EV.loc[(_cp_off_p, e), 'delay'])} мес."
-                      for e in _cp_cross) if _cp_cross else "тоже ни разу")
+                      + (", и порог перейдён в самом декабре" if _cp_dec(_cp_off_p, e) else "")
+                      for e in _cp_cross) if _cp_cross else
+          ("тоже ни разу" if not _cp_sel_cross else "ни разу"))
        if _cp_off_p != _cp_sel else "")
 )
 Markdown(_cp_concl if _cp_concl.endswith(".") else _cp_concl + ".")
