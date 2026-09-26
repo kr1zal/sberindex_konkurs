@@ -15,20 +15,48 @@
 и масштаб — настоящие, а не выдуманные генератором.
 
 **Ряды без структурных изменений.** Без них таблица показывает только полноту и молчит о точности:
-детектор, кричащий на каждом шаге, получил бы стопроцентное обнаружение. Половина
-стенда — нетронутые ряды, на которых любое срабатывание есть ложная тревога.
+детектор, кричащий на каждом шаге, получил бы стопроцентное обнаружение. Каждый ряд
+выборки проходит стенд и нетронутым, где любое срабатывание есть ложная тревога:
+на каждую настройку детектора и режим подготовки приходится одна чистая строка
+и по одной испорченной на каждое сочетание возмущения, величины и позиции врезки.
+Обнаружение и ложные тревоги считаются раздельно, по своим строкам, поэтому
+это соотношение на сводку не влияет.
+
+**Неизвестное число изломов.** Все методы, кроме CUSUM, работают в штрафном режиме
+и сами решают, есть ли излом; штраф пробрасывается из стенда. У CUSUM свой порог.
+
+Протокол — `configs/changepoints.yaml`, прогон — `scripts/changepoints.py`.
 """
 from __future__ import annotations
 
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 
 import numpy as np
 import pandas as pd
 
-from src.changepoints import DETECTORS
+from src.changepoints import DETECTORS, Detection
 
 MIN_HISTORY = 8      # раньше восьми точек ни один метод не имеет шансов
 RECENT_WINDOW = 3    # разладка засчитывается, если найдена вблизи текущего конца
+
+# Сетка штрафа ядра для калибровки. Стоимость rbf на отрезке из n точек не больше n − 1,
+# а в окне стенда не больше 24 точек: штраф 30 не пропускает ни одного излома, 0,01
+# пропускает почти любой. Шаг геометрический: доля ложных тревог меняется с порядком
+# штрафа, а не с его приращением.
+KERNEL_PEN_GRID = np.geomspace(0.01, 30, 30)
+
+BENCH_COLUMNS = [
+    "detector", "mode", "penalty", "penalty_effective", "kind", "magnitude", "position",
+    "series_id", "detected", "delay", "false_alarm", "signal",
+]
+SUMMARY_KEY = ["detector", "mode", "penalty"]
+SUMMARY_COLUMNS = [
+    "обнаружено, %", "задержка, медиана", "задержка, среднее", "доля с задержкой 0, %",
+    "ложных на чистых, %", "J Юдена", "n испорченных", "n чистых",
+]
 
 
 @dataclass
@@ -38,8 +66,16 @@ class Injection:
     magnitude: float
 
 
-def inject(y: np.ndarray, kind: str, position: int, magnitude: float) -> np.ndarray:
-    """Вносит возмущение известного типа и величины. Величина — в долях σ ряда."""
+def inject(
+    y: np.ndarray, kind: str, position: int, magnitude: float,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """Вносит возмущение известного типа и величины. Величина — в долях σ ряда.
+
+    Дисперсионному возмущению нужен генератор: стенд сеет его своим сидом, номером
+    ряда в выборке и позицией врезки. Прежде генератор сеялся одной позицией,
+    и на всех рядах стенда оказывался один и тот же шум.
+    """
     out = np.array(y, dtype=float)
     sigma = float(np.std(np.diff(out))) or 1.0
     shift = magnitude * sigma
@@ -50,7 +86,8 @@ def inject(y: np.ndarray, kind: str, position: int, magnitude: float) -> np.ndar
         steps = np.arange(len(out) - position, dtype=float)
         out[position:] += shift * steps / max(1, len(steps) - 1) * 3.0
     elif kind == "variance":
-        rng = np.random.default_rng(position)
+        if rng is None:
+            raise ValueError("дисперсионному возмущению нужен генератор случайных чисел (rng)")
         out[position:] += rng.normal(0.0, abs(shift), size=len(out) - position)
     else:
         raise ValueError(f"неизвестный тип возмущения: {kind}")
@@ -86,14 +123,39 @@ def preprocess(y: np.ndarray, mode: str) -> np.ndarray:
     raise ValueError(f"неизвестный режим подготовки: {mode}")
 
 
-def streaming_signal(y: np.ndarray, detector: str, mode: str = "raw") -> int | None:
+def detector_with_penalty(detector: str, penalty: float | None) -> Callable[[np.ndarray], Detection]:
+    """Детектор со штрафом стенда; None — штраф детектора по умолчанию.
+
+    CUSUM штраф игнорирует: у него свой порог, и стенд его не трогает.
+    """
+    fn = DETECTORS[detector]
+    if penalty is None or detector == "cusum":
+        return fn
+    return partial(fn, penalty=penalty)
+
+
+def month_offset(mode: str) -> int:
+    """Сдвиг индекса излома к месяцу ряда: темп роста короче исходного ряда на единицу.
+
+    Излом b в ряду темпов роста — месяц b + 1, с которого уровень ряда стал другим.
+    """
+    return 1 if mode == "ratio" else 0
+
+
+def streaming_signal(
+    y: np.ndarray, detector: str, mode: str = "raw", penalty: float | None = None,
+) -> int | None:
     """Момент первого сигнала при последовательном просмотре ряда.
 
     Возвращает индекс t, на котором детектор впервые сообщил о разладке вблизи
     конца доступной истории, либо None, если не сообщил ни разу.
+
+    `penalty` — штраф стенда (`detector_with_penalty`). Без него перебор штрафа
+    до потокового прогона не доходил: детектор звался со штрафом по умолчанию
+    при любом значении сетки.
     """
-    fn = DETECTORS[detector]
-    offset = 1 if mode == "ratio" else 0   # темп роста короче исходного ряда на единицу
+    fn = detector_with_penalty(detector, penalty)
+    offset = month_offset(mode)
     for t in range(MIN_HISTORY, len(y)):
         window = preprocess(y[: t + 1], mode)
         try:
@@ -105,62 +167,248 @@ def streaming_signal(y: np.ndarray, detector: str, mode: str = "raw") -> int | N
     return None
 
 
-def run_bench(
-    wide: pd.DataFrame,
-    n_series: int = 60,
-    position: int = 14,
-    magnitudes: tuple[float, ...] = (1.0, 2.0, 4.0),
-    kinds: tuple[str, ...] = ("level", "trend", "variance"),
-    modes: tuple[str, ...] = ("raw", "ratio", "deseason"),
-    seed: int = 20260920,
-) -> pd.DataFrame:
-    """Полный прогон: обнаружение, запаздывание и ложные тревоги по каждому методу."""
+def bench_sample(wide: pd.DataFrame, n_series: int, seed: int) -> pd.DataFrame:
+    """Случайная выборка рядов стенда. Порядковый номер ряда в ней сеет его возмущение."""
     rng = np.random.default_rng(seed)
     columns = rng.choice(wide.columns, size=min(n_series, wide.shape[1]), replace=False)
+    return wide.loc[:, list(columns)]
+
+
+def calibrate_kernel_penalty(
+    sample: pd.DataFrame, penalties: Sequence[float], mode: str,
+    grid: np.ndarray = KERNEL_PEN_GRID,
+) -> pd.DataFrame:
+    """Штраф ядра, при котором доля ложных тревог как у PELT при номинальном штрафе.
+
+    Номинальный штраф ядра несопоставим с методами l2 (`detect_kernel`): при одном
+    числе сравнивалась бы строгость, а не метод. На нетронутых рядах `sample` в режиме
+    `mode` по потоковому протоколу для каждого номинального штрафа берётся значение
+    из `grid`, при котором доля ложных тревог ядра ближе всего к доле PELT; при
+    равенстве — меньшее. Близость меряется числом рядов с тревогой, а не процентом:
+    у процентов равные расстояния вверх и вниз расходятся в последнем разряде,
+    и ничью решал бы шум округления. Доли в таблице — в процентах, как «ложных
+    на чистых, %» в сводке.
+    """
+    series = [sample[col].to_numpy(dtype=float) for col in sample.columns]
+
+    def alarms(detector: str, penalty: float) -> int:
+        return sum(streaming_signal(y, detector, mode, penalty=penalty) is not None for y in series)
+
+    grid = np.asarray(grid, dtype=float)
+    kernel = np.array([alarms("kernel_rbf", pen) for pen in grid])
     rows = []
+    for penalty in penalties:
+        pelt = alarms("pelt", penalty)
+        best = np.lexsort((grid, np.abs(kernel - pelt)))[0]  # ближайшая доля, затем меньший штраф
+        rows.append({
+            "penalty": penalty, "kernel_pen": float(grid[best]),
+            "fa_pelt": pelt / len(series) * 100, "fa_kernel": kernel[best] / len(series) * 100,
+        })
+    return pd.DataFrame(rows, columns=["penalty", "kernel_pen", "fa_pelt", "fa_kernel"])
 
-    for col in columns:
-        base = wide[col].to_numpy(dtype=float)
 
-        for detector in DETECTORS:
+def _settings(
+    detectors: Sequence[str], penalties: Sequence[float], kernel_penalties: dict[float, float] | None,
+) -> list[tuple[str, float, float | None]]:
+    """Настройки стенда: (детектор, номинальный штраф, штраф вызова)."""
+    if "kernel_rbf" in detectors and kernel_penalties is None:
+        raise ValueError(
+            "штраф ядра без калибровки несопоставим с методами l2: "
+            "передайте kernel_penalties (calibrate_kernel_penalty)"
+        )
+    settings = []
+    for detector in detectors:
+        if detector == "cusum":
+            settings.append((detector, np.nan, None))  # свой порог: один прогон, штраф пуст
+            continue
+        for penalty in penalties:
+            effective = kernel_penalties[penalty] if detector == "kernel_rbf" else penalty
+            settings.append((detector, penalty, effective))
+    return settings
+
+
+def run_bench(
+    sample: pd.DataFrame,
+    *,
+    positions: Sequence[int],
+    magnitudes: Sequence[float],
+    kinds: Sequence[str],
+    modes: Sequence[str],
+    detectors: Sequence[str],
+    penalties: Sequence[float],
+    seed: int,
+    kernel_penalties: dict[float, float] | None = None,
+    log: Callable[[str], None] | None = None,
+) -> pd.DataFrame:
+    """Полный прогон: обнаружение, запаздывание и ложные тревоги по каждому методу.
+
+    `sample` — ряды стенда (`bench_sample`). Протокол приходит из конфига, умолчаний
+    у него нет намеренно: второй экземпляр протокола в коде разошёлся бы с конфигом
+    молча. Методы со штрафом гоняются при каждом штрафе из `penalties`, CUSUM — один
+    раз на режим, и штраф в его строках пуст. Ядро вызывается с калиброванным штрафом
+    `kernel_penalties[номинальный]`: в строке номинальный — в `penalty`, сопоставимый
+    с остальными методами, а вызванный — в `penalty_effective`.
+
+    Сигнал до врезки на испорченном ряде — ложная тревога, не раньше неё — обнаружение
+    с задержкой `signal − position`. Испорченные ряды общие для всех детекторов:
+    методы сравниваются на одних и тех же случайных числах.
+    """
+    settings = _settings(detectors, penalties, kernel_penalties)
+    rows = []
+    started = time.perf_counter()
+    for i, col in enumerate(sample.columns):
+        base = sample[col].to_numpy(dtype=float)
+        spoiled = [
+            (kind, magnitude, position,
+             inject(base, kind, position, magnitude, rng=np.random.default_rng([seed, i, position])))
+            for position in positions for kind in kinds for magnitude in magnitudes
+        ]
+        for detector, penalty, effective in settings:
             for mode in modes:
+                common = {
+                    "detector": detector, "mode": mode, "penalty": penalty,
+                    "penalty_effective": np.nan if effective is None else effective, "series_id": col,
+                }
                 # нетронутый ряд: любой сигнал здесь — ложная тревога
-                signal = streaming_signal(base, detector, mode)
-                rows.append(
-                    {"detector": detector, "mode": mode, "kind": "none", "magnitude": 0.0,
-                     "detected": signal is not None, "delay": np.nan,
-                     "false_alarm": signal is not None}
-                )
-
-                for kind in kinds:
-                    for magnitude in magnitudes:
-                        spoiled = inject(base, kind, position, magnitude)
-                        signal = streaming_signal(spoiled, detector, mode)
-                        early = signal is not None and signal < position
-                        hit = signal is not None and signal >= position
-                        rows.append(
-                            {"detector": detector, "mode": mode, "kind": kind,
-                             "magnitude": magnitude, "detected": hit,
-                             "delay": (signal - position) if hit else np.nan,
-                             "false_alarm": early}
-                        )
-    return pd.DataFrame(rows)
+                signal = streaming_signal(base, detector, mode, penalty=effective)
+                rows.append({
+                    **common, "kind": "none", "magnitude": 0.0, "position": np.nan,
+                    "detected": signal is not None, "delay": np.nan,
+                    "false_alarm": signal is not None, "signal": np.nan if signal is None else signal,
+                })
+                for kind, magnitude, position, y in spoiled:
+                    signal = streaming_signal(y, detector, mode, penalty=effective)
+                    hit = signal is not None and signal >= position
+                    rows.append({
+                        **common, "kind": kind, "magnitude": magnitude, "position": position,
+                        "detected": hit, "delay": (signal - position) if hit else np.nan,
+                        "false_alarm": signal is not None and signal < position,
+                        "signal": np.nan if signal is None else signal,
+                    })
+        if log is not None:
+            log(f"  ряд {i + 1}/{sample.shape[1]} ({col}): {time.perf_counter() - started:.0f} с")
+    return pd.DataFrame(rows, columns=BENCH_COLUMNS)
 
 
-def summarise(bench: pd.DataFrame) -> pd.DataFrame:
-    """Сводка: полнота, запаздывание и доля ложных тревог на чистых рядах."""
-    spoiled = bench[bench.kind != "none"]
-    clean = bench[bench.kind == "none"]
+def summarise(bench: pd.DataFrame, by: Sequence[str] = ()) -> pd.DataFrame:
+    """Сводка детектор × режим × штраф: полнота, задержка и ложные тревоги на чистых рядах.
 
-    key = ["detector", "mode"]
-    summary = pd.DataFrame(
-        {
-            "обнаружено": spoiled.groupby(key)["detected"].mean() * 100,
-            "запаздывание": spoiled.groupby(key)["delay"].mean(),
-            "ложных на чистых": clean.groupby(key)["false_alarm"].mean() * 100,
-        }
+    Задержка (медиана, среднее) и доля нулевой задержки — только среди обнаруженных:
+    у необнаруженного задержки нет. `by` — дополнительный разрез испорченных строк,
+    например по величине возмущения; ложные тревоги от него не зависят и берутся
+    по чистым рядам той же тройки детектор × режим × штраф.
+
+    J Юдена — обнаружено минус ложных, то есть TPR − FPR: детектор, кричащий всегда,
+    получает стопроцентное обнаружение и должен быть за это наказан. Штраф CUSUM пуст,
+    и группировка не должна его терять (`dropna=False`).
+    """
+    key = SUMMARY_KEY + list(by)
+    spoiled = bench[bench["kind"] != "none"]
+    clean = bench[bench["kind"] == "none"]
+
+    by_spoiled = spoiled.groupby(key, dropna=False)
+    by_hit = spoiled[spoiled["detected"]].groupby(key, dropna=False)["delay"]
+    by_clean = clean.groupby(SUMMARY_KEY, dropna=False)
+    detection = pd.DataFrame({
+        "обнаружено, %": by_spoiled["detected"].mean() * 100,
+        "n испорченных": by_spoiled.size(),
+    })
+    delay = pd.DataFrame({
+        "задержка, медиана": by_hit.median(),
+        "задержка, среднее": by_hit.mean(),
+        "доля с задержкой 0, %": by_hit.agg(lambda d: (d == 0).mean() * 100),
+    })
+    alarms = pd.DataFrame({
+        "ложных на чистых, %": by_clean["false_alarm"].mean() * 100,
+        "n чистых": by_clean.size(),
+    })
+    # Слияние по колонкам, а не по индексу: pandas сопоставляет пустой штраф CUSUM
+    # с пустым только при слиянии колонок.
+    out = (
+        detection.reset_index()
+        .merge(delay.reset_index(), on=key, how="left")
+        .merge(alarms.reset_index(), on=SUMMARY_KEY, how="left")
     )
-    # качество = обнаружение минус ложные тревоги: детектор, кричащий всегда,
-    # получает стопроцентное обнаружение и должен быть за это наказан
-    summary["баланс"] = summary["обнаружено"] - summary["ложных на чистых"]
-    return summary.sort_values("баланс", ascending=False)
+    out["J Юдена"] = out["обнаружено, %"] - out["ложных на чистых, %"]
+    out["n чистых"] = out["n чистых"].fillna(0).astype(int)
+    order = [*by, "J Юдена"]
+    ascending = [True] * len(by) + [False]
+    return out[key + SUMMARY_COLUMNS].sort_values(order, ascending=ascending, kind="stable").reset_index(drop=True)
+
+
+def realtime_signals(y: np.ndarray, detector: str, mode: str, penalty: float | None) -> list[int]:
+    """Все сигналы ряда при последовательном просмотре — для панели на реальных данных.
+
+    Правило сигнала то же, что в `streaming_signal`: в месяц t детектор видит y[:t+1]
+    и нашёл излом в последних RECENT_WINDOW точках. Отличий два. После сигнала ряд
+    молчит RECENT_WINDOW месяцев: излом остаётся в последних точках окна несколько
+    шагов подряд и не должен считаться в каждом из них. И просмотр на первом сигнале
+    не кончается: за 24 месяца на панели несколько событий, а после первого сигнала
+    поздние события у этого ряда были бы невидимы по построению. Первый сигнал
+    совпадает со `streaming_signal` — там, на синтетике, излом один.
+
+    Пауза не спасает от второго сигнала, если детектор ставит тому же событию второй
+    излом позже. Разовый сдвиг уровня в темпах роста — одиночный выброс, и PELT
+    (сегмент не короче трёх точек) отсекает его вторым изломом через три точки:
+    на синтетике со сдвигом в месяце m сигналы приходят в m и снова в m + 4.
+    """
+    fn = detector_with_penalty(detector, penalty)
+    offset = month_offset(mode)
+    signals: list[int] = []
+    for t in range(MIN_HISTORY, len(y)):
+        if signals and t - signals[-1] <= RECENT_WINDOW:
+            continue
+        window = preprocess(y[: t + 1], mode)
+        try:
+            found = fn(window).breakpoints
+        except Exception:
+            continue
+        if any(b + offset >= t - RECENT_WINDOW for b in found):
+            signals.append(t)
+    return signals
+
+
+def panel_realtime(
+    wide: pd.DataFrame, detector: str, mode: str, penalty: float | None,
+    threshold_share: float, events: Sequence[str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Потоковый сигнал на панели: доля МО с сигналом по месяцам и задержка на событиях.
+
+    Каждый ряд просматривается в расширяющемся окне (`realtime_signals`, там же правило
+    сигнала и паузы после него). По месяцам: `month` (ГГГГ-ММ), `n_signals` — рядов
+    с сигналом в этом месяце, `share` — их процент от рядов панели. Первые MIN_HISTORY
+    месяцев детектор не запускается, и доля там нулевая по построению.
+
+    События — месяцы в терминах панели: месяц, с которого уровень ряда стал другим
+    (излом b в ряду темпов роста — месяц b + 1). По каждому: `crossed_month` — первый
+    месяц не раньше события с долей не ниже `threshold_share`, иначе пусто; `delay` —
+    месяцев от события до него; `max_share` — наибольшая доля от месяца события
+    до следующего события, не включая его месяц, у последнего — до конца панели:
+    каждый месяц принадлежит одному событию.
+    """
+    months = pd.DatetimeIndex(wide.index).strftime("%Y-%m")
+    counts = np.zeros(len(months), dtype=int)
+    for col in wide.columns:
+        for t in realtime_signals(wide[col].to_numpy(dtype=float), detector, mode, penalty):
+            counts[t] += 1
+    share = counts / wide.shape[1] * 100
+    monthly = pd.DataFrame({"month": months, "share": share, "n_signals": counts})
+
+    index = {month: i for i, month in enumerate(months)}
+    unknown = [event for event in events if event not in index]
+    if unknown:
+        raise ValueError(f"месяцы событий вне панели: {unknown}")
+    starts = sorted(index[event] for event in events)
+    rows = []
+    for event in events:
+        start = index[event]
+        end = next((s for s in starts if s > start), len(months))
+        crossed = np.flatnonzero(share[start:] >= threshold_share)
+        at = start + int(crossed[0]) if crossed.size else None
+        rows.append({
+            "event": event,
+            "crossed_month": None if at is None else months[at],
+            "delay": np.nan if at is None else at - start,
+            "max_share": float(share[start:end].max()),
+        })
+    return monthly, pd.DataFrame(rows, columns=["event", "crossed_month", "delay", "max_share"])
