@@ -388,50 +388,177 @@ Markdown(
 не было. Модель федерального ряда выбирается бэктестом на его же истории до origin,
 эластичность сжимается в долю объяснённой дисперсии.
 
-## Обнаружение разладок: решает преобразование
+## Обнаружение разладок: решает преобразование {.smaller}
 
-| детектор и подготовка | обнаружено | ложных на чистых рядах |
-|---|---|---|
-| PELT на **темпах роста** | 46,9% | **5,0%** |
-| PELT на сырых значениях | 45,0% | 85,0% |
-| остальные пять на сырых | 15–31% | 77–100% |
+```{python}
+# Стенд — из файлов scripts/changepoints.py (results/cp_*.csv): штраф выбран правилом
+# до реальных данных, CUSUM — со своим порогом. Первые четыре колонки — темпы роста,
+# две последние — сырые ряды; задержка — медиана среди обнаруженных.
+import importlib.util
+import yaml
+_cp_cfg = yaml.safe_load(open("../configs/changepoints.yaml", encoding="utf-8"))
+_cps = pd.read_csv("../results/cp_summary.csv")
+_cpe = pd.read_csv("../results/cp_realtime_events.csv", dtype={"crossed_month": object})
+_cp_sel = float(_cpe.loc[_cpe["selected"].astype(str).str.lower() == "true", "penalty"].iloc[0])
+_cp_mode = _cp_cfg["realtime"]["mode"]
+_cp_S = _cps[(_cps["penalty"] == _cp_sel) | _cps["penalty"].isna()].set_index(["detector", "mode"])
+_CP_DET = {"pelt": "PELT", "binseg": "BinSeg", "window": "Window", "bottomup": "BottomUp",
+           "kernel_rbf": "ядровой", "cusum": "CUSUM"}
+_cp_dets = sorted(_cp_cfg["bench"]["detectors"], key=lambda d: -_cp_S.loc[(d, _cp_mode), "J Юдена"])
 
-Один и тот же алгоритм: на сырых рядах 85% ложных тревог, на темпах роста — 5%.
+def _cp_pen(p):
+    return _num(p, 0 if float(p).is_integer() else 1)
+
+def _cp_n01(v):
+    """Медиана месяцев: целая — без знаков, дробная — с одним."""
+    return _num(v, 0 if float(v).is_integer() else 1)
+
+def _cp_col(mode, column, digits, sign=False):
+    return [_num(_cp_S.loc[(d, mode), column], digits, sign) for d in _cp_dets]
+
+_cp_tab = pd.DataFrame({
+    "обнаружено, %": _cp_col(_cp_mode, "обнаружено, %", 1),
+    "задержка, мес.": [_cp_n01(_cp_S.loc[(d, _cp_mode), "задержка, медиана"]) for d in _cp_dets],
+    "ложных, %": _cp_col(_cp_mode, "ложных на чистых, %", 1),
+    "J Юдена": _cp_col(_cp_mode, "J Юдена", 1, sign=True),
+    "сырые: ложных, %": _cp_col("raw", "ложных на чистых, %", 1),
+    "сырые: J": _cp_col("raw", "J Юдена", 1, sign=True),
+}, index=pd.Index([_CP_DET[d] for d in _cp_dets], name="метод"))
+Markdown(_cp_tab.to_markdown(disable_numparse=True, colalign=("left",) + ("right",) * 6))
+```
+
+```{python}
+_cp_pr, _cp_prw = _cp_S.loc[("pelt", _cp_mode)], _cp_S.loc[("pelt", "raw")]
+# Тезис — как в отчёте: у каждого метода преобразование снижает ложные тревоги и поднимает J,
+# а разброс J методов со штрафом на темпах роста меньше выигрыша любого из них.
+_cp_own = set(_cps.loc[_cps["penalty"].isna(), "detector"])
+_cp_gain = [_cp_S.loc[(d, _cp_mode), "J Юдена"] - _cp_S.loc[(d, "raw"), "J Юдена"]
+            for d in _cp_dets if d not in _cp_own]
+_cp_pen_J = [_cp_S.loc[(d, _cp_mode), "J Юдена"] for d in _cp_dets if d not in _cp_own]
+_cp_thesis = (all(_cp_S.loc[(d, _cp_mode), "J Юдена"] > _cp_S.loc[(d, "raw"), "J Юдена"]
+                  and _cp_S.loc[(d, _cp_mode), "ложных на чистых, %"]
+                  < _cp_S.loc[(d, "raw"), "ложных на чистых, %"] for d in _cp_dets)
+              and max(_cp_pen_J) - min(_cp_pen_J) < min(_cp_gain))
+_cp_best_key = _cp_S["J Юдена"].idxmax()
+_cp_best = _cp_S.loc[_cp_best_key]
+_cp_r = _cp_pr["обнаружено, %"] / _cp_best["обнаружено, %"]
+_cp_less = ({2: "вдвое", 3: "втрое", 4: "вчетверо"}.get(round(_cp_r)) if abs(_cp_r - round(_cp_r)) < 0.15
+            else None) or f"в {_num(_cp_r, 1)} раза"
+Markdown(
+    f"Штраф {_cp_pen(_cp_sel)} выбран по стенду до реальных данных. Один и тот же PELT: на сырых "
+    f"рядах {_num(_cp_prw['ложных на чистых, %'], 1)}% ложных тревог, на темпах роста — "
+    f"{_num(_cp_pr['ложных на чистых, %'], 1)}%, J Юдена {_num(_cp_prw['J Юдена'], 1, sign=True)} → "
+    f"{_num(_cp_pr['J Юдена'], 1, sign=True)}. "
+    + ("" if _cp_thesis else "**Заголовок слайда этим прогоном не подтверждается.** ")
+    + (f"Лучший J — {_num(_cp_best['J Юдена'], 1, sign=True)} у {_CP_DET[_cp_best_key[0]]}"
+       f"{'' if _cp_best_key[1] == _cp_mode else ' на сырых рядах' if _cp_best_key[1] == 'raw' else ' без профиля месяца'}, но он "
+       f"находит {_cp_less} меньше PELT, с задержкой {_cp_n01(_cp_best['задержка, медиана'])} мес. "
+       f"против {_cp_n01(_cp_pr['задержка, медиана'])}"
+       + (": уровень скромный." if _cp_best["J Юдена"] < 20 else ".")
+       if _cp_best_key != ("pelt", _cp_mode) and _cp_r >= 1.15 else
+       f"Лучший J — {_num(_cp_best['J Юдена'], 1, sign=True)} у {_CP_DET[_cp_best_key[0]]}"
+       f"{'' if _cp_best_key[1] == _cp_mode else ' на сырых рядах' if _cp_best_key[1] == 'raw' else ' без профиля месяца'}.")
+)
+```
 
 **На сырых данных детекторы находят декабрьский скачок расходов, а не структурные
 изменения.** Вскрылось только потому, что в стенд положены ряды без структурных изменений.
 
-## Интерпретация на реальных данных
+## Интерпретация на реальных данных {.smaller}
 
+:::: {.columns}
+::: {.column width="60%"}
 ```{python}
-from src.changepoints import detect_pelt
-from src.cp_bench import preprocess
-counts = np.zeros(len(wide.index), int)
-for col in wide.columns:
-    for b in detect_pelt(preprocess(wide[col].to_numpy(float), "ratio"), penalty=1.0).breakpoints:
-        if 0 <= b+1 < len(wide.index): counts[b+1] += 1
-sh = pd.Series(counts/wide.shape[1]*100, index=wide.index.strftime("%Y-%m"))
-_r = pd.read_parquet("../data/reference/key_rate.parquet"); _r["period"]=pd.to_datetime(_r["period"])
-_r = _r[(_r.key_rate_categories=="Ключевая ставка в реальном выражении")&(_r.period>="2023-01-01")&(_r.period<="2024-12-31")].sort_values("period")
-_fig = charts.breaks_vs_rate(sh, pd.Series(_r.value.values, index=sh.index))
+# Потоковый сигнал — доля МО, у которых в месяце начался эпизод тревоги (results/cp_realtime*.csv),
+# при выбранном штрафе и при штрафе прежнего разбора: его берёт scripts/news_event_study.py.
+from src import charts
 import matplotlib.pyplot as plt
+_cp_spec = importlib.util.spec_from_file_location("news_event_study", "../scripts/news_event_study.py")
+_cp_nes = importlib.util.module_from_spec(_cp_spec)
+_cp_spec.loader.exec_module(_cp_nes)
+_cp_off_p = float(_cp_nes.PENALTY)
+_cpr = pd.read_csv("../results/cp_realtime.csv")
+_cpo = pd.read_csv("../results/cp_offline.csv")
+_cpos = pd.read_csv("../results/cp_offline_series.csv")
+_cp_events = sorted(str(e) for e in _cp_cfg["realtime"]["events"])
+_cp_thr = float(_cp_cfg["realtime"]["threshold_share"])
+_cp_months = list(_cpr.loc[_cpr["penalty"] == _cp_sel, "month"])
+_cp_RT = _cpr.pivot(index="month", columns="penalty", values="share").reindex(_cp_months)
+_cp_OFF = _cpo.pivot(index="month", columns="penalty", values="share").reindex(_cp_months)
+_cp_kr = pd.read_parquet("../data/reference/key_rate.parquet")
+_cp_kr = _cp_kr[_cp_kr["key_rate_categories"] == "Ключевая ставка в реальном выражении"].copy()
+_cp_kr["month"] = pd.to_datetime(_cp_kr["period"]).dt.strftime("%Y-%m")
+_cp_panels = {f"Потоково, штраф {_cp_pen(_cp_sel)} — выбран по стенду: начала эпизодов тревоги":
+              _cp_RT[_cp_sel]}
+if _cp_off_p != _cp_sel:
+    _cp_panels[f"Потоково, штраф {_cp_pen(_cp_off_p)}"] = _cp_RT[_cp_off_p]
+_fig = charts.breaks_vs_rate(_cp_panels, _cp_kr.set_index("month")["value"].reindex(_cp_months),
+                             _cp_thr, marks=_cp_events)
 plt.show()
 ```
+:::
+::: {.column width="40%"}
+```{python}
+_CP_NOM = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь",
+           "октябрь", "ноябрь", "декабрь"]
+_CP_IN = ["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре",
+          "октябре", "ноябре", "декабре"]
 
-Сверка с реальной ключевой ставкой (тот же источник — СберИндекс):
+def _cp_ym(month, names=_CP_NOM):
+    return f"{names[int(month[5:]) - 1]} {month[:4]}"
 
-- **январь 2024** — сильнейшее изменение реальной ставки за весь период
-- **октябрь 2024** — четвёртое по силе
-- **октябрь 2023** — точка разворота, ставка достигла минимума 0,79
+_cp_EV = _cpe.set_index(["penalty", "event"])
 
-В остальные месяцы согласие не превышает 12%.
+def _cp_line(p):
+    """Переходы порога при штрафе p: месяц и задержка, у непройденных — наибольшая доля."""
+    cr = [e for e in _cp_events if isinstance(_cp_EV.loc[(p, e), "crossed_month"], str)]
+    ms = [e for e in _cp_events if e not in cr]
+    if not cr:
+        return (f"порог {_num(_cp_thr, 0)}% не перейдён ни разу, наибольшая доля — "
+                f"{_num(_cp_RT[p].max(), 1)}% ({_cp_ym(_cp_RT[p].idxmax())})")
+    text = "; ".join(f"{_cp_ym(e)} — порог в {_cp_ym(_cp_EV.loc[(p, e), 'crossed_month'], _CP_IN)}, "
+                     f"задержка {int(_cp_EV.loc[(p, e), 'delay'])} мес." for e in cr)
+    if ms:
+        text += (f"; {_and_join(_cp_ym(e) for e in ms)} — нет ("
+                 + _and_join(_num(_cp_EV.loc[(p, e), "max_share"], 1) for e in ms) + "%)")
+    return text
+
+_cp_off = _cp_OFF[_cp_off_p]
+_cp_top = sorted(_cp_off.nlargest(len(_cp_events)).index, key=_cp_months.index)
+Markdown(
+    f"- **Штраф {_cp_pen(_cp_sel)}, выбран по стенду:** {_cp_line(_cp_sel).rstrip('.')}.\n"
+    + (f"- **Штраф {_cp_pen(_cp_off_p)}:** {_cp_line(_cp_off_p).rstrip('.')}.\n"
+       if _cp_off_p != _cp_sel else "")
+    + f"- **Задним числом, по полному ряду** (штраф {_cp_pen(_cp_off_p)}): "
+    + ", ".join(f"{_cp_ym(m)} — {_num(_cp_off[m], 1)}%" for m in _cp_top)
+    + f"; в остальные месяцы не выше {_num(_cp_off.drop(index=_cp_top).max(), 1)}%."
+)
+```
+:::
+::::
 
 ## Чего мы не утверждаем
 
-Трёх событий недостаточно для вывода о причинности — это совпадение и гипотеза.
-
-Январь неотделим от сезонности: ряд начинается в январе 2023, и детектируемый
-январь у нас ровно один.
+```{python}
+# Пара изломов по полному ряду — из results/cp_offline_series.csv; число событий — из конфига.
+_cp_os = _cpos[_cpos["penalty"] == _cp_off_p]
+_cp_e0, _cp_e1 = _cp_events[0], _cp_events[1]
+_cp_with0 = set(_cp_os.loc[_cp_os["month"] == _cp_e0, "series_id"])
+_cp_pair = len(_cp_with0 & set(_cp_os.loc[_cp_os["month"] == _cp_e1, "series_id"]))
+_cp_jans = [m for m in _cp_months[1:] if m.endswith("-01")]
+Markdown(
+    f"{_GEN[len(_cp_events)].capitalize()} событий недостаточно для вывода о причинности — это "
+    f"совпадение и гипотеза.\n\n"
+    + (f"{_cp_ym(_cp_e0).capitalize()} и {_cp_ym(_cp_e1)} по полному ряду — не два шока: у "
+       f"{_num(_cp_pair, 0)} из {_num(len(_cp_with0), 0)} "
+       f"{_plural(len(_cp_with0), 'ряда', 'рядов', 'рядов')} с изломом в "
+       f"{_cp_ym(_cp_e0, _CP_IN)} есть излом и в {_cp_ym(_cp_e1, _CP_IN)}: это начало и конец "
+       f"одного отрезка.\n\n" if _cp_with0 and _cp_pair / len(_cp_with0) >= 0.9 else "")
+    + f"Январь неотделим от сезонности: ряд начинается в {_cp_ym(_cp_months[0], _CP_IN)}, "
+    f"и детектируемый январь у нас "
+    + ("ровно один." if len(_cp_jans) == 1 else f"не один: {len(_cp_jans)}.")
+)
+```
 
 Показатель — оценка среднедушевых расходов, методология муниципального уровня
 не опубликована. Мы прогнозируем **опубликованный ряд**, а интерпретируем только
@@ -557,12 +684,33 @@ Markdown(
 покажет улучшение, если подбирать параметры по тем же данным, на которых меряешь.
 :::
 
-## Выводы
+## Выводы {.smaller}
 
 **Работает:** глобальная модель на панели плюс перенос недостающей сезонности —
 **23,0% над эталоном конкурса** на трёх месяцах, 45,9% на наукасте; на год вперёд —
-двухэтапная модель, 40%. Детекция изломов на темпах роста, три месяца
-общего согласия совпадают с разворотами денежной политики.
+двухэтапная модель, 40%.
+
+```{python}
+# Строка про изломы — из тех же файлов стенда, что слайды об обнаружении.
+_cp_cross = [e for e in _cp_events if isinstance(_cp_EV.loc[(_cp_off_p, e), "crossed_month"], str)]
+_cp_sel_cross = [e for e in _cp_events if isinstance(_cp_EV.loc[(_cp_sel, e), "crossed_month"], str)]
+_cp_concl = (
+    f"**Изломы: {'решает преобразование, а не алгоритм' if _cp_thesis else 'преобразование решает не всё'}.** "
+    f"PELT на темпах роста: обнаружено {_num(_cp_pr['обнаружено, %'], 1)}%, задержка "
+    f"{_cp_n01(_cp_pr['задержка, медиана'])} мес., ложных тревог "
+    f"{_num(_cp_pr['ложных на чистых, %'], 1)}% (на сырых рядах {_num(_cp_prw['ложных на чистых, %'], 1)}%). "
+    f"В реальном времени при выбранном штрафе "
+    + (f"порог {_num(_cp_thr, 0)}% не перейдён ни разу" if not _cp_sel_cross else
+       "порог перейдён: " + "; ".join(f"{_cp_ym(e)} — задержка {int(_cp_EV.loc[(_cp_sel, e), 'delay'])} мес."
+                                      for e in _cp_sel_cross))
+    + (f"; при штрафе {_cp_pen(_cp_off_p)} — "
+       + (("только " if len(_cp_cross) < len(_cp_events) else "")
+          + "; ".join(f"{_cp_ym(e)}, с задержкой {int(_cp_EV.loc[(_cp_off_p, e), 'delay'])} мес."
+                      for e in _cp_cross) if _cp_cross else "тоже ни разу")
+       if _cp_off_p != _cp_sel else "")
+)
+Markdown(_cp_concl if _cp_concl.endswith(".") else _cp_concl + ".")
+```
 
 **Не работает:** фундаментальные модели без дообучения в трёх семействах,
 новостные данные в четырёх конструкциях, длинные ряды в трёх конструкциях
@@ -572,6 +720,8 @@ Markdown(
 недостающую историю ровно в той мере, в какой её недостаёт: корреляция выигрыша
 с длиной обучения 0,96, при 21 месяце выигрыша уже нет. Длину ряда заменить
 нельзя — можно только занять недостающую сезонность у того, у кого она есть.
+
+## Что из этого следует
 
 **Осторожно с определённостью.** Ни одна модель не выигрывает у наивной на всех
 трёх фолдах. По фолдам интервалы накрывают ноль у всех конструкций. Приводим

@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -110,32 +112,56 @@ def model_comparison(summary: pd.DataFrame, baseline: str = "prophet") -> plt.Fi
     return fig
 
 
-def breaks_vs_rate(share: pd.Series, rate: pd.Series) -> plt.Figure:
-    """Две панели с общей осью времени — намеренно НЕ две шкалы на одной картинке.
+def breaks_vs_rate(shares: dict[str, pd.Series], rate: pd.Series, threshold: float,
+                   marks: Sequence[str] = ()) -> plt.Figure:
+    """Доли МО по месяцам — по панели на каждую картину — и ставка под ними, с общей осью времени.
 
-    Совмещение величин разного масштаба на двух осях Y позволяет подогнать видимую
-    «связь» выбором пределов, и читатель не может это проверить. Разнесённые панели
-    показывают ровно то, что есть: совпадение моментов, а не форму зависимости.
+    Намеренно НЕ две шкалы на одной картинке: совмещение величин разного масштаба на двух
+    осях Y позволяет подогнать видимую «связь» выбором пределов, и читатель не может это
+    проверить. Разнесённые панели показывают ровно то, что есть: совпадение моментов,
+    а не форму зависимости.
+
+    Все доли — на одной шкале от нуля до ста, со штриховой линией порога события: картина,
+    где доля не поднимается выше десяти процентов, при своей шкале растянулась бы на всю
+    высоту панели и читалась бы как всплеск. Пунктирные вертикали — месяцы событий `marks`:
+    по ним видно, на сколько сигнал отстаёт от события. Подписаны столбцы выше двадцати
+    процентов и наибольший в каждой панели.
     """
-    fig, (top, bottom) = plt.subplots(2, 1, figsize=(8, 5.0), sharex=True,
-                                      facecolor=SURFACE, height_ratios=[1, 1])
-    x = np.arange(len(share))
-    top.bar(x, share.values, color=SERIES[0], width=0.62, zorder=2)
-    for i, v in enumerate(share.values):
-        if v > 20:
-            top.text(i, v + 2, f"{v:.0f}%", ha="center", color=INK, fontsize=9, fontweight="bold")
-    _style(top, "Доля МО со структурным изменением", "%")
+    months = next(iter(shares.values())).index
+    n = len(shares)
+    fig, axes = plt.subplots(n + 1, 1, figsize=(8, 1.55 * n + 2.2), sharex=True,
+                             facecolor=SURFACE, height_ratios=[1] * n + [1.2])
+    x = np.arange(len(months))
+    for k, (ax, (title, share)) in enumerate(zip(axes, shares.items())):
+        values = share.reindex(months).to_numpy(dtype=float)
+        ax.bar(x, values, color=SERIES[0], width=0.62, zorder=2)
+        top = int(np.nanargmax(values)) if np.isfinite(values).any() else -1
+        for i, v in enumerate(values):
+            if v > 20 or (i == top and v > 0):
+                text = f"{v:.0f}%" if v >= 10 else f"{v:.1f}%".replace(".", ",")
+                ax.text(i, v + 3, text, ha="center", color=INK, fontsize=8, fontweight="bold")
+        ax.axhline(threshold, color=INK_SOFT, linewidth=1, linestyle="--", zorder=1)
+        if k == 0:
+            ax.text(-0.3, threshold + 3, f"порог {threshold:g}%", ha="left", color=INK_SOFT, fontsize=8)
+        ax.set_ylim(0, 100)
+        ax.set_yticks([0, threshold, 100])
+        _style(ax, "", "% МО")
+        ax.set_title(title, color=INK, fontsize=10, loc="left", pad=8)
 
+    bottom = axes[-1]
     bottom.plot(x, rate.values, color=SERIES[1], linewidth=2, marker="o", markersize=5)
-    for i, v in enumerate(share.values):
-        if v > 20:
-            # Вертикаль связывает панели по моменту времени. Цветом сетки она
-            # была не видна и своей работы не делала.
-            for panel in (top, bottom):
-                panel.axvline(i, color=INK_SOFT, linewidth=1, linestyle=":", zorder=1)
-    _style(bottom, "Ключевая ставка в реальном выражении, СберИндекс", "%")
+    _style(bottom, "", "%")
+    bottom.set_title("Ключевая ставка в реальном выражении, СберИндекс", color=INK, fontsize=10,
+                     loc="left", pad=8)
+    # Вертикаль связывает панели по моменту времени. Цветом сетки она была не видна
+    # и своей работы не делала.
+    position = {month: i for i, month in enumerate(months)}
+    for month in marks:
+        if month in position:
+            for panel in axes:
+                panel.axvline(position[month], color=INK_SOFT, linewidth=1, linestyle=":", zorder=1)
     bottom.set_xticks(x[::3])
-    bottom.set_xticklabels(share.index[::3], rotation=45, ha="right")
+    bottom.set_xticklabels(months[::3], rotation=45, ha="right")
     fig.tight_layout()
     return fig
 
