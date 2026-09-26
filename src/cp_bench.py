@@ -52,7 +52,9 @@ SUMMARY_COLUMNS = [
     "обнаружено, %", "задержка, медиана", "задержка, среднее", "доля с задержкой 0, %",
     "ложных на чистых, %", "J Юдена", "n испорченных", "n чистых", "n_failed",
 ]
-CALIBRATION_COLUMNS = ["penalty", "kernel_pen", "fa_pelt", "fa_kernel", "n_failed_pelt", "n_failed_kernel"]
+CALIBRATION_COLUMNS = [
+    "penalty", "kernel_pen", "fa_pelt", "fa_kernel", "n_failed_pelt", "n_failed_kernel", "n_failed_grid",
+]
 
 
 def inject(
@@ -86,9 +88,9 @@ def inject(
 def preprocess(y: np.ndarray, mode: str) -> np.ndarray:
     """Подготовка ряда перед детекцией.
 
-    На сырых рядах все детекторы бесполезны: декабрьский скачок расходов на 17-22%
-    выглядит как сдвиг уровня, и на нетронутых рядах срабатывание происходит в 77-100%
-    случаев. То есть находится сезонность, а не структурные изменения.
+    На сырых рядах детектор легко принимает сезонность за структурное изменение:
+    декабрьский скачок расходов на 17-22% выглядит как сдвиг уровня, и на нетронутых
+    рядах ложных тревог много.
 
     Все преобразования causal - используют только прошлое, иначе потоковый протокол
     потерял бы смысл.
@@ -194,7 +196,9 @@ def calibrate_kernel_penalty(
     и вниз расходятся в последнем разряде, и ничью решал бы шум округления. Доли в таблице —
     в процентах, как «ложных на чистых, %» в сводке. `n_failed_pelt`, `n_failed_kernel` —
     шаги, на которых упал PELT при номинальном штрафе и ядро при выбранном: протокол
-    считает их шагами без тревоги, и доля с ними занижена.
+    считает их шагами без тревоги, и доля с ними занижена. `n_failed_grid` — сбои ядра
+    по всей сетке, одно число на калибровку: точка со сбоями выглядит молчаливой и может
+    оказаться ближайшей, даже если выбрана другая.
     """
     if sample.shape[1] == 0:
         raise ValueError("калибровать штраф ядра не на чем: в выборке стенда нет рядов")
@@ -211,6 +215,7 @@ def calibrate_kernel_penalty(
 
     scanned = [alarms("kernel_rbf", pen) for pen in grid]
     kernel = np.array([count for count, _ in scanned])
+    grid_failed = sum(failed for _, failed in scanned)
     rows = []
     for penalty in penalties:
         pelt, pelt_failed = alarms("pelt", penalty)
@@ -220,7 +225,7 @@ def calibrate_kernel_penalty(
         rows.append({
             "penalty": penalty, "kernel_pen": float(grid[best]),
             "fa_pelt": pelt / len(series) * 100, "fa_kernel": kernel[best] / len(series) * 100,
-            "n_failed_pelt": pelt_failed, "n_failed_kernel": scanned[best][1],
+            "n_failed_pelt": pelt_failed, "n_failed_kernel": scanned[best][1], "n_failed_grid": grid_failed,
         })
     return pd.DataFrame(rows, columns=CALIBRATION_COLUMNS)
 
@@ -427,6 +432,8 @@ def panel_realtime(
     доля; `share_in_window` — процент МО, у которых эпизод начался где-либо в окне:
     потоковый аналог доли изломов по полному ряду, накопленный за окно.
     """
+    if wide.shape[1] == 0:
+        raise ValueError("на панели нет рядов: доле МО не из чего считаться")
     months = pd.DatetimeIndex(wide.index).strftime("%Y-%m")
     failed: list[int] = []
     per_series = [

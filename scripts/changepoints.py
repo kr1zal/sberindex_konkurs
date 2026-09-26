@@ -146,6 +146,10 @@ def main() -> int:
         for line in (failure_warning(f"калибровка, PELT при штрафе {row.penalty:g}", row.n_failed_pelt)
                      + failure_warning(f"калибровка, ядро при штрафе {row.kernel_pen:.4g}", row.n_failed_kernel)):
             print(line)
+    # сбои ядра по всей сетке — одно число на калибровку, в каждой строке таблицы то же
+    grid_failed = int(calibration["n_failed_grid"].max()) if not calibration.empty else 0
+    for line in failure_warning("калибровка, ядро на сетке штрафа", grid_failed):
+        print(line)
     kernel_pens = dict(zip(calibration["penalty"], calibration["kernel_pen"]))
 
     stage = time.perf_counter()

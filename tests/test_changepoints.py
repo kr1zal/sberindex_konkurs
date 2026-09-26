@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src import cp_bench  # noqa: E402
-from src.changepoints import DETECTORS, Detection, detect_pelt  # noqa: E402
+from src.changepoints import DETECTORS, Detection, detect_kernel, detect_pelt  # noqa: E402
 from src.cp_bench import (  # noqa: E402
     BENCH_COLUMNS, CALIBRATION_COLUMNS, MIN_HISTORY, RECENT_WINDOW, SUMMARY_COLUMNS, inject,
     panel_realtime, preprocess, realtime_signals, run_bench, streaming_signal, summarise,
@@ -101,6 +101,14 @@ def pattern_detector(pattern: str):
 def exploding_detector(window, **kwargs):
     """Заглушка сломанного детектора: падает на каждом шаге."""
     raise RuntimeError("детектор сломан")
+
+
+def flaky_pelt(window, penalty=3.0):
+    """PELT, который падает на окнах короче полного ряда темпов роста (23 точки на 24
+    месяцах): в потоке сбой на всех шагах, кроме последнего, по полному ряду — как обычно."""
+    if len(window) < 23:
+        raise RuntimeError("детектор сломан на коротком окне")
+    return detect_pelt(window, penalty=penalty)
 
 
 def threshold_detector(window, penalty=3.0):
@@ -577,8 +585,7 @@ CONFIG = {
     "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
     "bench": {"n_series": 3, "seed": 5, "positions": [14], "magnitudes": [4.0], "kinds": ["level"],
               "modes": ["ratio"], "detectors": ["pelt", "kernel_rbf", "cusum"], "penalties": [1.0, 3.0],
-              # сетка не та, что по умолчанию в calibrate_kernel_penalty: иначе проверка
-              # не отличила бы сетку из конфига от умолчания
+              # своя сетка, не протокольная: калиброванный штраф обязан взяться именно из неё
               "kernel_pen_grid": {"min": 0.002, "max": 50, "points": 25}},
     "selection": {"rule": "J Юдена у {detector} на режиме {mode}, среди штрафов из сетки; при равенстве — меньший штраф"},
     "realtime": {"detector": "pelt", "mode": "ratio", "threshold_share": 50, "events": ["2024-03"]},
@@ -727,10 +734,61 @@ class DetectorFailureTest(unittest.TestCase):
         self.assertNotIn("ВНИМАНИЕ: стенд, pelt", log)
 
 
+class CalibrationFailureTest(unittest.TestCase):
+    def test_failing_grid_point_is_counted_even_when_it_wins(self):
+        # PELT падает на каждом шаге и тревог не даёт; ядро падает только при штрафе 2 и там
+        # тоже «молчит». До PELT одинаково близки 2 и 3, берётся меньший — сломанная точка.
+        sample = pd.DataFrame({f"мо_{i}": np.full(12, level) for i, level in enumerate([0.5, 1.5, 2.5, 2.5, 2.5])})
+
+        def kernel(window, penalty=3.0):
+            if penalty == 2.0:
+                raise RuntimeError("ядро сломано при штрафе 2")
+            return threshold_detector(window, penalty)
+
+        with mock.patch.dict(cp_bench.DETECTORS, {"pelt": exploding_detector, "kernel_rbf": kernel}):
+            table = cp_bench.calibrate_kernel_penalty(sample, (1.0,), "raw", grid=[1.0, 2.0, 3.0])
+        failed_steps = 5 * (12 - MIN_HISTORY)  # все шаги всех пяти рядов
+        row = table.iloc[0]
+        self.assertEqual(row["kernel_pen"], 2.0)
+        self.assertEqual((row["n_failed_pelt"], row["n_failed_kernel"], row["n_failed_grid"]),
+                         (failed_steps, failed_steps, failed_steps))
+
+    def test_main_prints_calibration_and_real_data_warnings(self):
+        # PELT падает на коротких окнах — в калибровке, на стенде и в потоке по панели;
+        # ядро падает в одной точке сетки, которую калибровка может и не выбрать.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        edge = CONFIG["bench"]["kernel_pen_grid"]["min"]
+
+        def kernel(window, penalty=3.0):
+            if np.isclose(penalty, edge):
+                raise RuntimeError("ядро сломано в одной точке сетки")
+            return detect_kernel(window, penalty=penalty)
+
+        log = run_main(Path(tmp.name), CONFIG, shifted_panel(8), {"pelt": flaky_pelt, "kernel_rbf": kernel})
+        calibration = pd.read_csv(Path(tmp.name) / "results" / "cp_calibration.csv")
+        self.assertTrue((calibration["n_failed_pelt"] > 0).all())
+        self.assertTrue((calibration["n_failed_grid"] > 0).all())
+        for line in ["ВНИМАНИЕ: калибровка, PELT при штрафе 1:", "ВНИМАНИЕ: калибровка, PELT при штрафе 3:",
+                     "ВНИМАНИЕ: калибровка, ядро на сетке штрафа:", "ВНИМАНИЕ: стенд, pelt / ratio / штраф 1:",
+                     "ВНИМАНИЕ: реальные данные, pelt / ratio / штраф 1:",
+                     "ВНИМАНИЕ: реальные данные, pelt / ratio / штраф 3:"]:
+            with self.subTest(line):
+                self.assertIn(line, log)
+        realtime = pd.read_csv(Path(tmp.name) / "results" / "cp_realtime.csv")
+        self.assertEqual(realtime.groupby("penalty")["n_failed"].sum().tolist(), [8 * (23 - MIN_HISTORY)] * 2)
+
+
 class EmptyInputTest(unittest.TestCase):
     def test_bench_sample_needs_at_least_one_series(self):
         with self.assertRaises(ValueError):
             cp_bench.bench_sample(noisy_panel(3), 0, seed=1)
+
+    def test_panel_without_series_is_rejected(self):
+        empty = noisy_panel(3).iloc[:, :0]
+        for events in ([month(14)], []):
+            with self.subTest(events=events), self.assertRaises(ValueError):
+                panel_realtime(empty, "pelt", "ratio", 1.0, 50, events)
 
     def test_calibration_needs_series_and_a_grid(self):
         with self.assertRaises(ValueError):
