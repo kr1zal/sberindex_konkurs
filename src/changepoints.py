@@ -30,40 +30,60 @@ class Detection:
     breakpoints: list[int] = field(default_factory=list)
 
 
-def _run_ruptures(y: np.ndarray, algo, n_bkps: int | None, penalty: float | None) -> list[int]:
-    """ruptures возвращает последним индексом длину ряда — это не разладка, отрезаем."""
-    fitted = algo.fit(y.reshape(-1, 1))
-    if n_bkps is not None:
-        found = fitted.predict(n_bkps=n_bkps)
-    else:
-        found = fitted.predict(pen=penalty)
+def _run_ruptures(y: np.ndarray, algo, penalty: float) -> list[int]:
+    """Разладки при штрафе за каждую: число изломов метод выбирает сам.
+
+    Режим с заданным заранее числом изломов здесь не поддерживается намеренно:
+    при одном заданном изломе он находится всегда, даже на чистом ряде, — это
+    сегментация при известном числе изломов, а не обнаружение. Стенд в таком режиме
+    мерил постановку, а не метод: «ложные тревоги» на чистых рядах были её артефактом.
+
+    ruptures возвращает последним индексом длину ряда — это не разладка, отрезаем.
+    """
+    found = algo.fit(y.reshape(-1, 1)).predict(pen=penalty)
     return [int(b) for b in found if b < len(y)]
+
+
+# У методов со стоимостью l2 выигрыш от излома измеряется в квадратах единиц ряда,
+# поэтому штраф умножается на дисперсию ряда: тогда одно число штрафа значит одно
+# и то же у всех четырёх методов и на рядах любого масштаба.
 
 
 def detect_pelt(y: np.ndarray, penalty: float = 3.0, model: str = "l2") -> Detection:
     """Точный поиск при штрафе за число разладок. Без задания их количества заранее."""
-    bkps = _run_ruptures(y, rpt.Pelt(model=model, min_size=3, jump=1), None, penalty * np.var(y))
+    bkps = _run_ruptures(y, rpt.Pelt(model=model, min_size=3, jump=1), penalty * np.var(y))
     return Detection("pelt", bkps)
 
 
-def detect_binseg(y: np.ndarray, n_bkps: int = 1, model: str = "l2") -> Detection:
+def detect_binseg(y: np.ndarray, penalty: float = 3.0, model: str = "l2") -> Detection:
     """Жадное бинарное сегментирование. Быстрое, но может промахиваться на коротких рядах."""
-    return Detection("binseg", _run_ruptures(y, rpt.Binseg(model=model, min_size=3, jump=1), n_bkps, None))
+    algo = rpt.Binseg(model=model, min_size=3, jump=1)
+    return Detection("binseg", _run_ruptures(y, algo, penalty * np.var(y)))
 
 
-def detect_window(y: np.ndarray, n_bkps: int = 1, width: int = 6, model: str = "l2") -> Detection:
+def detect_window(y: np.ndarray, penalty: float = 3.0, width: int = 6, model: str = "l2") -> Detection:
     """Скользящее окно: сравнивает статистики слева и справа от центра окна."""
-    return Detection("window", _run_ruptures(y, rpt.Window(width=width, model=model, jump=1), n_bkps, None))
+    algo = rpt.Window(width=width, model=model, jump=1)
+    return Detection("window", _run_ruptures(y, algo, penalty * np.var(y)))
 
 
-def detect_bottomup(y: np.ndarray, n_bkps: int = 1, model: str = "l2") -> Detection:
+def detect_bottomup(y: np.ndarray, penalty: float = 3.0, model: str = "l2") -> Detection:
     """Восходящее слияние сегментов — зеркало бинарного сегментирования."""
-    return Detection("bottomup", _run_ruptures(y, rpt.BottomUp(model=model, min_size=3, jump=1), n_bkps, None))
+    algo = rpt.BottomUp(model=model, min_size=3, jump=1)
+    return Detection("bottomup", _run_ruptures(y, algo, penalty * np.var(y)))
 
 
-def detect_kernel(y: np.ndarray, n_bkps: int = 1) -> Detection:
-    """Ядровой метод: ловит изменения в распределении, а не только в среднем."""
-    return Detection("kernel_rbf", _run_ruptures(y, rpt.KernelCPD(kernel="rbf", min_size=3), n_bkps, None))
+def detect_kernel(y: np.ndarray, penalty: float = 3.0) -> Detection:
+    """Ядровой метод: ловит изменения в распределении, а не только в среднем.
+
+    Штраф берётся как есть, без умножения на дисперсию: стоимость считается
+    в пространстве ядра, а ширина ядра подбирается по медиане расстояний внутри
+    ряда, поэтому от масштаба ряда стоимость не зависит. Зато номинальное число здесь
+    несопоставимо с методами l2 — стенд калибрует его по доле ложных тревог
+    (`src.cp_bench.calibrate_kernel_penalty`).
+    """
+    algo = rpt.KernelCPD(kernel="rbf", min_size=3)
+    return Detection("kernel_rbf", _run_ruptures(y, algo, penalty))
 
 
 def detect_cusum(y: np.ndarray, threshold: float = 5.0, baseline: int = 6) -> Detection:
