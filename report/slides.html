@@ -4139,7 +4139,7 @@ z-index: 1000;
 </div>
 </div>
 </div>
-<div id="f8f6034e" class="cell" data-execution_count="2">
+<div id="d17b66fb" class="cell" data-execution_count="2">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="2">
 <p><strong>Измерение.</strong> Ошибка делится на промах мимо общего движения страны и разброс между муниципалитетами. Разброс укладывается в <strong>695–849 ₽ по всем 18 сочетаниям модели и фолда</strong> при стандартном отклонении 47. MAE при этом гуляет от 781 до 3 535. Остальное не сдвинула ни одна из шести моделей разложения.</p>
 </div>
@@ -4148,7 +4148,7 @@ z-index: 1000;
 </section>
 <section id="первая-находка-ловушка-годовой-сезонности" class="slide level2 smaller">
 <h2>Первая находка: ловушка годовой сезонности</h2>
-<div id="78ff9295" class="cell" data-execution_count="3">
+<div id="042aae8c" class="cell" data-execution_count="3">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -4158,7 +4158,7 @@ z-index: 1000;
 </div>
 </div>
 <p>Годовая сезонность на 15 точках не идентифицируется — <strong>прогноз уходит в отрицательные значения</strong>. Prophet предупреждает об этом сам.</p>
-<div id="020f2850" class="cell" data-execution_count="4">
+<div id="3834b629" class="cell" data-execution_count="4">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="4">
 <p>Один флаг: на полной панели MAE <strong>22 527 ₽</strong> против 1 581 у эталона — в <strong>14 раз</strong> больше, R² пул −9,19; подгонка дороже.</p>
 </div>
@@ -4205,7 +4205,7 @@ z-index: 1000;
 </section>
 <section id="сравнение-моделей-прогнозирования" class="slide level2">
 <h2>Сравнение моделей прогнозирования</h2>
-<div id="c3df0adb" class="cell" data-execution_count="5">
+<div id="fa3bfa78" class="cell" data-execution_count="5">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -4218,7 +4218,7 @@ z-index: 1000;
 </section>
 <section id="метрики-рядом-mae-mase-r²" class="slide level2 smaller">
 <h2>Метрики рядом: MAE, MASE, R²</h2>
-<div id="9893a303" class="cell" data-execution_count="6">
+<div id="497ed3dc" class="cell" data-execution_count="6">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="6">
 <table class="caption-top" style="width:100%;">
 <colgroup>
@@ -4292,7 +4292,7 @@ z-index: 1000;
 </table>
 </div>
 </div>
-<div id="c8570db0" class="cell" data-execution_count="7">
+<div id="bbcaa3fc" class="cell" data-execution_count="7">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="7">
 <p>Среднее R² по парам ряд × фолд в таблицы не идёт: на трёх тестовых точках оно вырождено — от −39,0 до −7,3, и лучшей по нему выходит наивная модель, худшая по MAE.</p>
 </div>
@@ -4451,7 +4451,7 @@ z-index: 1000;
 </tbody>
 </table>
 <p>Разброс двухэтапной модели <strong>совпадает с наивной до рубля</strong> — 695, 774, 824. Это тождество по построению: обе дают «последнее значение × общий множитель».</p>
-<div id="2ef63003" class="cell" data-execution_count="8">
+<div id="d1e9093e" class="cell" data-execution_count="8">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="8">
 <p>Разница между ними — ровно общий фактор, и он стоит <strong>460 ₽ из 1 852</strong>.</p>
 </div>
@@ -4460,7 +4460,7 @@ z-index: 1000;
 </section>
 <section id="пять-горизонтов-наукаст-и-1-3-6-12-месяцев" class="slide level2 smaller">
 <h2>Пять горизонтов: наукаст и 1, 3, 6, 12 месяцев</h2>
-<div id="7be1c54e" class="cell" data-execution_count="9">
+<div id="b4cf78d9" class="cell" data-execution_count="9">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="9">
 <table class="caption-top">
 <colgroup>
@@ -4526,7 +4526,7 @@ z-index: 1000;
 </table>
 </div>
 </div>
-<div id="906fc3e8" class="cell" data-execution_count="10">
+<div id="47dfa29e" class="cell" data-execution_count="10">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="10">
 <p><strong>Наукаст: 45,9% над эталоном.</strong> Известный агрегат за текущий месяц добавляет 21,4 рубля: движение страны на месяц предсказуемо, остаток — разброс.</p>
 <p><strong>Год вперёд: у панельных моделей нет обучающих примеров</strong>, двухэтапная обходит эталон на 40%. Даже оракул общего движения не разносит точнее 1 356.</p>
@@ -4593,7 +4593,7 @@ z-index: 1000;
 </section>
 <section id="обнаружение-разладок-решает-преобразование" class="slide level2 smaller">
 <h2>Обнаружение разладок: решает преобразование</h2>
-<div id="6b17452e" class="cell" data-execution_count="11">
+<div id="46731d65" class="cell" data-execution_count="11">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="11">
 <table class="caption-top">
 <colgroup>
@@ -4675,18 +4675,18 @@ z-index: 1000;
 </table>
 </div>
 </div>
-<div id="dc51c830" class="cell" data-execution_count="12">
+<div id="02da620a" class="cell" data-execution_count="12">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="12">
 <p>Штраф 3 — по стенду, до реальных данных; задержка — медиана среди обнаруженных. PELT: на сырых рядах 88,3% ложных тревог, на темпах роста — 26,7%, J −47,9 → +5,9. Лучший J — +9,9 у Window, но находок вдвое меньше, задержка 4 мес. против 2: уровень скромный.</p>
 </div>
 </div>
-<p><strong>На сырых данных детекторы находят декабрьский скачок расходов, а не структурные изменения.</strong> Вскрылось только потому, что в стенд положены ряды без структурных изменений.</p>
+<p><strong>На сырых данных детекторы находят сезонность и структуру рядов, а не структурные изменения.</strong> Вскрылось благодаря нетронутым рядам в стенде.</p>
 </section>
 <section id="интерпретация-на-реальных-данных" class="slide level2 smaller">
 <h2>Интерпретация на реальных данных</h2>
 <div class="columns">
 <div class="column" style="width:60%;">
-<div id="38a8446a" class="cell" data-execution_count="13">
+<div id="2d82c154" class="cell" data-execution_count="13">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -4696,7 +4696,7 @@ z-index: 1000;
 </div>
 </div>
 </div><div class="column" style="width:40%;">
-<div id="64f97f36" class="cell" data-execution_count="14">
+<div id="ce79f709" class="cell" data-execution_count="14">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="14">
 <ul>
 <li><strong>Штраф 3, выбран по стенду:</strong> порог 50% не перейдён ни разу, наибольшая доля — 9,6% (декабрь 2023).</li>
@@ -4709,9 +4709,9 @@ z-index: 1000;
 </section>
 <section id="чего-мы-не-утверждаем" class="slide level2">
 <h2>Чего мы не утверждаем</h2>
-<div id="f57fd6b3" class="cell" data-execution_count="15">
+<div id="f1d49045" class="cell" data-execution_count="15">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="15">
-<p>Трёх событий недостаточно для вывода о причинности — это совпадение и гипотеза.</p>
+<p>Трёх событий недостаточно для вывода о причинности: связь с денежной политикой — совпадение и гипотеза.</p>
 <p>Октябрь 2023 и январь 2024 по полному ряду — не два шока: у 1 024 из 1 025 рядов с изломом в октябре 2023 есть излом и в январе 2024: это начало и конец одного отрезка.</p>
 <p>Январь неотделим от сезонности: ряд начинается в январе 2023, и детектируемый январь у нас ровно один.</p>
 </div>
@@ -4720,18 +4720,18 @@ z-index: 1000;
 </section>
 <section id="что-не-сработало" class="slide level2 smaller">
 <h2>Что не сработало</h2>
-<div id="2900a155" class="cell" data-execution_count="16">
+<div id="f2ad12bc" class="cell" data-execution_count="16">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="16">
 <p><strong>Фундаментальные модели без дообучения.</strong> Chronos-Bolt small проигрывает наивной на 41%, Moirai на 22%, TimesFM 2.5 на 14% — в среднем; на третьем фолде Moirai, TimesFM 2.5 и Chronos-Bolt base наивную обходят. <strong>Три</strong> разных семейства сходятся, значит дело не в архитектуре. На горизонте 3 дообучение Chronos снимает 30% ошибки (2 620 → 1 830) и доводит его лишь до уровня наивной (на 1,2% лучше): эталону уступает 15,8%, панельной модели — в 1,5 раза. На наукасте — лишь 1,6% (2 026 → 1 994), и он на 23,8% хуже наивной; на 6 и 12 мес. дообучение пропускается или отказывает. Повтор с тем же сидом расходится на третьем фолде: 2 326 против 2 337. Больше параметров в среднем хуже: дообученный base даёт 2 004 против 1 830 у small.</p>
 </div>
 </div>
 <p><strong>Ансамбль (пилот, 300 рядов).</strong> Смесь с весом по тесту давала +9,6%. При честном подборе веса — <strong>−40%</strong>. Оптимальный вес нестабилен между фолдами.</p>
-<div id="276ef959" class="cell" data-execution_count="17">
+<div id="db6a6497" class="cell" data-execution_count="17">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="17">
 <p><strong>Новости, четыре независимые конструкции.</strong> 589 тыс. заголовков, 18 регионов. Признаки в модели: +4,7 руб., корреляция с изломами не прошла Бонферрони (обе — на словаре до чистки). Событийный анализ, 42 проверки: ни одного значимого. <strong>Национальный уровень против федерального агрегата — 48 гипотез, порог объявлен заранее, не прошла ни одна.</strong></p>
 </div>
 </div>
-<div id="619284a3" class="cell" data-execution_count="18">
+<div id="af96da60" class="cell" data-execution_count="18">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="18">
 <p>Заголовки не виноваты: по выборке в 20 тыс. статей с телами тело добирает медианно <strong>1,2%</strong> из непопавших, а связь с целью меняется вдвое слабее шума выборки.</p>
 </div>
@@ -4754,9 +4754,9 @@ z-index: 1000;
 <section id="выводы" class="slide level2 smaller">
 <h2>Выводы</h2>
 <p><strong>Работает:</strong> глобальная модель на панели плюс перенос недостающей сезонности — <strong>23,0% над эталоном конкурса</strong> на трёх месяцах, 45,9% на наукасте; на год вперёд — двухэтапная модель, 40%.</p>
-<div id="7cd490db" class="cell" data-execution_count="19">
+<div id="3c4db6fc" class="cell" data-execution_count="19">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="19">
-<p><strong>Изломы: решает преобразование, а не алгоритм.</strong> PELT на темпах роста: обнаружено 32,6%, задержка 2 мес., ложных тревог 26,7% (на сырых рядах 88,3%). В реальном времени при выбранном штрафе порог 50% не перейдён ни разу; при штрафе 1 — только октябрь 2024, с задержкой 2 мес., и порог перейдён в самом декабре.</p>
+<p><strong>Изломы: решает преобразование, а не алгоритм.</strong> PELT на темпах роста: обнаружено 32,6% (без врезки в декабре 2023 — 27,5%), медиана задержки 2 мес., ложных тревог 26,7% (на сырых рядах 88,3%). В реальном времени при выбранном штрафе порог 50% не перейдён ни разу; при штрафе 1 — только октябрь 2024, с задержкой 2 мес., и порог перейдён в самом декабре.</p>
 </div>
 </div>
 <p><strong>Не работает:</strong> фундаментальные модели без дообучения в трёх семействах, новостные данные в четырёх конструкциях, длинные ряды в трёх конструкциях переноса из пяти.</p>
@@ -4765,7 +4765,7 @@ z-index: 1000;
 <section id="что-из-этого-следует" class="slide level2">
 <h2>Что из этого следует</h2>
 <p><strong>Осторожно с определённостью.</strong> Ни одна модель не выигрывает у наивной на всех трёх фолдах. По фолдам интервалы накрывают ноль у всех конструкций. Приводим обе оценки и не выбираем удобную.</p>
-<div id="6ac96ec5" class="cell" data-execution_count="20">
+<div id="b544b091" class="cell" data-execution_count="20">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="20">
 <p><strong>Главный практический вывод.</strong> Три дополнительных месяца истории меняют качество прогноза сильнее, чем переход от наивной модели к градиентному бустингу: на фолдах с обучением 18 и 21 точка MAE базовой панельной модели в среднем 1 006, на фолде с 15 точками — 2 387.</p>
 </div>
