@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src import cp_bench  # noqa: E402
-from src.changepoints import DETECTORS, detect_pelt  # noqa: E402
+from src.changepoints import DETECTORS, Detection, detect_pelt  # noqa: E402
 from src.cp_bench import (  # noqa: E402
     BENCH_COLUMNS, MIN_HISTORY, RECENT_WINDOW, SUMMARY_COLUMNS, inject, panel_realtime,
     preprocess, realtime_signals, run_bench, streaming_signal, summarise,
@@ -80,6 +80,22 @@ def flagged(y: np.ndarray, t: int, penalty: float = 1.0) -> bool:
     нашёл излом в последних RECENT_WINDOW точках."""
     found = detect_pelt(preprocess(y[: t + 1], "ratio"), penalty=penalty).breakpoints
     return any(b + 1 >= t - RECENT_WINDOW for b in found)
+
+
+def hysteresis_starts(flags: dict[int, bool]) -> list[int]:
+    """Начала эпизодов по определению: флаг в t и ни одного в t − 1, …, t − RECENT_WINDOW."""
+    return [t for t, on in flags.items()
+            if on and not any(flags.get(t - k, False) for k in range(1, RECENT_WINDOW + 1))]
+
+
+def pattern_detector(pattern: str):
+    """Заглушка с заданными флагами: излом у конца окна ровно в месяцы с «X», первый
+    символ — месяц MIN_HISTORY. Значения ряда не важны — только длина окна (режим raw)."""
+    def detect(window, **kwargs):
+        i = len(window) - 1 - MIN_HISTORY
+        near_end = 0 <= i < len(pattern) and pattern[i] == "X"
+        return Detection("pattern", [len(window) - 1] if near_end else [])
+    return detect
 
 
 class DetectorPenaltyModeTest(unittest.TestCase):
@@ -290,19 +306,39 @@ class PanelRealtimeTest(unittest.TestCase):
                 "events": [month(self.SHIFT)], **kwargs}
         return panel_realtime(self.panel if panel is None else panel, **args)
 
-    def signals(self, col: str) -> list[int]:
-        return realtime_signals(self.panel[col].to_numpy(float), "pelt", "ratio", 1.0)
+    def signals(self, col: str, penalty: float = 1.0) -> list[int]:
+        return realtime_signals(self.panel[col].to_numpy(float), "pelt", "ratio", penalty)
 
-    def test_signals_are_starts_of_flag_runs(self):
-        # Определение по флагам, посчитанным здесь заново: сигнал — флаг в t при отсутствии
-        # флага в t − 1, в первый проверяемый месяц прошлого флага нет, паузы нет. На панели
-        # есть и эпизоды шума до сдвига, и слитые с эпизодом сдвига.
+    def test_signals_follow_the_hysteresis_rule(self):
+        # Определение по флагам, посчитанным здесь заново. При штрафе 1 на панели есть эпизоды
+        # шума до сдвига и слитые с эпизодом сдвига, при штрафе 3 — перерывы во флагах после него.
+        for penalty in (1.0, 3.0):
+            for col in self.panel.columns:
+                y = self.panel[col].to_numpy(float)
+                flags = {t: flagged(y, t, penalty) for t in range(MIN_HISTORY, len(y))}
+                with self.subTest(col, penalty=penalty):
+                    self.assertEqual(self.signals(col, penalty), hysteresis_starts(flags))
+
+    def test_short_gaps_after_the_shift_no_longer_start_a_second_episode(self):
+        # При штрафе 3 серия флагов после разового сдвига прерывается на месяц-два перед
+        # вторым изломом, и по одному переходу «нет флага → флаг» у части рядов в течение
+        # шести месяцев после сдвига начинался второй эпизод. Гистерезис его убирает. Второй
+        # эпизод остаётся, только если флагов не было RECENT_WINDOW месяцев подряд, — по
+        # определению это два эпизода (здесь у одного ряда перерыв ровно в три месяца).
+        near = range(self.SHIFT, self.SHIFT + 7)
+        rising_echo = echo = 0
         for col in self.panel.columns:
             y = self.panel[col].to_numpy(float)
-            flags = [flagged(y, t) for t in range(MIN_HISTORY, len(y))]
-            starts = [MIN_HISTORY + i for i, on in enumerate(flags) if on and (i == 0 or not flags[i - 1])]
-            with self.subTest(col):
-                self.assertEqual(self.signals(col), starts)
+            flags = {t: flagged(y, t, 3.0) for t in range(MIN_HISTORY, len(y))}
+            rising = [t for t, on in flags.items() if on and not flags.get(t - 1, False)]
+            rising_echo += sum(t in near for t in rising) > 1
+            second = [t for t in self.signals(col, 3.0) if t in near][1:]
+            echo += bool(second)
+            for t in second:
+                with self.subTest(col, t=t):
+                    self.assertFalse(any(flags.get(t - k, False) for k in range(1, RECENT_WINDOW + 1)))
+        self.assertGreaterEqual(rising_echo, 5)
+        self.assertLess(echo, rising_echo)
 
     def test_single_shift_gives_one_signal_per_series(self):
         # Сдвиг в первый проверяемый месяц: до него сигналить нечему, после него дисперсию
@@ -336,7 +372,9 @@ class PanelRealtimeTest(unittest.TestCase):
                 self.assertLessEqual(sum(t >= self.SHIFT for t in self.signals(col)), 1)
 
     def test_common_shift_crosses_threshold_within_recent_window(self):
-        monthly, events = self.realtime()
+        # Штраф 3: при штрафе 1 шум даёт флаги и в месяцы перед сдвигом, и эпизод сдвига
+        # у половины рядов сливается с эпизодом шума — ограничение правила, не этой проверки.
+        monthly, events = self.realtime(penalty=3.0)
         self.assertEqual(list(monthly.columns), ["month", "share", "n_signals"])
         self.assertEqual(monthly["month"].tolist(), [month(i) for i in range(24)])
         self.assertTrue((monthly["share"].iloc[: self.SHIFT] < 50).all())
@@ -363,9 +401,9 @@ class PanelRealtimeTest(unittest.TestCase):
 
     def test_crossing_is_searched_inside_the_event_window(self):
         # Первое событие своё окно порогом не проходит; переход в окне второго — чужой
-        # и первому не приписывается.
+        # и первому не приписывается. Штраф 3 — как в проверке перехода выше.
         first, second = self.SHIFT - 5, self.SHIFT
-        monthly, events = self.realtime(events=[month(first), month(second)])
+        monthly, events = self.realtime(penalty=3.0, events=[month(first), month(second)])
         self.assertTrue((monthly["share"].iloc[first:second] < 50).all())
         self.assertTrue(pd.notna(events.loc[1, "crossed_month"]))
         self.assertTrue(pd.isna(events.loc[0, "crossed_month"]) and pd.isna(events.loc[0, "delay"]))
@@ -394,6 +432,27 @@ class PanelRealtimeTest(unittest.TestCase):
     def test_unknown_event_month_is_rejected(self):
         with self.assertRaises(ValueError):
             self.realtime(events=["2030-01"])
+
+
+class HysteresisTest(unittest.TestCase):
+    """Правило эпизода на заданных флагах (`pattern_detector`)."""
+
+    def signals(self, pattern: str) -> list[int]:
+        with mock.patch.dict(cp_bench.DETECTORS, {"pattern": pattern_detector(pattern)}):
+            return realtime_signals(np.ones(24), "pattern", "raw", None)
+
+    def test_gap_shorter_than_recent_window_keeps_one_episode(self):
+        # флаги ряда мо_2 при штрафе 3: перерыв в два месяца перед вторым изломом
+        self.assertEqual(self.signals("XXXX..X..."), [MIN_HISTORY])
+        self.assertEqual(self.signals("X" + "." * (RECENT_WINDOW - 1) + "X"), [MIN_HISTORY])
+
+    def test_gap_of_recent_window_quiet_months_starts_a_new_episode(self):
+        self.assertEqual(self.signals("X" + "." * RECENT_WINDOW + "X"),
+                         [MIN_HISTORY, MIN_HISTORY + RECENT_WINDOW + 1])
+
+    def test_first_evaluated_month_may_signal(self):
+        self.assertEqual(self.signals("X"), [MIN_HISTORY])
+        self.assertEqual(self.signals("..XX"), [MIN_HISTORY + 2])
 
 
 def summary_rows(rows: list[tuple]) -> pd.DataFrame:
