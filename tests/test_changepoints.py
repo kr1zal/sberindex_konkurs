@@ -1,15 +1,23 @@
 """Детекторы в штрафном режиме, стенд разладок и потоковый сигнал на панели:
-`src/changepoints.py`, `src/cp_bench.py`. Ряды синтетические, файлов тесты не пишут.
+`src/changepoints.py`, `src/cp_bench.py`, `scripts/changepoints.py`.
+
+Ряды синтетические, файлы пишутся только во временный каталог: живые
+`results/cp_*.csv` тесты не трогают.
 """
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import numpy as np
 import pandas as pd
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -20,6 +28,12 @@ from src.cp_bench import (  # noqa: E402
     BENCH_COLUMNS, MIN_HISTORY, RECENT_WINDOW, SUMMARY_COLUMNS, inject, panel_realtime,
     preprocess, realtime_signals, run_bench, streaming_signal, summarise,
 )
+
+# scripts/ — не пакет: скрипт грузится по пути, без правки sys.path под все тесты.
+# Имя модуля своё: `changepoints` уже занято детекторами в src.
+_spec = importlib.util.spec_from_file_location("changepoints_script", ROOT / "scripts" / "changepoints.py")
+script = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(script)
 
 PENALIZED = ["pelt", "binseg", "window", "bottomup", "kernel_rbf"]
 # Штраф, при котором чистая синусоида целиком не окупает ни одного излома, а сдвиг в 4σ
@@ -317,6 +331,117 @@ class PanelRealtimeTest(unittest.TestCase):
     def test_unknown_event_month_is_rejected(self):
         with self.assertRaises(ValueError):
             self.realtime(events=["2030-01"])
+
+
+def summary_rows(rows: list[tuple]) -> pd.DataFrame:
+    return pd.DataFrame([{"detector": d, "mode": m, "penalty": p, "J Юдена": j} for d, m, p, j in rows])
+
+
+class SelectPenaltyTest(unittest.TestCase):
+    def test_highest_youden_of_the_detector_and_mode(self):
+        summary = summary_rows([("pelt", "ratio", 1.0, 30.0), ("pelt", "ratio", 3.0, 40.0),
+                                ("pelt", "raw", 1.0, 90.0), ("cusum", "ratio", np.nan, 95.0)])
+        self.assertEqual(script.select_penalty(summary, "pelt", "ratio"), 3.0)
+
+    def test_tie_goes_to_the_smaller_penalty(self):
+        # Разность долей с разными знаменателями: равные по смыслу J расходятся в последнем разряде.
+        # Больший из двух достаётся большему штрафу: без округления выбор ушёл бы к нему.
+        a = 100 * 30 / 540 - 100 * 2 / 60
+        b = 100 * 39 / 540 - 100 * 3 / 60
+        self.assertNotEqual(a, b)
+        summary = summary_rows([("pelt", "ratio", 3.0, max(a, b)), ("pelt", "ratio", 1.0, min(a, b))])
+        self.assertEqual(script.select_penalty(summary, "pelt", "ratio"), 1.0)
+
+    def test_detector_without_penalty_rows_is_rejected(self):
+        summary = summary_rows([("cusum", "ratio", np.nan, 10.0)])
+        with self.assertRaises(ValueError):
+            script.select_penalty(summary, "cusum", "ratio")
+
+
+class OfflineSharesTest(unittest.TestCase):
+    def test_break_in_growth_rates_is_dated_by_the_new_level(self):
+        # Излом b в ряду темпов роста — месяц b + 1: с него уровень ряда другой.
+        panel = shifted_panel(shift_at=14)
+        table = script.offline_shares(panel, "pelt", "ratio", 1.0)
+        self.assertEqual(list(table.columns), ["month", "share", "n_breaks"])
+        self.assertEqual(table["share"].idxmax(), 14)
+        self.assertEqual(table.loc[14, "month"], month(14))
+        self.assertAlmostEqual(table.loc[14, "share"], table.loc[14, "n_breaks"] / panel.shape[1] * 100)
+
+
+class _Report:
+    def as_text(self) -> str:
+        return ""
+
+
+CONFIG = {
+    "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
+    "bench": {"n_series": 3, "seed": 5, "positions": [14], "magnitudes": [4.0], "kinds": ["level"],
+              "modes": ["ratio"], "detectors": ["pelt", "kernel_rbf", "cusum"], "penalties": [1.0, 3.0]},
+    "selection": {"rule": "J Юдена на режиме ratio, среди штрафов из сетки; при равенстве — меньший штраф"},
+    "realtime": {"detector": "pelt", "mode": "ratio", "threshold_share": 50, "events": ["2024-03"]},
+    "output": {"dir": "results"},
+}
+FILES = {
+    "cp_bench.csv": BENCH_COLUMNS,
+    "cp_summary.csv": KEY + SUMMARY_COLUMNS,
+    "cp_summary_by_magnitude.csv": KEY + ["magnitude"] + SUMMARY_COLUMNS,
+    "cp_calibration.csv": ["penalty", "kernel_pen", "fa_pelt", "fa_kernel"],
+    "cp_realtime.csv": ["penalty", "month", "share", "n_signals"],
+    "cp_realtime_events.csv": ["penalty", "selected", "event", "crossed_month", "delay", "max_share"],
+    "cp_offline.csv": ["penalty", "month", "share", "n_breaks"],
+}
+
+
+class MainTest(unittest.TestCase):
+    """`main()` целиком на синтетике: от калибровки до записанных файлов."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        config = self.root / "config.yaml"
+        config.write_text(yaml.safe_dump(CONFIG, allow_unicode=True), encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            for name, value in {"ROOT": self.root, "load_panel": mock.Mock(return_value=None),
+                                "build_matrix": mock.Mock(return_value=(shifted_panel(8), _Report()))}.items():
+                stack.enter_context(mock.patch.object(script, name, value))
+            stack.enter_context(mock.patch.object(sys, "argv", ["changepoints.py", "--config", str(config)]))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            script.main()
+        self.log = out.getvalue()
+        self.results = self.root / "results"
+
+    def read(self, name: str) -> pd.DataFrame:
+        return pd.read_csv(self.results / name)
+
+    def test_every_file_is_written_with_its_columns(self):
+        for name, columns in FILES.items():
+            with self.subTest(name):
+                self.assertEqual(list(self.read(name).columns), columns)
+
+    def test_penalty_is_chosen_by_the_rule_before_the_real_data(self):
+        summary = self.read("cp_summary.csv")
+        chosen = script.select_penalty(summary, "pelt", "ratio")
+        events = self.read("cp_realtime_events.csv")
+        self.assertEqual(sorted(events["penalty"]), [1.0, 3.0])
+        self.assertEqual(events.loc[events["selected"], "penalty"].tolist(), [chosen])
+        self.assertLess(self.log.index(CONFIG["selection"]["rule"]), self.log.index("РЕАЛЬНЫЕ ДАННЫЕ"))
+
+    def test_bench_uses_the_calibrated_kernel_penalty(self):
+        calibration = self.read("cp_calibration.csv")
+        bench = self.read("cp_bench.csv")
+        kernel = bench[bench["detector"] == "kernel_rbf"]
+        expected = kernel["penalty"].map(dict(zip(calibration["penalty"], calibration["kernel_pen"])))
+        self.assertTrue(np.allclose(kernel["penalty_effective"], expected))
+
+    def test_realtime_and_offline_cover_every_penalty_and_month(self):
+        for name in ["cp_realtime.csv", "cp_offline.csv"]:
+            with self.subTest(name):
+                table = self.read(name)
+                self.assertEqual(len(table), 2 * 24)
+                self.assertEqual(sorted(table["penalty"].unique()), [1.0, 3.0])
 
 
 if __name__ == "__main__":
