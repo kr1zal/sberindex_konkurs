@@ -753,32 +753,134 @@ class EdgeWarningsTest(unittest.TestCase):
         self.assertIn("штраф 10:", lines[1])
 
 
+class LogWarningsTest(unittest.TestCase):
+    """Строки лога о выбранном штрафе на краю сетки и о месяцах врезки."""
+
+    def test_selected_penalty_at_either_edge_of_the_grid_is_marked(self):
+        grid = [0.5, 1.0, 3.0, 5.0]
+        for chosen in (0.5, 5.0):
+            with self.subTest(chosen=chosen):
+                lines = script.selection_edge_warning(chosen, grid)
+                self.assertEqual(len(lines), 1)
+                self.assertTrue(lines[0].startswith(f"ВНИМАНИЕ: выбранный штраф на краю сетки — {chosen:g}"))
+        for chosen in (1.0, 3.0):
+            with self.subTest(chosen=chosen):
+                self.assertEqual(script.selection_edge_warning(chosen, grid), [])
+
+    def test_positions_are_dated_by_the_panel_and_december_or_january_is_marked(self):
+        months = [month(i) for i in range(24)]
+        lines = script.position_lines(months, [8, 11, 12, 14, 23])
+        self.assertEqual(lines[0], "позиции врезки: 8 → 2023-09, 11 → 2023-12, 12 → 2024-01, "
+                                   "14 → 2024-03, 23 → 2024-12")
+        self.assertEqual([line.split(",")[0] for line in lines[1:]],
+                         ["ВНИМАНИЕ: позиция врезки 11 → 2023-12", "ВНИМАНИЕ: позиция врезки 12 → 2024-01",
+                          "ВНИМАНИЕ: позиция врезки 23 → 2024-12"])
+        self.assertEqual(script.position_lines(months, [8, 14, 17, 20])[1:], [])
+
+
+class RealtimeRankTest(unittest.TestCase):
+    """Ранговый вид (`realtime_rank`) на помесячной таблице с заданными долями."""
+
+    # доли наблюдаемых месяцев 2023-09 … 2024-12; события — 2023-10 и 2024-01
+    SHARES = [10.0, 30.0, 5.0, 20.0, 5.0, 5.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 3.0, 4.0, 6.0, 20.0]
+    EVENTS = ["2023-10", "2024-01"]
+
+    def rank(self, shares=None, events=None) -> pd.DataFrame:
+        share = np.r_[np.zeros(MIN_HISTORY), self.SHARES if shares is None else shares]
+        monthly = pd.DataFrame({"month": [month(i) for i in range(24)], "share": share,
+                                "n_signals": 0, "n_failed": 0})
+        return cp_bench.realtime_rank(monthly, self.EVENTS if events is None else events)
+
+    def test_observed_months_are_ranked_from_the_largest_share_ties_averaged(self):
+        rank = self.rank()
+        self.assertEqual(list(rank.columns), ["month", "event", "share", "rank", "n_months", "background_median",
+                                              "ratio_to_background"])
+        # раньше MIN_HISTORY детектор не запускается: доля там нулевая по построению
+        self.assertEqual(rank["month"].tolist(), [month(i) for i in range(MIN_HISTORY, 24)])
+        self.assertTrue((rank["n_months"] == 16).all())
+        ranks = rank.set_index("month")["rank"]
+        self.assertEqual(ranks["2023-10"], 1.0)  # 30 — наибольшая
+        self.assertEqual((ranks["2023-12"], ranks["2024-12"]), (2.5, 2.5))  # 20 и 20 — места 2 и 3
+        self.assertEqual(ranks["2024-01"], 7.0)  # 5 трижды — места 6–8
+        self.assertEqual(ranks["2024-05"], 14.5)  # 1 четырежды — места 13–16
+
+    def test_background_is_the_median_of_months_without_events(self):
+        rank = self.rank()
+        # 14 месяцев без событий, декабри в фоне: 1,1,1,1,2,2,3,4,5,5,6,10,20,20 — медиана 3,5
+        self.assertTrue((rank["background_median"] == 3.5).all())
+        events = rank[rank["event"].notna()].set_index("event")
+        self.assertEqual(events.index.tolist(), self.EVENTS)
+        self.assertEqual(events["share"].tolist(), [30.0, 5.0])
+        self.assertAlmostEqual(events.loc["2023-10", "ratio_to_background"], 30 / 3.5)
+        self.assertAlmostEqual(events.loc["2024-01", "ratio_to_background"], 5 / 3.5)
+
+    def test_zero_background_leaves_the_ratio_empty(self):
+        shares = [0.0] * 16
+        shares[1] = 30.0  # эпизоды начались только в месяц события
+        rank = self.rank(shares, ["2023-10"])
+        self.assertTrue((rank["background_median"] == 0).all())
+        self.assertTrue(rank["ratio_to_background"].isna().all())
+        # колонка остаётся числовой: скрипт склеивает ранговый вид всех штрафов, и пустая
+        # колонка другого типа меняла бы тип склейки (FutureWarning в прогоне на панели)
+        self.assertEqual(rank["ratio_to_background"].dtype, np.float64)
+
+    def test_event_before_the_first_evaluated_month_or_outside_the_panel_is_rejected(self):
+        for events in (["2023-05"], ["2030-01"]):
+            with self.subTest(events=events), self.assertRaises(ValueError):
+                self.rank(events=events)
+
+
+class SaveTest(unittest.TestCase):
+    def test_protocol_goes_first_and_the_frame_is_left_as_is(self):
+        # кадр после записи идёт дальше — в лог и в правило выбора штрафа
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "out.csv"
+        frame = pd.DataFrame({"position": [8.0, np.nan], "share": [1.5, 2.0]})
+        script.save(frame, path, "v2", whole=("position",))
+        self.assertEqual(path.read_text(encoding="utf-8").splitlines(),
+                         ["protocol,position,share", "v2,8,1.5", "v2,,2.0"])
+        self.assertEqual(list(frame.columns), ["position", "share"])
+
+
 class _Report:
     def as_text(self) -> str:
         return ""
 
 
 CONFIG = {
+    "protocol_version": 2,
     "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
-    "bench": {"n_series": 3, "seed": 5, "positions": [14], "magnitudes": [4.0], "kinds": ["level"],
+    "bench": {"n_series": 3, "seed": 5, "positions": [8, 14], "magnitudes": [4.0], "kinds": ["level"],
               "modes": ["ratio"], "detectors": ["pelt", "kernel_rbf", "cusum"], "penalties": [1.0, 3.0],
               "max_delay": 3, "twin_rule": True,
               # своя сетка, не протокольная: калиброванный штраф обязан взяться именно из неё
               "kernel_pen_grid": {"min": 0.002, "max": 50, "points": 25}},
     "selection": {"rule": "J Юдена у {detector} на режиме {mode}, среди штрафов из сетки; при равенстве — меньший штраф"},
-    "realtime": {"detector": "pelt", "mode": "ratio", "threshold_share": 50, "events": ["2024-03"]},
+    "realtime": {"detector": "pelt", "mode": "ratio", "threshold_share": 50, "events": ["2024-03"],
+                 "rank_view": True},
     "output": {"dir": "results"},
 }
+# Протокол v1 на той же синтетике: правила зачёта выключены, позиция 11 — декабрь 2023,
+# рангового вида нет.
+CONFIG_V1 = {
+    **CONFIG, "protocol_version": 1,
+    "bench": {**CONFIG["bench"], "positions": [11, 14], "max_delay": None, "twin_rule": False},
+    "realtime": {**CONFIG["realtime"], "rank_view": False},
+}
 FILES = {
-    "cp_bench.csv": BENCH_COLUMNS,
-    "cp_summary.csv": KEY + SUMMARY_COLUMNS,
-    "cp_summary_by_magnitude.csv": KEY + ["magnitude"] + SUMMARY_COLUMNS,
-    "cp_calibration.csv": CALIBRATION_COLUMNS,
-    "cp_realtime.csv": ["penalty", "month", "share", "n_signals", "n_failed"],
-    "cp_realtime_events.csv": ["penalty", "selected", "event", "crossed_month", "delay", "max_share",
+    "cp_bench.csv": ["protocol"] + BENCH_COLUMNS,
+    "cp_summary.csv": ["protocol"] + KEY + SUMMARY_COLUMNS,
+    "cp_summary_by_magnitude.csv": ["protocol"] + KEY + ["magnitude"] + SUMMARY_COLUMNS,
+    "cp_summary_by_position.csv": ["protocol"] + KEY + ["position"] + SUMMARY_COLUMNS,
+    "cp_calibration.csv": ["protocol"] + CALIBRATION_COLUMNS,
+    "cp_realtime.csv": ["protocol", "penalty", "month", "share", "n_signals", "n_failed"],
+    "cp_realtime_events.csv": ["protocol", "penalty", "selected", "event", "crossed_month", "delay", "max_share",
                                "share_in_window"],
-    "cp_offline.csv": ["penalty", "month", "share", "n_breaks"],
-    "cp_offline_series.csv": ["penalty", "series_id", "month"],
+    "cp_realtime_rank.csv": ["protocol", "penalty", "selected", "month", "event", "share", "rank", "n_months",
+                             "background_median", "ratio_to_background"],
+    "cp_offline.csv": ["protocol", "penalty", "month", "share", "n_breaks"],
+    "cp_offline_series.csv": ["protocol", "penalty", "series_id", "month"],
 }
 
 
@@ -859,6 +961,16 @@ class MainTest(unittest.TestCase):
         self.assertIn("max_delay 3", header)
         self.assertIn("twin_rule True", header)
 
+    def test_scoring_rules_reach_the_bench_from_the_config(self):
+        # Здесь все сигналы после врезки — с нулевой задержкой, и max_delay по файлу не проверить;
+        # 2, а не протокольные 3 — чтобы значение нельзя было спутать с RECENT_WINDOW.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        config = {**CONFIG, "bench": {**CONFIG["bench"], "max_delay": 2}}
+        with mock.patch.object(script, "run_bench", wraps=script.run_bench) as bench:
+            run_main(Path(tmp.name), config, shifted_panel(8))
+        self.assertEqual((bench.call_args.kwargs["max_delay"], bench.call_args.kwargs["twin_rule"]), (2, True))
+
     def test_bench_follows_the_configured_scoring_rules(self):
         spoiled = self.read("cp_bench.csv").query("kind != 'none'")
         after = spoiled["signal"] >= spoiled["position"]
@@ -868,6 +980,116 @@ class MainTest(unittest.TestCase):
         self.assertTrue((spoiled["detected"] == (after & ~late & ~vetoed)).all())
         # правило близнеца здесь действительно снимает сигналы: сдвиг панели общий у всех рядов
         self.assertGreater(vetoed.sum(), 0)
+
+    def test_first_log_line_is_the_protocol_version(self):
+        # до отчёта о матрице: у заглушки он пуст, и первой строкой была бы пустая
+        self.assertEqual(self.log.splitlines()[0], f"ПРОТОКОЛ СТЕНДА: v2 ({self.root / 'config.yaml'})")
+
+    def test_every_file_carries_the_protocol_version_first(self):
+        for name in FILES:
+            with self.subTest(name):
+                table = self.read(name)
+                self.assertGreater(len(table), 0)
+                self.assertEqual(table.columns[0], "protocol")
+                self.assertTrue((table["protocol"] == "v2").all())
+
+    def test_summary_by_position_is_the_summary_at_the_chosen_penalty(self):
+        bench = self.read("cp_bench.csv").drop(columns="protocol")
+        chosen = script.select_penalty(self.read("cp_summary.csv"), "pelt", "ratio")
+        expected = summarise(bench[(bench["penalty"] == chosen) | bench["penalty"].isna()], by=("position",))
+        written = self.read("cp_summary_by_position.csv").drop(columns="protocol")
+        self.assertEqual(sorted(written["position"].unique()), [8, 14])
+        pd.testing.assert_frame_equal(written, expected, check_dtype=False)
+        self.assertIn(f"ПО ПОЗИЦИИ ВРЕЗКИ при штрафе {chosen:g}", self.log)
+
+    def test_rank_view_is_written_for_every_penalty(self):
+        rank = self.read("cp_realtime_rank.csv")
+        shares = self.read("cp_realtime.csv")
+        chosen = script.select_penalty(self.read("cp_summary.csv"), "pelt", "ratio")
+        self.assertEqual(rank.loc[rank["selected"], "penalty"].unique().tolist(), [chosen])
+        for penalty in (1.0, 3.0):
+            with self.subTest(penalty=penalty):
+                written = rank[rank["penalty"] == penalty].drop(columns=["protocol", "penalty", "selected"])
+                monthly = shares[shares["penalty"] == penalty].reset_index(drop=True)
+                expected = cp_bench.realtime_rank(monthly, CONFIG["realtime"]["events"])
+                pd.testing.assert_frame_equal(written.reset_index(drop=True), expected, check_dtype=False)
+
+    def test_log_describes_the_event_month_at_the_chosen_penalty(self):
+        rank = self.read("cp_realtime_rank.csv")
+        row = rank[rank["selected"] & (rank["event"] == "2024-03")].iloc[0]
+        # два знака: один ряд панели из двух тысяч — 0,05%, и фон «0.0%» при конечном отношении вводил бы в заблуждение
+        self.assertIn(f"2024-03: доля {row['share']:.2f}%, ранг {row['rank']:g} из {row['n_months']}, "
+                      f"медиана фона {row['background_median']:.2f}%", self.log)
+        # описание, не второй порог: оценки «прошёл / не прошёл» в ранговом виде нет
+        section = self.log[self.log.index("РАНГОВЫЙ ВИД"):]
+        self.assertNotIn("прош", section[:section.index("\n\n")])
+
+    def test_log_dates_the_positions_and_marks_a_selection_at_the_edge(self):
+        self.assertIn("позиции врезки: 8 → 2023-09, 14 → 2024-03", self.log)
+        self.assertNotIn("ВНИМАНИЕ: позиция врезки", self.log)
+        # в сетке два штрафа, так что любой выбор — на её краю
+        self.assertIn("ВНИМАНИЕ: выбранный штраф на краю сетки", self.log)
+
+    def test_log_lists_every_written_file(self):
+        saved = next(line for line in self.log.splitlines() if line.startswith("сохранено в"))
+        for name in FILES:
+            with self.subTest(name):
+                self.assertIn(name, saved)
+
+
+class ConfigKeysTest(unittest.TestCase):
+    def test_protocol_keys_have_no_defaults(self):
+        # Умолчание в коде — второй экземпляр протокола: конфиг без правила близнеца молча
+        # прогнал бы правила v1. max_delay: null допустим, но ключ обязан быть.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+
+        def without(section, key):
+            if section is None:
+                return {k: v for k, v in CONFIG.items() if k != key}
+            return {**CONFIG, section: {k: v for k, v in CONFIG[section].items() if k != key}}
+
+        for section, key in [(None, "protocol_version"), ("bench", "max_delay"), ("bench", "twin_rule"),
+                             ("realtime", "rank_view")]:
+            with self.subTest(key), self.assertRaises(KeyError):
+                run_main(Path(tmp.name), without(section, key), shifted_panel(8))
+
+
+class MainProtocolV1Test(unittest.TestCase):
+    """`main()` с конфигом протокола v1: версия в файлах, правила v2 выключены, рангового вида нет."""
+
+    @classmethod
+    def setUpClass(cls):
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.root = Path(tmp.name)
+        cls.log = run_main(cls.root, CONFIG_V1, shifted_panel(8))
+        cls.results = cls.root / "results"
+
+    def test_every_file_carries_v1_and_the_rank_view_is_not_written(self):
+        written = sorted(path.name for path in self.results.glob("*.csv"))
+        self.assertEqual(written, sorted(set(FILES) - {"cp_realtime_rank.csv"}))
+        for name in written:
+            with self.subTest(name):
+                table = pd.read_csv(self.results / name)
+                self.assertEqual(table.columns[0], "protocol")
+                self.assertTrue((table["protocol"] == "v1").all())
+        self.assertEqual(self.log.splitlines()[0], f"ПРОТОКОЛ СТЕНДА: v1 ({self.root / 'config.yaml'})")
+        self.assertNotIn("cp_realtime_rank.csv", self.log)
+
+    def test_december_position_is_marked(self):
+        self.assertIn("позиции врезки: 11 → 2023-12, 14 → 2024-03", self.log)
+        self.assertIn("ВНИМАНИЕ: позиция врезки 11 → 2023-12", self.log)
+
+    def test_every_signal_after_the_injection_counts(self):
+        bench = pd.read_csv(self.results / "cp_bench.csv").query("kind != 'none'")
+        after = bench["signal"] >= bench["position"]
+        self.assertFalse(bench["late"].any())
+        self.assertTrue((bench["detected"] == after).all())
+        # флаг близнеца в месяц сигнала есть — без правила он сигнал не снимает
+        self.assertGreater((after & bench["twin_flag_at_signal"]).sum(), 0)
+        summary = pd.read_csv(self.results / "cp_summary.csv")
+        self.assertTrue((summary["n late"] == 0).all() and (summary["n twin-vetoed"] == 0).all())
 
 
 class DetectorFailureTest(unittest.TestCase):

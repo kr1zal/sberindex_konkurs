@@ -5,17 +5,21 @@
 все — при неизвестном числе изломов, методы со штрафом — на каждом штрафе сетки.
 Затем штраф для реальных данных выбирается правилом `selection` — до того, как
 посчитаны реальные данные, — и потоковый сигнал считается по всем рядам панели.
-Протокол задан в `configs/changepoints.yaml` и больше нигде.
+Протокол задан в конфиге и больше нигде: действующий — `configs/changepoints.yaml` (v2),
+прежний — `configs/changepoints_v1.yaml`, он пишет в `results/cp_v1/`.
 
 Файлы в `output.dir` каждый раз переписываются целиком — стенд не сливается
-партиями, как `src/run.py`:
+партиями, как `src/run.py`. Первая колонка каждого файла — `protocol`, версия протокола
+(`v2`): файлы разных версий иначе не отличить.
 
     cp_calibration.csv           штраф ядра, при котором доля ложных тревог как у PELT
     cp_bench.csv                 все строки стенда
     cp_summary.csv               детектор × режим × штраф: обнаружено, задержка, ложные, J Юдена
     cp_summary_by_magnitude.csv  то же по величине возмущения при выбранном штрафе
+    cp_summary_by_position.csv   то же по позиции врезки при выбранном штрафе
     cp_realtime.csv              потоковый сигнал на панели по месяцам, на каждом штрафе
     cp_realtime_events.csv       события: месяц перехода порога, задержка, доли в окне события
+    cp_realtime_rank.csv         ранговый вид: доля месяца, ранг, медиана фона — при realtime.rank_view
     cp_offline.csv               изломы по полному ряду — прежний офлайновый расчёт, для сравнения
     cp_offline_series.csv        те же изломы по рядам, строка на излом: пары изломов считаются из файла
 
@@ -37,8 +41,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.cp_bench import (  # noqa: E402
-    bench_sample, calibrate_kernel_penalty, detector_with_penalty, effective_penalty, month_offset,
-    panel_realtime, preprocess, run_bench, summarise,
+    RANK_COLUMNS, bench_sample, calibrate_kernel_penalty, detector_with_penalty, effective_penalty,
+    month_offset, panel_realtime, preprocess, realtime_rank, run_bench, summarise,
 )
 from src.data import build_matrix, load_panel  # noqa: E402
 
@@ -104,9 +108,38 @@ def failure_warning(what: str, n_failed: int) -> list[str]:
     return [f"ВНИМАНИЕ: {what}: детектор упал на {int(n_failed)} шагах — они засчитаны как шаги без тревоги"]
 
 
-def save(frame: pd.DataFrame, path: Path, whole: Sequence[str] = ()) -> None:
-    """CSV целиком; колонки `whole` — целые с пропусками: «14», а не «14.0», пусто — нет значения."""
-    frame.astype({column: "Int64" for column in whole}).to_csv(path, index=False)
+def selection_edge_warning(chosen: float, penalties: Sequence[float]) -> list[str]:
+    """Строка «ВНИМАНИЕ», если правило выбрало крайний штраф сетки: J Юдена мог бы расти
+    и за её краем, и тогда лучший штраф лежит вне сетки. Сетку это не меняет — только видимость."""
+    edges = {min(penalties): "наименьший", max(penalties): "наибольший"}
+    if chosen not in edges:
+        return []
+    return [f"ВНИМАНИЕ: выбранный штраф на краю сетки — {chosen:g}, {edges[chosen]} из {sorted(penalties)}: "
+            f"оптимум может лежать за её пределами"]
+
+
+def position_lines(months: Sequence[str], positions: Sequence[int]) -> list[str]:
+    """Позиции врезки месяцами панели и строка «ВНИМАНИЕ» для позиции в декабре или январе.
+
+    Врезка в месяц сезонного скачка засчитывает обнаружением сам скачок: в v1 так вышло
+    с позицией 11 — декабрём 2023. Протокол этим не проверяется и не меняется — только видимость.
+    """
+    lines = ["позиции врезки: " + ", ".join(f"{p} → {months[p]}" for p in positions)]
+    for p in positions:
+        name = {"12": "декабрь", "01": "январь"}.get(months[p][-2:])
+        if name:
+            lines.append(f"ВНИМАНИЕ: позиция врезки {p} → {months[p]}, {name}: сезонный скачок этого месяца "
+                         f"совпадает с врезкой и может засчитываться её обнаружением")
+    return lines
+
+
+def save(frame: pd.DataFrame, path: Path, protocol: str, whole: Sequence[str] = ()) -> None:
+    """CSV целиком, первой колонкой — версия протокола: файлы v1 и v2 иначе не отличить.
+    Колонки `whole` — целые с пропусками: «14», а не «14.0», пусто — нет значения.
+    `frame` не меняется: после записи он идёт в лог и дальше в расчёт."""
+    out = frame.astype({column: "Int64" for column in whole})
+    out.insert(0, "protocol", protocol)
+    out.to_csv(path, index=False)
 
 
 def table(frame: pd.DataFrame, digits: str = ",.1f") -> str:
@@ -120,7 +153,14 @@ def main() -> int:
     started = time.perf_counter()
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
+    # Версия — первой строкой лога и первой колонкой каждого файла: результаты v1 и v2
+    # лежат рядом, и по файлу или логу должно быть видно, чей он.
+    protocol = f"v{cfg['protocol_version']}"
+    print(f"ПРОТОКОЛ СТЕНДА: {protocol} ({args.config})")
     bench_cfg, realtime = cfg["bench"], cfg["realtime"]
+    # Ключи протокола без умолчаний, и читаются сразу: без них прогон падает в начале,
+    # а не через несколько минут. max_delay: null — без границы задержки, как в v1.
+    max_delay, twin_rule, rank_view = bench_cfg["max_delay"], bench_cfg["twin_rule"], realtime["rank_view"]
     panel = load_panel(ROOT / cfg["data"]["path"])
     wide, report = build_matrix(panel, cfg["data"]["category"], max_gap=cfg["data"]["max_gap"])
     print(report.as_text(), end="\n\n")
@@ -130,12 +170,14 @@ def main() -> int:
     penalties = [float(p) for p in bench_cfg["penalties"]]
     sample = bench_sample(wide, bench_cfg["n_series"], bench_cfg["seed"])
     print(f"рядов в панели: {wide.shape[1]} | периодов: {wide.shape[0]} | в выборке стенда: {sample.shape[1]}")
+    for line in position_lines(pd.DatetimeIndex(wide.index).strftime("%Y-%m"), bench_cfg["positions"]):
+        print(line)
 
     stage = time.perf_counter()
     spec = bench_cfg["kernel_pen_grid"]
     grid = np.geomspace(spec["min"], spec["max"], spec["points"])
     calibration = calibrate_kernel_penalty(sample, penalties, realtime["mode"], grid=grid)
-    save(calibration, out_dir / "cp_calibration.csv")
+    save(calibration, out_dir / "cp_calibration.csv", protocol)
     print(f"\nКАЛИБРОВКА ШТРАФА ЯДРА: нетронутые ряды выборки, режим {realtime['mode']}, сетка "
           f"{spec['min']:g}–{spec['max']:g} из {spec['points']} точек; доля ложных тревог ядра, %, — "
           f"ближайшая к PELT при номинальном штрафе ({time.perf_counter() - stage:.0f} с)")
@@ -153,7 +195,6 @@ def main() -> int:
     kernel_pens = dict(zip(calibration["penalty"], calibration["kernel_pen"]))
 
     stage = time.perf_counter()
-    max_delay, twin_rule = bench_cfg["max_delay"], bench_cfg["twin_rule"]  # null — без границы задержки
     print(f"\nСТЕНД: {sample.shape[1]} рядов; позиции {bench_cfg['positions']}, величины "
           f"{bench_cfg['magnitudes']}, возмущения {bench_cfg['kinds']}, режимы {bench_cfg['modes']}, "
           f"штрафы {penalties}; зачёт: max_delay {max_delay}, twin_rule {twin_rule}")
@@ -163,9 +204,9 @@ def main() -> int:
         penalties=penalties, seed=bench_cfg["seed"], max_delay=max_delay, twin_rule=twin_rule,
         kernel_penalties=kernel_pens, log=print,
     )
-    save(bench, out_dir / "cp_bench.csv", whole=("position", "delay", "signal"))
+    save(bench, out_dir / "cp_bench.csv", protocol, whole=("position", "delay", "signal"))
     summary = summarise(bench)
-    save(summary, out_dir / "cp_summary.csv")
+    save(summary, out_dir / "cp_summary.csv", protocol)
     print(f"стенд: {len(bench)} строк, {time.perf_counter() - stage:.0f} с")
     print("\nСВОДКА: задержка в месяцах — среди обнаруженных; CUSUM — со своим порогом, штраф пуст")
     print(table(summary))
@@ -184,16 +225,23 @@ def main() -> int:
     print(f"  {detector} / {mode}: " + "; ".join(
         f"штраф {p:g} → J Юдена {j:.1f}" for p, j in zip(candidates["penalty"], candidates["J Юдена"])))
     print(f"  выбран штраф: {chosen:g}")
+    for line in selection_edge_warning(chosen, penalties):
+        print(line)
 
-    by_magnitude = summarise(bench[(bench["penalty"] == chosen) | bench["penalty"].isna()], by=("magnitude",))
-    save(by_magnitude, out_dir / "cp_summary_by_magnitude.csv")
+    at_chosen = bench[(bench["penalty"] == chosen) | bench["penalty"].isna()]  # CUSUM — со своим порогом
+    by_magnitude = summarise(at_chosen, by=("magnitude",))
+    save(by_magnitude, out_dir / "cp_summary_by_magnitude.csv", protocol)
     print(f"\nПО ВЕЛИЧИНЕ ВОЗМУЩЕНИЯ при штрафе {chosen:g}")
     print(table(by_magnitude))
+    by_position = summarise(at_chosen, by=("position",))
+    save(by_position, out_dir / "cp_summary_by_position.csv", protocol, whole=("position",))
+    print(f"\nПО ПОЗИЦИИ ВРЕЗКИ при штрафе {chosen:g}")
+    print(table(by_position.astype({"position": "Int64"})))
 
     stage = time.perf_counter()
     print(f"\nРЕАЛЬНЫЕ ДАННЫЕ: {detector} на {mode} в расширяющемся окне по {wide.shape[1]} рядам, "
           f"порог {realtime['threshold_share']}% МО; для сравнения — изломы по полному ряду")
-    monthly_parts, event_parts, offline_parts, break_parts = [], [], [], []
+    monthly_parts, event_parts, rank_parts, offline_parts, break_parts = [], [], [], [], []
     for penalty in penalties:
         effective = effective_penalty(detector, penalty, kernel_pens)  # как на стенде
         monthly, events = panel_realtime(
@@ -201,6 +249,9 @@ def main() -> int:
         )
         monthly_parts.append(monthly.assign(penalty=penalty))
         event_parts.append(events.assign(penalty=penalty, selected=penalty == chosen))
+        if rank_view:
+            ranked = realtime_rank(monthly, realtime["events"])
+            rank_parts.append(ranked.assign(penalty=penalty, selected=penalty == chosen))
         breaks = offline_breaks(wide, detector, mode, effective)
         break_parts.append(breaks.assign(penalty=penalty))
         offline_parts.append(offline_shares(breaks, wide).assign(penalty=penalty))
@@ -214,14 +265,25 @@ def main() -> int:
     ]
     offline = pd.concat(offline_parts, ignore_index=True)[["penalty", "month", "share", "n_breaks"]]
     offline_series = pd.concat(break_parts, ignore_index=True)[["penalty", "series_id", "month"]]
-    save(shares, out_dir / "cp_realtime.csv")
-    save(events, out_dir / "cp_realtime_events.csv", whole=("delay",))
-    save(offline, out_dir / "cp_offline.csv")
-    save(offline_series, out_dir / "cp_offline_series.csv")
+    save(shares, out_dir / "cp_realtime.csv", protocol)
+    save(events, out_dir / "cp_realtime_events.csv", protocol, whole=("delay",))
+    save(offline, out_dir / "cp_offline.csv", protocol)
+    save(offline_series, out_dir / "cp_offline_series.csv", protocol)
 
     print("\nСОБЫТИЯ: в окне события (до следующего) — первый месяц с долей не ниже порога, "
           "задержка в месяцах, наибольшая месячная доля и доля МО с началом эпизода за всё окно")
     print(table(events))
+    if rank_view:
+        rank = pd.concat(rank_parts, ignore_index=True)[["penalty", "selected", *RANK_COLUMNS]]
+        save(rank, out_dir / "cp_realtime_rank.csv", protocol)
+        print(f"\nРАНГОВЫЙ ВИД при штрафе {chosen:g} — описание, не второй порог: доля МО с началом эпизода "
+              f"в месяц события, её ранг среди наблюдаемых месяцев (1 — наибольшая доля), медиана долей "
+              f"месяцев без событий и отношение к ней")
+        # два знака: один ряд панели — 0,05%, и фон «0.0%» при конечном отношении сбивал бы с толку
+        for row in rank[rank["selected"] & rank["event"].notna()].itertuples(index=False):
+            ratio = "—" if pd.isna(row.ratio_to_background) else f"{row.ratio_to_background:.2f}"
+            print(f"  {row.event}: доля {row.share:.2f}%, ранг {row.rank:g} из {row.n_months}, "
+                  f"медиана фона {row.background_median:.2f}%, отношение {ratio}")
     side_by_side = pd.concat({
         "потоково": shares.pivot(index="month", columns="penalty", values="share"),
         "по полному ряду": offline.pivot(index="month", columns="penalty", values="share"),
@@ -231,7 +293,8 @@ def main() -> int:
     print(side_by_side.to_string(float_format=lambda v: f"{v:.1f}"))
 
     names = ["cp_calibration.csv", "cp_bench.csv", "cp_summary.csv", "cp_summary_by_magnitude.csv",
-             "cp_realtime.csv", "cp_realtime_events.csv", "cp_offline.csv", "cp_offline_series.csv"]
+             "cp_summary_by_position.csv", "cp_realtime.csv", "cp_realtime_events.csv",
+             *(["cp_realtime_rank.csv"] if rank_view else []), "cp_offline.csv", "cp_offline_series.csv"]
     print(f"\nсохранено в {out_dir}: " + ", ".join(names))
     print(f"время работы: {(time.perf_counter() - started) / 60:.1f} мин")
     return 0

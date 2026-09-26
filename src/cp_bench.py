@@ -67,6 +67,7 @@ SUMMARY_COLUMNS = [
 CALIBRATION_COLUMNS = [
     "penalty", "kernel_pen", "fa_pelt", "fa_kernel", "n_failed_pelt", "n_failed_kernel", "n_failed_grid",
 ]
+RANK_COLUMNS = ["month", "event", "share", "rank", "n_months", "background_median", "ratio_to_background"]
 
 
 def inject(
@@ -525,3 +526,44 @@ def panel_realtime(
         })
     columns = ["event", "crossed_month", "delay", "max_share", "share_in_window"]
     return monthly, pd.DataFrame(rows, columns=columns)
+
+
+def realtime_rank(monthly: pd.DataFrame, events: Sequence[str]) -> pd.DataFrame:
+    """Ранговый вид потокового сигнала одного штрафа: чем месяц события выделяется среди месяцев.
+
+    Порог доли МО отвечает «да или нет» и молчит о событии, которое его не прошло,
+    хотя месяц события может стоять первым среди всех месяцев. Ранговый вид — описание,
+    не второй порог: оценки «прошёл / не прошёл» в нём нет. `monthly` — помесячная таблица
+    `panel_realtime`. Строка на наблюдаемый месяц — с индекса MIN_HISTORY: раньше детектор
+    не запускается, и нулевые по построению доли занижали бы фон. `share` — процент МО
+    с началом эпизода тревоги, `rank` — место доли среди наблюдаемых месяцев (1 — наибольшая,
+    ничьи — средний ранг), `n_months` — сколько их; `event` — метка события, если месяц —
+    месяц события, иначе пусто. `background_median` — медиана долей наблюдаемых месяцев без
+    событий: события не поднимают фон, с которым сравниваются, а декабри остаются в нём —
+    сезонный скачок и есть фон. `ratio_to_background` — доля к фону, пусто при нулевом фоне.
+    """
+    months = monthly["month"].tolist()
+    index = {month: i for i, month in enumerate(months)}
+    unknown = [event for event in events if event not in index]
+    if unknown:
+        raise ValueError(f"месяцы событий вне панели: {unknown}")
+    early = [event for event in events if index[event] < MIN_HISTORY]
+    if early:
+        raise ValueError(
+            f"месяцы событий раньше первого проверяемого (индекс {MIN_HISTORY}): {early} — "
+            "детектор там не запускается, и доля нулевая по построению"
+        )
+    observed = monthly.iloc[MIN_HISTORY:].reset_index(drop=True)
+    share = observed["share"].astype(float)
+    is_event = observed["month"].isin(events)
+    background = float(share[~is_event].median())
+    return pd.DataFrame({
+        "month": observed["month"],
+        "event": observed["month"].where(is_event),
+        "share": share,
+        "rank": share.rank(ascending=False, method="average"),
+        "n_months": len(observed),
+        "background_median": background,
+        # пустая колонка — числовая: ранговый вид всех штрафов склеивается в один файл
+        "ratio_to_background": share / background if background else np.full(len(share), np.nan),
+    }, columns=RANK_COLUMNS)
