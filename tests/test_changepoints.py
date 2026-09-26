@@ -75,6 +75,13 @@ def month(i: int) -> str:
     return MONTHS[i].strftime("%Y-%m")
 
 
+def flagged(y: np.ndarray, t: int, penalty: float = 1.0) -> bool:
+    """Флаг потокового правила в месяц t, заново по детектору: PELT на темпах роста y[:t+1]
+    нашёл излом в последних RECENT_WINDOW точках."""
+    found = detect_pelt(preprocess(y[: t + 1], "ratio"), penalty=penalty).breakpoints
+    return any(b + 1 >= t - RECENT_WINDOW for b in found)
+
+
 class DetectorPenaltyModeTest(unittest.TestCase):
     """Все пять методов со штрафом решают обнаружение: число изломов не задано заранее."""
 
@@ -278,39 +285,72 @@ class PanelRealtimeTest(unittest.TestCase):
     def setUp(self):
         self.panel = shifted_panel(shift_at=self.SHIFT)
 
-    def realtime(self, **kwargs):
+    def realtime(self, panel=None, **kwargs):
         args = {"detector": "pelt", "mode": "ratio", "penalty": 1.0, "threshold_share": 50,
                 "events": [month(self.SHIFT)], **kwargs}
-        return panel_realtime(self.panel, **args)
+        return panel_realtime(self.panel if panel is None else panel, **args)
+
+    def signals(self, col: str) -> list[int]:
+        return realtime_signals(self.panel[col].to_numpy(float), "pelt", "ratio", 1.0)
+
+    def test_signals_are_starts_of_flag_runs(self):
+        # Определение по флагам, посчитанным здесь заново: сигнал — флаг в t при отсутствии
+        # флага в t − 1, в первый проверяемый месяц прошлого флага нет, паузы нет. На панели
+        # есть и эпизоды шума до сдвига, и слитые с эпизодом сдвига.
+        for col in self.panel.columns:
+            y = self.panel[col].to_numpy(float)
+            flags = [flagged(y, t) for t in range(MIN_HISTORY, len(y))]
+            starts = [MIN_HISTORY + i for i, on in enumerate(flags) if on and (i == 0 or not flags[i - 1])]
+            with self.subTest(col):
+                self.assertEqual(self.signals(col), starts)
+
+    def test_single_shift_gives_one_signal_per_series(self):
+        # Сдвиг в первый проверяемый месяц: до него сигналить нечему, после него дисперсию
+        # темпов роста задаёт выброс, и шум тревог не поднимает. Флаг у каждого ряда держится
+        # и в m + RECENT_WINDOW + 1 — пауза такой длины дала бы там второй сигнал. Серия флагов
+        # здесь у каждого ряда непрерывна; прерванная дала бы второй эпизод — это ограничение
+        # правила (`realtime_signals`), а не этой проверки.
+        m = MIN_HISTORY
+        panel = shifted_panel(shift_at=m)
+        for col in panel.columns:
+            y = panel[col].to_numpy(float)
+            with self.subTest(col):
+                self.assertTrue(flagged(y, m + RECENT_WINDOW + 1))
+                self.assertEqual(realtime_signals(y, "pelt", "ratio", 1.0), [m])
+        monthly, events = self.realtime(panel, events=[month(m)])
+        self.assertEqual(monthly["n_signals"].sum(), panel.shape[1])
+        self.assertEqual(events.loc[0, "crossed_month"], month(m))
+        self.assertEqual(events.loc[0, "share_in_window"], 100.0)
+
+    def test_no_second_signal_after_the_shift(self):
+        # Трасса со сдвигом в m = 14: у большинства рядов флаг держится и в m + 4, где прежняя
+        # пауза в три месяца давала второй сигнал. Эпизоды шума до сдвига — свои эпизоды,
+        # но после сдвига у ряда не больше одного сигнала.
+        echo = self.SHIFT + RECENT_WINDOW + 1
+        still = sum(flagged(self.panel[col].to_numpy(float), echo) for col in self.panel.columns)
+        self.assertGreater(still, self.panel.shape[1] / 2)
+        monthly, _ = self.realtime()
+        self.assertEqual(monthly["n_signals"].iloc[echo], 0)
+        for col in self.panel.columns:
+            with self.subTest(col):
+                self.assertLessEqual(sum(t >= self.SHIFT for t in self.signals(col)), 1)
 
     def test_common_shift_crosses_threshold_within_recent_window(self):
         monthly, events = self.realtime()
         self.assertEqual(list(monthly.columns), ["month", "share", "n_signals"])
         self.assertEqual(monthly["month"].tolist(), [month(i) for i in range(24)])
         self.assertTrue((monthly["share"].iloc[: self.SHIFT] < 50).all())
-        self.assertEqual(list(events.columns), ["event", "crossed_month", "delay", "max_share"])
+        self.assertEqual(list(events.columns), ["event", "crossed_month", "delay", "max_share", "share_in_window"])
         row = events.iloc[0]
         crossed = monthly["month"].tolist().index(row["crossed_month"])
         self.assertTrue(self.SHIFT <= crossed <= self.SHIFT + RECENT_WINDOW, row["crossed_month"])
         self.assertEqual(row["delay"], crossed - self.SHIFT)
         self.assertEqual(row["max_share"], monthly["share"].iloc[self.SHIFT:].max())
 
-    def test_one_break_is_counted_once_per_series(self):
-        # Излом остаётся в последних точках окна несколько шагов подряд; без паузы
-        # после сигнала ряд попал бы в долю в каждом из них.
-        y = self.panel.iloc[:, 0].to_numpy(float)
-        late = self.SHIFT + RECENT_WINDOW
-        seen_late = detect_pelt(preprocess(y[: late + 1], "ratio"), penalty=1.0).breakpoints
-        self.assertTrue(any(b + 1 >= late - RECENT_WINDOW for b in seen_late))
-        signals = realtime_signals(y, "pelt", "ratio", 1.0)
-        near = [t for t in signals if self.SHIFT <= t <= late]
-        self.assertEqual(len(near), 1)
-        self.assertTrue(all(b - a > RECENT_WINDOW for a, b in zip(signals, signals[1:])))
-
     def test_first_signal_is_the_streaming_signal(self):
         for col in self.panel.columns:
             y = self.panel[col].to_numpy(float)
-            signals = realtime_signals(y, "pelt", "ratio", 1.0)
+            signals = self.signals(col)
             with self.subTest(col):
                 self.assertEqual(signals[0] if signals else None, streaming_signal(y, "pelt", "ratio", penalty=1.0))
                 self.assertTrue(all(t >= MIN_HISTORY for t in signals))
@@ -321,6 +361,15 @@ class PanelRealtimeTest(unittest.TestCase):
         self.assertTrue(pd.isna(row["crossed_month"]) and pd.isna(row["delay"]))
         self.assertEqual(row["max_share"], monthly["share"].iloc[self.SHIFT:].max())
 
+    def test_crossing_is_searched_inside_the_event_window(self):
+        # Первое событие своё окно порогом не проходит; переход в окне второго — чужой
+        # и первому не приписывается.
+        first, second = self.SHIFT - 5, self.SHIFT
+        monthly, events = self.realtime(events=[month(first), month(second)])
+        self.assertTrue((monthly["share"].iloc[first:second] < 50).all())
+        self.assertTrue(pd.notna(events.loc[1, "crossed_month"]))
+        self.assertTrue(pd.isna(events.loc[0, "crossed_month"]) and pd.isna(events.loc[0, "delay"]))
+
     def test_max_share_stops_before_the_next_event_month(self):
         first, second = self.SHIFT - 5, self.SHIFT
         monthly, events = self.realtime(events=[month(first), month(second)])
@@ -329,6 +378,18 @@ class PanelRealtimeTest(unittest.TestCase):
         self.assertGreater(share.iloc[second], share.iloc[first:second].max())
         self.assertEqual(events["max_share"].iloc[0], share.iloc[first:second].max())
         self.assertEqual(events["max_share"].iloc[1], share.iloc[second:].max())
+
+    def test_share_in_window_counts_series_with_an_episode_start_inside(self):
+        first, second = self.SHIFT - 5, self.SHIFT
+        _, events = self.realtime(events=[month(first), month(second)])
+        per_series = [self.signals(col) for col in self.panel.columns]
+        for row, (start, end) in zip(events.itertuples(index=False), [(first, second), (second, 24)]):
+            with self.subTest(row.event):
+                inside = sum(any(start <= t < end for t in signals) for signals in per_series)
+                self.assertAlmostEqual(row.share_in_window, 100 * inside / len(per_series))
+                self.assertGreaterEqual(row.share_in_window, row.max_share)
+        # накопленная за окно доля больше пика: эпизоды шума до сдвига разбросаны по месяцам
+        self.assertGreater(events.loc[0, "share_in_window"], events.loc[0, "max_share"])
 
     def test_unknown_event_month_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -390,7 +451,8 @@ FILES = {
     "cp_summary_by_magnitude.csv": KEY + ["magnitude"] + SUMMARY_COLUMNS,
     "cp_calibration.csv": ["penalty", "kernel_pen", "fa_pelt", "fa_kernel"],
     "cp_realtime.csv": ["penalty", "month", "share", "n_signals"],
-    "cp_realtime_events.csv": ["penalty", "selected", "event", "crossed_month", "delay", "max_share"],
+    "cp_realtime_events.csv": ["penalty", "selected", "event", "crossed_month", "delay", "max_share",
+                               "share_in_window"],
     "cp_offline.csv": ["penalty", "month", "share", "n_breaks"],
 }
 

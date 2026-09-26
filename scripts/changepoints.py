@@ -15,7 +15,7 @@
     cp_summary.csv               детектор × режим × штраф: обнаружено, задержка, ложные, J Юдена
     cp_summary_by_magnitude.csv  то же по величине возмущения при выбранном штрафе
     cp_realtime.csv              потоковый сигнал на панели по месяцам, на каждом штрафе
-    cp_realtime_events.csv       события: месяц перехода порога, задержка, наибольшая доля
+    cp_realtime_events.csv       события: месяц перехода порога, задержка, доли в окне события
     cp_offline.csv               изломы по полному ряду — прежний офлайновый расчёт, для сравнения
 
     .venv/bin/python -u scripts/changepoints.py [--config configs/changepoints.yaml]
@@ -156,21 +156,22 @@ def main() -> int:
         print(f"  штраф {penalty:g}: {time.perf_counter() - stage:.0f} с")
     shares = pd.concat(monthly_parts, ignore_index=True)[["penalty", "month", "share", "n_signals"]]
     events = pd.concat(event_parts, ignore_index=True)[
-        ["penalty", "selected", "event", "crossed_month", "delay", "max_share"]
+        ["penalty", "selected", "event", "crossed_month", "delay", "max_share", "share_in_window"]
     ]
     offline = pd.concat(offline_parts, ignore_index=True)[["penalty", "month", "share", "n_breaks"]]
     save(shares, out_dir / "cp_realtime.csv")
     save(events, out_dir / "cp_realtime_events.csv", whole=("delay",))
     save(offline, out_dir / "cp_offline.csv")
 
-    print("\nСОБЫТИЯ: первый месяц не раньше события с долей не ниже порога, задержка в месяцах, "
-          "наибольшая доля до следующего события")
+    print("\nСОБЫТИЯ: в окне события (до следующего) — первый месяц с долей не ниже порога, "
+          "задержка в месяцах, наибольшая месячная доля и доля МО с началом эпизода за всё окно")
     print(table(events))
     side_by_side = pd.concat({
         "потоково": shares.pivot(index="month", columns="penalty", values="share"),
         "по полному ряду": offline.pivot(index="month", columns="penalty", values="share"),
     }, axis=1)
-    print("\nДОЛЯ МО ПО МЕСЯЦАМ, %: потоковый сигнал и изломы по полному ряду; во второй строке шапки — штраф")
+    print("\nДОЛЯ МО ПО МЕСЯЦАМ, %: начала эпизодов потокового сигнала и изломы по полному ряду; "
+          "во второй строке шапки — штраф")
     print(side_by_side.to_string(float_format=lambda v: f"{v:.1f}"))
 
     names = ["cp_calibration.csv", "cp_bench.csv", "cp_summary.csv", "cp_summary_by_magnitude.csv",

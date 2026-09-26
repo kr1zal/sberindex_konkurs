@@ -337,34 +337,41 @@ def summarise(bench: pd.DataFrame, by: Sequence[str] = ()) -> pd.DataFrame:
 
 
 def realtime_signals(y: np.ndarray, detector: str, mode: str, penalty: float | None) -> list[int]:
-    """Все сигналы ряда при последовательном просмотре — для панели на реальных данных.
+    """Начала эпизодов тревоги ряда при последовательном просмотре — для панели на реальных данных.
 
-    Правило сигнала то же, что в `streaming_signal`: в месяц t детектор видит y[:t+1]
-    и нашёл излом в последних RECENT_WINDOW точках. Отличий два. После сигнала ряд
-    молчит RECENT_WINDOW месяцев: излом остаётся в последних точках окна несколько
-    шагов подряд и не должен считаться в каждом из них. И просмотр на первом сигнале
-    не кончается: за 24 месяца на панели несколько событий, а после первого сигнала
-    поздние события у этого ряда были бы невидимы по построению. Первый сигнал
-    совпадает со `streaming_signal` — там, на синтетике, излом один.
+    Флаг в месяц t — правило `streaming_signal`: детектор на y[:t+1] нашёл излом в последних
+    RECENT_WINDOW точках. Сигнал — начало эпизода: флаг в t при отсутствии флага в t − 1.
+    В первый проверяемый месяц (MIN_HISTORY) прошлого флага нет, и сигнал возможен сразу —
+    как на стенде. Первый сигнал совпадает со `streaming_signal`.
 
-    Пауза не спасает от второго сигнала, если детектор ставит тому же событию второй
-    излом позже. Разовый сдвиг уровня в темпах роста — одиночный выброс, и PELT
-    (сегмент не короче трёх точек) отсекает его вторым изломом через три точки:
-    на синтетике со сдвигом в месяце m сигналы приходят в m и снова в m + 4.
+    Один излом держит флаг несколько шагов подряд, и считать надо эпизод, а не шаги.
+    Пауза фиксированной длины не годится: разовый сдвиг уровня в темпах роста — одиночный
+    выброс, и PELT (сегмент не короче трёх точек) сначала ставит излом у конца окна, а потом
+    отсекает выброс вторым изломом через три точки. На синтетике со сдвигом в месяце m флаг
+    держится с m по m + 5, и пауза в RECENT_WINDOW месяцев давала второй сигнал в m + 4.
+
+    Ограничения. Два события, чьи эпизоды сливаются в один непрерывный, у ряда дают один
+    сигнал — второе у него не видно. И наоборот: если флаг одного события прерывается,
+    эпизодов два. У разового сдвига уровня при штрафе от 2 PELT на шаг-два теряет излом,
+    прежде чем отсечь выброс вторым изломом, и второй эпизод начинается через пять-шесть
+    месяцев после сдвига — на синтетике при штрафе 3 у 25–40% рядов. Шаг, на котором
+    детектор упал, считается шагом без флага, как в `streaming_signal`.
     """
     fn = detector_with_penalty(detector, penalty)
     offset = month_offset(mode)
     signals: list[int] = []
+    flagged = False
     for t in range(MIN_HISTORY, len(y)):
-        if signals and t - signals[-1] <= RECENT_WINDOW:
-            continue
         window = preprocess(y[: t + 1], mode)
         try:
             found = fn(window).breakpoints
         except Exception:
+            flagged = False
             continue
-        if any(b + offset >= t - RECENT_WINDOW for b in found):
+        now = any(b + offset >= t - RECENT_WINDOW for b in found)
+        if now and not flagged:
             signals.append(t)
+        flagged = now
     return signals
 
 
@@ -372,24 +379,29 @@ def panel_realtime(
     wide: pd.DataFrame, detector: str, mode: str, penalty: float | None,
     threshold_share: float, events: Sequence[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Потоковый сигнал на панели: доля МО с сигналом по месяцам и задержка на событиях.
+    """Потоковый сигнал на панели: начала эпизодов тревоги по месяцам и по событиям.
 
     Каждый ряд просматривается в расширяющемся окне (`realtime_signals`, там же правило
-    сигнала и паузы после него). По месяцам: `month` (ГГГГ-ММ), `n_signals` — рядов
-    с сигналом в этом месяце, `share` — их процент от рядов панели. Первые MIN_HISTORY
-    месяцев детектор не запускается, и доля там нулевая по построению.
+    эпизода и его ограничение). По месяцам: `month` (ГГГГ-ММ), `n_signals` — рядов,
+    у которых эпизод начался в этом месяце, `share` — их процент от рядов панели. Первые
+    MIN_HISTORY месяцев детектор не запускается, и доля там нулевая по построению.
 
     События — месяцы в терминах панели: месяц, с которого уровень ряда стал другим
-    (излом b в ряду темпов роста — месяц b + 1). По каждому: `crossed_month` — первый
-    месяц не раньше события с долей не ниже `threshold_share`, иначе пусто; `delay` —
-    месяцев от события до него; `max_share` — наибольшая доля от месяца события
-    до следующего события, не включая его месяц, у последнего — до конца панели:
-    каждый месяц принадлежит одному событию.
+    (излом b в ряду темпов роста — месяц b + 1). Окно события — от его месяца до месяца
+    следующего события, не включая его, у последнего — до конца панели: каждый месяц
+    принадлежит одному событию, и переход порога следующего события не приписывается
+    предыдущему. В окне: `crossed_month` — первый месяц с долей не ниже `threshold_share`,
+    иначе пусто; `delay` — месяцев от события до него; `max_share` — наибольшая месячная
+    доля; `share_in_window` — процент МО, у которых эпизод начался где-либо в окне:
+    потоковый аналог доли изломов по полному ряду, накопленный за окно.
     """
     months = pd.DatetimeIndex(wide.index).strftime("%Y-%m")
+    per_series = [
+        realtime_signals(wide[col].to_numpy(dtype=float), detector, mode, penalty) for col in wide.columns
+    ]
     counts = np.zeros(len(months), dtype=int)
-    for col in wide.columns:
-        for t in realtime_signals(wide[col].to_numpy(dtype=float), detector, mode, penalty):
+    for signals in per_series:
+        for t in signals:
             counts[t] += 1
     share = counts / wide.shape[1] * 100
     monthly = pd.DataFrame({"month": months, "share": share, "n_signals": counts})
@@ -398,17 +410,20 @@ def panel_realtime(
     unknown = [event for event in events if event not in index]
     if unknown:
         raise ValueError(f"месяцы событий вне панели: {unknown}")
-    starts = sorted(index[event] for event in events)
+    event_months = sorted(index[event] for event in events)
     rows = []
     for event in events:
         start = index[event]
-        end = next((s for s in starts if s > start), len(months))
-        crossed = np.flatnonzero(share[start:] >= threshold_share)
+        end = next((m for m in event_months if m > start), len(months))
+        crossed = np.flatnonzero(share[start:end] >= threshold_share)
         at = start + int(crossed[0]) if crossed.size else None
+        inside = sum(any(start <= t < end for t in signals) for signals in per_series)
         rows.append({
             "event": event,
             "crossed_month": None if at is None else months[at],
             "delay": np.nan if at is None else at - start,
             "max_share": float(share[start:end].max()),
+            "share_in_window": inside / wide.shape[1] * 100,
         })
-    return monthly, pd.DataFrame(rows, columns=["event", "crossed_month", "delay", "max_share"])
+    columns = ["event", "crossed_month", "delay", "max_share", "share_in_window"]
+    return monthly, pd.DataFrame(rows, columns=columns)
