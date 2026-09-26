@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from functools import partial
 
 import numpy as np
@@ -42,11 +41,12 @@ from src.changepoints import DETECTORS, Detection
 MIN_HISTORY = 8      # раньше восьми точек ни один метод не имеет шансов
 RECENT_WINDOW = 3    # разладка засчитывается, если найдена вблизи текущего конца
 
-# Сетка штрафа ядра для калибровки. Стоимость rbf на отрезке из n точек не больше n − 1,
-# а в окне стенда не больше 24 точек: штраф 30 не пропускает ни одного излома, 0,01
-# пропускает почти любой. Шаг геометрический: доля ложных тревог меняется с порядком
-# штрафа, а не с его приращением.
-KERNEL_PEN_GRID = np.geomspace(0.01, 30, 30)
+# Сетка штрафа ядра по умолчанию — для прямых вызовов и тестов; прогон берёт сетку
+# из конфига (bench.kernel_pen_grid). Стоимость rbf на отрезке из n точек не больше n − 1,
+# а в окне стенда не больше 24 точек: штраф 100 не пропускает ни одного излома, 0,001 —
+# почти любой. Шаг геометрический: доля ложных тревог меняется с порядком штрафа,
+# а не с его приращением.
+KERNEL_PEN_GRID = np.geomspace(0.001, 100, 40)
 
 BENCH_COLUMNS = [
     "detector", "mode", "penalty", "penalty_effective", "kind", "magnitude", "position",
@@ -57,13 +57,6 @@ SUMMARY_COLUMNS = [
     "обнаружено, %", "задержка, медиана", "задержка, среднее", "доля с задержкой 0, %",
     "ложных на чистых, %", "J Юдена", "n испорченных", "n чистых",
 ]
-
-
-@dataclass
-class Injection:
-    kind: str
-    position: int
-    magnitude: float
 
 
 def inject(

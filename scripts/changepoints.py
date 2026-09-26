@@ -17,6 +17,7 @@
     cp_realtime.csv              потоковый сигнал на панели по месяцам, на каждом штрафе
     cp_realtime_events.csv       события: месяц перехода порога, задержка, доли в окне события
     cp_offline.csv               изломы по полному ряду — прежний офлайновый расчёт, для сравнения
+    cp_offline_series.csv        те же изломы по рядам, строка на излом: пары изломов считаются из файла
 
     .venv/bin/python -u scripts/changepoints.py [--config configs/changepoints.yaml]
 """
@@ -57,22 +58,42 @@ def select_penalty(summary: pd.DataFrame, detector: str, mode: str) -> float:
     return float(rows.loc[youden == youden.max(), "penalty"].min())
 
 
-def offline_shares(wide: pd.DataFrame, detector: str, mode: str, penalty: float) -> pd.DataFrame:
-    """Доля МО с изломом в месяце по полному ряду — прежний расчёт отчёта, для сравнения.
+def offline_breaks(wide: pd.DataFrame, detector: str, mode: str, penalty: float) -> pd.DataFrame:
+    """Изломы по полному ряду, строка на излом: ряд и месяц нового уровня (`month_offset`).
 
-    Детектор видит ряд целиком, поэтому о своевременности это ничего не говорит —
-    только о том, где изломы в итоге оказались. Ряд с двумя изломами попадает
-    в два месяца. Месяц излома — месяц нового уровня (`month_offset`).
+    Прежний расчёт отчёта. Детектор видит ряд целиком, поэтому о своевременности это
+    ничего не говорит — только о том, где изломы в итоге оказались. По рядам, а не только
+    долями — чтобы изломы одного ряда, например пару через три месяца, можно было считать
+    из файла.
     """
     months = pd.DatetimeIndex(wide.index).strftime("%Y-%m")
     detect = detector_with_penalty(detector, penalty)
     offset = month_offset(mode)
-    counts = np.zeros(len(months), dtype=int)
+    rows = []
     for col in wide.columns:
         for b in detect(preprocess(wide[col].to_numpy(dtype=float), mode)).breakpoints:
             if 0 <= b + offset < len(months):
-                counts[b + offset] += 1
+                rows.append({"series_id": col, "month": months[b + offset]})
+    return pd.DataFrame(rows, columns=["series_id", "month"])
+
+
+def offline_shares(breaks: pd.DataFrame, wide: pd.DataFrame) -> pd.DataFrame:
+    """Доля МО с изломом по полному ряду в каждом месяце панели; ряд с двумя изломами —
+    в двух месяцах. Считается из `offline_breaks`, чтобы два файла не расходились."""
+    months = pd.DatetimeIndex(wide.index).strftime("%Y-%m")
+    counts = breaks["month"].value_counts().reindex(months, fill_value=0).to_numpy()
     return pd.DataFrame({"month": months, "share": counts / wide.shape[1] * 100, "n_breaks": counts})
+
+
+def edge_warnings(calibration: pd.DataFrame, grid: np.ndarray) -> list[str]:
+    """Предупреждения о калибровке, упёршейся в край сетки: ближайшая к PELT доля ложных
+    тревог может лежать за её пределами, и штраф ядра тогда сопоставим лишь приблизительно."""
+    edges = {float(np.min(grid)), float(np.max(grid))}
+    return [
+        f"ВНИМАНИЕ: калибровка на краю сетки — номинальный штраф {row.penalty:g}: штраф ядра "
+        f"{row.kernel_pen:.4g}, ложных у ядра {row.fa_kernel:.1f}%, у PELT {row.fa_pelt:.1f}%"
+        for row in calibration.itertuples(index=False) if row.kernel_pen in edges
+    ]
 
 
 def save(frame: pd.DataFrame, path: Path, whole: Sequence[str] = ()) -> None:
@@ -103,11 +124,16 @@ def main() -> int:
     print(f"рядов в панели: {wide.shape[1]} | периодов: {wide.shape[0]} | в выборке стенда: {sample.shape[1]}")
 
     stage = time.perf_counter()
-    calibration = calibrate_kernel_penalty(sample, penalties, realtime["mode"])
+    spec = bench_cfg["kernel_pen_grid"]
+    grid = np.geomspace(spec["min"], spec["max"], spec["points"])
+    calibration = calibrate_kernel_penalty(sample, penalties, realtime["mode"], grid=grid)
     save(calibration, out_dir / "cp_calibration.csv")
-    print(f"\nКАЛИБРОВКА ШТРАФА ЯДРА: нетронутые ряды выборки, режим {realtime['mode']}; доля ложных "
-          f"тревог ядра, %, — ближайшая к PELT при номинальном штрафе ({time.perf_counter() - stage:.0f} с)")
+    print(f"\nКАЛИБРОВКА ШТРАФА ЯДРА: нетронутые ряды выборки, режим {realtime['mode']}, сетка "
+          f"{spec['min']:g}–{spec['max']:g} из {spec['points']} точек; доля ложных тревог ядра, %, — "
+          f"ближайшая к PELT при номинальном штрафе ({time.perf_counter() - stage:.0f} с)")
     print(table(calibration, ".4g"))
+    for line in edge_warnings(calibration, grid):
+        print(line)
     kernel_pens = dict(zip(calibration["penalty"], calibration["kernel_pen"]))
 
     stage = time.perf_counter()
@@ -144,7 +170,7 @@ def main() -> int:
     stage = time.perf_counter()
     print(f"\nРЕАЛЬНЫЕ ДАННЫЕ: {detector} на {mode} в расширяющемся окне по {wide.shape[1]} рядам, "
           f"порог {realtime['threshold_share']}% МО; для сравнения — изломы по полному ряду")
-    monthly_parts, event_parts, offline_parts = [], [], []
+    monthly_parts, event_parts, offline_parts, break_parts = [], [], [], []
     for penalty in penalties:
         effective = kernel_pens[penalty] if detector == "kernel_rbf" else penalty  # как на стенде
         monthly, events = panel_realtime(
@@ -152,16 +178,20 @@ def main() -> int:
         )
         monthly_parts.append(monthly.assign(penalty=penalty))
         event_parts.append(events.assign(penalty=penalty, selected=penalty == chosen))
-        offline_parts.append(offline_shares(wide, detector, mode, effective).assign(penalty=penalty))
+        breaks = offline_breaks(wide, detector, mode, effective)
+        break_parts.append(breaks.assign(penalty=penalty))
+        offline_parts.append(offline_shares(breaks, wide).assign(penalty=penalty))
         print(f"  штраф {penalty:g}: {time.perf_counter() - stage:.0f} с")
     shares = pd.concat(monthly_parts, ignore_index=True)[["penalty", "month", "share", "n_signals"]]
     events = pd.concat(event_parts, ignore_index=True)[
         ["penalty", "selected", "event", "crossed_month", "delay", "max_share", "share_in_window"]
     ]
     offline = pd.concat(offline_parts, ignore_index=True)[["penalty", "month", "share", "n_breaks"]]
+    offline_series = pd.concat(break_parts, ignore_index=True)[["penalty", "series_id", "month"]]
     save(shares, out_dir / "cp_realtime.csv")
     save(events, out_dir / "cp_realtime_events.csv", whole=("delay",))
     save(offline, out_dir / "cp_offline.csv")
+    save(offline_series, out_dir / "cp_offline_series.csv")
 
     print("\nСОБЫТИЯ: в окне события (до следующего) — первый месяц с долей не ниже порога, "
           "задержка в месяцах, наибольшая месячная доля и доля МО с началом эпизода за всё окно")
@@ -175,7 +205,7 @@ def main() -> int:
     print(side_by_side.to_string(float_format=lambda v: f"{v:.1f}"))
 
     names = ["cp_calibration.csv", "cp_bench.csv", "cp_summary.csv", "cp_summary_by_magnitude.csv",
-             "cp_realtime.csv", "cp_realtime_events.csv", "cp_offline.csv"]
+             "cp_realtime.csv", "cp_realtime_events.csv", "cp_offline.csv", "cp_offline_series.csv"]
     print(f"\nсохранено в {out_dir}: " + ", ".join(names))
     print(f"время работы: {(time.perf_counter() - started) / 60:.1f} мин")
     return 0

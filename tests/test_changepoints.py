@@ -425,11 +425,34 @@ class OfflineSharesTest(unittest.TestCase):
     def test_break_in_growth_rates_is_dated_by_the_new_level(self):
         # Излом b в ряду темпов роста — месяц b + 1: с него уровень ряда другой.
         panel = shifted_panel(shift_at=14)
-        table = script.offline_shares(panel, "pelt", "ratio", 1.0)
+        breaks = script.offline_breaks(panel, "pelt", "ratio", 1.0)
+        self.assertEqual(list(breaks.columns), ["series_id", "month"])
+        table = script.offline_shares(breaks, panel)
         self.assertEqual(list(table.columns), ["month", "share", "n_breaks"])
         self.assertEqual(table["share"].idxmax(), 14)
         self.assertEqual(table.loc[14, "month"], month(14))
         self.assertAlmostEqual(table.loc[14, "share"], table.loc[14, "n_breaks"] / panel.shape[1] * 100)
+
+    def test_rows_are_the_breaks_of_each_series(self):
+        panel = shifted_panel(shift_at=14)
+        breaks = script.offline_breaks(panel, "pelt", "ratio", 1.0)
+        for col in panel.columns:
+            found = detect_pelt(preprocess(panel[col].to_numpy(float), "ratio"), penalty=1.0).breakpoints
+            with self.subTest(col):
+                self.assertEqual(breaks.loc[breaks["series_id"] == col, "month"].tolist(),
+                                 [month(b + 1) for b in found])
+
+
+class EdgeWarningsTest(unittest.TestCase):
+    def test_warns_only_for_calibration_at_either_edge_of_the_grid(self):
+        grid = np.geomspace(0.001, 100, 40)
+        table = pd.DataFrame({"penalty": [1.0, 3.0, 10.0], "kernel_pen": [grid[0], grid[17], grid[-1]],
+                              "fa_pelt": [100.0, 5.0, 0.0], "fa_kernel": [100.0, 5.0, 0.0]})
+        lines = script.edge_warnings(table, grid)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all(line.startswith("ВНИМАНИЕ: калибровка на краю сетки") for line in lines))
+        self.assertIn("штраф 1:", lines[0])
+        self.assertIn("штраф 10:", lines[1])
 
 
 class _Report:
@@ -440,7 +463,10 @@ class _Report:
 CONFIG = {
     "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
     "bench": {"n_series": 3, "seed": 5, "positions": [14], "magnitudes": [4.0], "kinds": ["level"],
-              "modes": ["ratio"], "detectors": ["pelt", "kernel_rbf", "cusum"], "penalties": [1.0, 3.0]},
+              "modes": ["ratio"], "detectors": ["pelt", "kernel_rbf", "cusum"], "penalties": [1.0, 3.0],
+              # сетка не та, что по умолчанию в calibrate_kernel_penalty: иначе проверка
+              # не отличила бы сетку из конфига от умолчания
+              "kernel_pen_grid": {"min": 0.002, "max": 50, "points": 25}},
     "selection": {"rule": "J Юдена на режиме ratio, среди штрафов из сетки; при равенстве — меньший штраф"},
     "realtime": {"detector": "pelt", "mode": "ratio", "threshold_share": 50, "events": ["2024-03"]},
     "output": {"dir": "results"},
@@ -454,6 +480,7 @@ FILES = {
     "cp_realtime_events.csv": ["penalty", "selected", "event", "crossed_month", "delay", "max_share",
                                "share_in_window"],
     "cp_offline.csv": ["penalty", "month", "share", "n_breaks"],
+    "cp_offline_series.csv": ["penalty", "series_id", "month"],
 }
 
 
@@ -499,6 +526,18 @@ class MainTest(unittest.TestCase):
         kernel = bench[bench["detector"] == "kernel_rbf"]
         expected = kernel["penalty"].map(dict(zip(calibration["penalty"], calibration["kernel_pen"])))
         self.assertTrue(np.allclose(kernel["penalty_effective"], expected))
+
+    def test_kernel_penalty_comes_from_the_configured_grid(self):
+        spec = CONFIG["bench"]["kernel_pen_grid"]
+        grid = np.geomspace(spec["min"], spec["max"], spec["points"])
+        for pen in self.read("cp_calibration.csv")["kernel_pen"]:
+            self.assertTrue(np.isclose(grid, pen, rtol=1e-12, atol=0).any(), pen)
+
+    def test_offline_series_add_up_to_offline_counts(self):
+        counts = self.read("cp_offline_series.csv").groupby(["penalty", "month"]).size()
+        offline = self.read("cp_offline.csv").set_index(["penalty", "month"])["n_breaks"]
+        self.assertGreater(offline.sum(), 0)
+        self.assertTrue(counts.reindex(offline.index, fill_value=0).equals(offline))
 
     def test_realtime_and_offline_cover_every_penalty_and_month(self):
         for name in ["cp_realtime.csv", "cp_offline.csv"]:
