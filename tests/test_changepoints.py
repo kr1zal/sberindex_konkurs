@@ -25,8 +25,8 @@ sys.path.insert(0, str(ROOT))
 from src import cp_bench  # noqa: E402
 from src.changepoints import DETECTORS, Detection, detect_pelt  # noqa: E402
 from src.cp_bench import (  # noqa: E402
-    BENCH_COLUMNS, MIN_HISTORY, RECENT_WINDOW, SUMMARY_COLUMNS, inject, panel_realtime,
-    preprocess, realtime_signals, run_bench, streaming_signal, summarise,
+    BENCH_COLUMNS, CALIBRATION_COLUMNS, MIN_HISTORY, RECENT_WINDOW, SUMMARY_COLUMNS, inject,
+    panel_realtime, preprocess, realtime_signals, run_bench, streaming_signal, summarise,
 )
 
 # scripts/ — не пакет: скрипт грузится по пути, без правки sys.path под все тесты.
@@ -96,6 +96,11 @@ def pattern_detector(pattern: str):
         near_end = 0 <= i < len(pattern) and pattern[i] == "X"
         return Detection("pattern", [len(window) - 1] if near_end else [])
     return detect
+
+
+def exploding_detector(window, **kwargs):
+    """Заглушка сломанного детектора: падает на каждом шаге."""
+    raise RuntimeError("детектор сломан")
 
 
 def threshold_detector(window, penalty=3.0):
@@ -207,6 +212,16 @@ class RunBenchTest(unittest.TestCase):
         hit = spoiled[spoiled["detected"]]
         self.assertTrue((hit["delay"] == hit["signal"] - 14).all())
 
+    def test_clean_rows_are_never_detected_and_the_summary_does_not_read_them(self):
+        bench = run_bench(self.panel, **BENCH)
+        clean = bench["kind"] == "none"
+        self.assertFalse(bench.loc[clean, "detected"].any())
+        # прежняя запись: у чистой строки «обнаружено» = была тревога; числа сводки те же
+        legacy = bench.copy()
+        legacy.loc[clean, "detected"] = legacy.loc[clean, "false_alarm"]
+        self.assertTrue(legacy.loc[clean, "detected"].any())
+        pd.testing.assert_frame_equal(summarise(bench), summarise(legacy))
+
     def test_kernel_without_calibration_is_rejected(self):
         with self.assertRaises(ValueError):
             run_bench(self.panel, **{**BENCH, "kernel_penalties": None})
@@ -222,10 +237,10 @@ class RunBenchTest(unittest.TestCase):
 def bench_rows(detector, penalty, spoiled, clean, magnitude=1.0) -> list[dict]:
     """Строки стенда: `spoiled` — пары (обнаружено, задержка), `clean` — ложные тревоги."""
     rows = [{"detector": detector, "mode": "ratio", "penalty": penalty, "kind": "level",
-             "magnitude": magnitude, "detected": hit, "delay": delay, "false_alarm": False}
+             "magnitude": magnitude, "detected": hit, "delay": delay, "false_alarm": False, "n_failed": 0}
             for hit, delay in spoiled]
     rows += [{"detector": detector, "mode": "ratio", "penalty": penalty, "kind": "none",
-              "magnitude": 0.0, "detected": alarm, "delay": np.nan, "false_alarm": alarm}
+              "magnitude": 0.0, "detected": False, "delay": np.nan, "false_alarm": alarm, "n_failed": 0}
              for alarm in clean]
     return rows
 
@@ -280,7 +295,7 @@ class CalibrationTest(unittest.TestCase):
         # где ядро тоже молчит, ближайших значений несколько — берётся меньший штраф.
         grid = np.array([0.05, 0.5, 5.0, 25.0, 30.0])
         table = cp_bench.calibrate_kernel_penalty(clean, (1.0, 1e6), "ratio", grid=grid)
-        self.assertEqual(list(table.columns), ["penalty", "kernel_pen", "fa_pelt", "fa_kernel"])
+        self.assertEqual(list(table.columns), CALIBRATION_COLUMNS)
         self.assertEqual(table["penalty"].tolist(), [1.0, 1e6])
 
         def alarms(detector, penalty) -> int:
@@ -414,7 +429,7 @@ class PanelRealtimeTest(unittest.TestCase):
         # Штраф 3: при штрафе 1 шум даёт флаги и в месяцы перед сдвигом, и эпизод сдвига
         # у половины рядов сливается с эпизодом шума — ограничение правила, не этой проверки.
         monthly, events = self.realtime(penalty=3.0)
-        self.assertEqual(list(monthly.columns), ["month", "share", "n_signals"])
+        self.assertEqual(list(monthly.columns), ["month", "share", "n_signals", "n_failed"])
         self.assertEqual(monthly["month"].tolist(), [month(i) for i in range(24)])
         self.assertTrue((monthly["share"].iloc[: self.SHIFT] < 50).all())
         self.assertEqual(list(events.columns), ["event", "crossed_month", "delay", "max_share", "share_in_window"])
@@ -565,7 +580,7 @@ CONFIG = {
               # сетка не та, что по умолчанию в calibrate_kernel_penalty: иначе проверка
               # не отличила бы сетку из конфига от умолчания
               "kernel_pen_grid": {"min": 0.002, "max": 50, "points": 25}},
-    "selection": {"rule": "J Юдена на режиме ratio, среди штрафов из сетки; при равенстве — меньший штраф"},
+    "selection": {"rule": "J Юдена у {detector} на режиме {mode}, среди штрафов из сетки; при равенстве — меньший штраф"},
     "realtime": {"detector": "pelt", "mode": "ratio", "threshold_share": 50, "events": ["2024-03"]},
     "output": {"dir": "results"},
 }
@@ -573,8 +588,8 @@ FILES = {
     "cp_bench.csv": BENCH_COLUMNS,
     "cp_summary.csv": KEY + SUMMARY_COLUMNS,
     "cp_summary_by_magnitude.csv": KEY + ["magnitude"] + SUMMARY_COLUMNS,
-    "cp_calibration.csv": ["penalty", "kernel_pen", "fa_pelt", "fa_kernel"],
-    "cp_realtime.csv": ["penalty", "month", "share", "n_signals"],
+    "cp_calibration.csv": CALIBRATION_COLUMNS,
+    "cp_realtime.csv": ["penalty", "month", "share", "n_signals", "n_failed"],
     "cp_realtime_events.csv": ["penalty", "selected", "event", "crossed_month", "delay", "max_share",
                                "share_in_window"],
     "cp_offline.csv": ["penalty", "month", "share", "n_breaks"],
@@ -582,25 +597,34 @@ FILES = {
 }
 
 
+def run_main(root: Path, config: dict, panel: pd.DataFrame, detectors: dict | None = None) -> str:
+    """`main()` во временном каталоге `root`: загрузка панели подменена, детекторы —
+    настоящие, плюс `detectors`, если заданы. Возвращает напечатанное."""
+    path = root / "config.yaml"
+    path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    out = io.StringIO()
+    with contextlib.ExitStack() as stack:
+        for name, value in {"ROOT": root, "load_panel": mock.Mock(return_value=None),
+                            "build_matrix": mock.Mock(return_value=(panel, _Report()))}.items():
+            stack.enter_context(mock.patch.object(script, name, value))
+        stack.enter_context(mock.patch.dict(cp_bench.DETECTORS, detectors or {}))
+        stack.enter_context(mock.patch.object(sys, "argv", ["changepoints.py", "--config", str(path)]))
+        stack.enter_context(contextlib.redirect_stdout(out))
+        script.main()
+    return out.getvalue()
+
+
 class MainTest(unittest.TestCase):
     """`main()` целиком на синтетике: от калибровки до записанных файлов."""
 
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
+        # Проверки только читают файлы и лог, поэтому main() гоняется один раз на класс.
         tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name)
-        config = self.root / "config.yaml"
-        config.write_text(yaml.safe_dump(CONFIG, allow_unicode=True), encoding="utf-8")
-        out = io.StringIO()
-        with contextlib.ExitStack() as stack:
-            for name, value in {"ROOT": self.root, "load_panel": mock.Mock(return_value=None),
-                                "build_matrix": mock.Mock(return_value=(shifted_panel(8), _Report()))}.items():
-                stack.enter_context(mock.patch.object(script, name, value))
-            stack.enter_context(mock.patch.object(sys, "argv", ["changepoints.py", "--config", str(config)]))
-            stack.enter_context(contextlib.redirect_stdout(out))
-            script.main()
-        self.log = out.getvalue()
-        self.results = self.root / "results"
+        cls.addClassCleanup(tmp.cleanup)
+        cls.root = Path(tmp.name)
+        cls.log = run_main(cls.root, CONFIG, shifted_panel(8))
+        cls.results = cls.root / "results"
 
     def read(self, name: str) -> pd.DataFrame:
         return pd.read_csv(self.results / name)
@@ -616,7 +640,8 @@ class MainTest(unittest.TestCase):
         events = self.read("cp_realtime_events.csv")
         self.assertEqual(sorted(events["penalty"]), [1.0, 3.0])
         self.assertEqual(events.loc[events["selected"], "penalty"].tolist(), [chosen])
-        self.assertLess(self.log.index(CONFIG["selection"]["rule"]), self.log.index("РЕАЛЬНЫЕ ДАННЫЕ"))
+        rule = CONFIG["selection"]["rule"].format(detector="pelt", mode="ratio")
+        self.assertLess(self.log.index(rule), self.log.index("РЕАЛЬНЫЕ ДАННЫЕ"))
 
     def test_bench_uses_the_calibrated_kernel_penalty(self):
         calibration = self.read("cp_calibration.csv")
@@ -643,6 +668,75 @@ class MainTest(unittest.TestCase):
                 table = self.read(name)
                 self.assertEqual(len(table), 2 * 24)
                 self.assertEqual(sorted(table["penalty"].unique()), [1.0, 3.0])
+
+
+class DetectorFailureTest(unittest.TestCase):
+    """Шаг, на котором детектор упал, — шаг без флага, но не молчание: сбой считается."""
+
+    def test_failed_steps_are_counted_not_swallowed(self):
+        y = noisy_panel(1).iloc[:, 0].to_numpy(float)
+        failed: list[int] = []
+        with mock.patch.dict(cp_bench.DETECTORS, {"exploding": exploding_detector}):
+            self.assertIsNone(streaming_signal(y, "exploding", "ratio", failed=failed))
+            self.assertEqual(failed, list(range(MIN_HISTORY, len(y))))
+            failed = []
+            self.assertEqual(realtime_signals(y, "exploding", "ratio", None, failed), [])
+            self.assertEqual(len(failed), len(y) - MIN_HISTORY)
+
+    def test_failures_reach_the_summary_and_the_panel_table(self):
+        panel = noisy_panel(3)
+        bench_args = {**BENCH, "detectors": ("pelt", "exploding", "cusum"), "kernel_penalties": None}
+        with mock.patch.dict(cp_bench.DETECTORS, {"exploding": exploding_detector}):
+            summary = summarise(run_bench(panel, **bench_args))
+            monthly, _ = panel_realtime(panel, "exploding", "ratio", 1.0, 50, [month(14)])
+        steps = 24 - MIN_HISTORY
+        broken = summary[summary["detector"] == "exploding"]
+        # на каждом ряду 1 чистый и 2 испорченных просмотра, каждый падает на всех шагах
+        self.assertTrue((broken["n_failed"] == 3 * 3 * steps).all())
+        self.assertTrue((summary.loc[summary["detector"] != "exploding", "n_failed"] == 0).all())
+        self.assertEqual(monthly["n_failed"].tolist(), [0] * MIN_HISTORY + [3] * steps)
+        self.assertEqual(monthly["n_signals"].sum(), 0)
+
+    def test_real_detectors_do_not_fail_on_synthetic_series(self):
+        bench = run_bench(noisy_panel(3), **{
+            **BENCH, "detectors": tuple(DETECTORS), "modes": ("raw", "ratio", "deseason"),
+            "kinds": ("level", "trend", "variance"),
+        })
+        self.assertEqual(int(bench["n_failed"].sum()), 0)
+
+    def test_warning_line_names_the_place_and_the_count(self):
+        self.assertEqual(script.failure_warning("стенд, pelt / ratio / штраф 1", 0), [])
+        lines = script.failure_warning("стенд, pelt / ratio / штраф 1", 16)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("ВНИМАНИЕ: стенд, pelt / ratio / штраф 1:"))
+        self.assertIn("16 шагах", lines[0])
+
+    def test_main_prints_a_warning_for_a_failing_detector(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        config = {**CONFIG, "bench": {**CONFIG["bench"], "detectors": ["pelt", "exploding", "cusum"]}}
+        # CUSUM тоже сломан — у него штрафа нет, и в строке вместо штрафа прочерк
+        broken = {"exploding": exploding_detector, "cusum": exploding_detector}
+        log = run_main(Path(tmp.name), config, shifted_panel(8), broken)
+        summary = pd.read_csv(Path(tmp.name) / "results" / "cp_summary.csv")
+        self.assertIn("ВНИМАНИЕ: стенд, exploding / ratio / штраф 1:", log)
+        self.assertIn("ВНИМАНИЕ: стенд, exploding / ratio / штраф 3:", log)
+        self.assertIn("ВНИМАНИЕ: стенд, cusum / ratio / штраф —:", log)
+        self.assertTrue((summary.loc[summary["detector"] != "pelt", "n_failed"] > 0).all())
+        self.assertTrue((summary.loc[summary["detector"] == "pelt", "n_failed"] == 0).all())
+        self.assertNotIn("ВНИМАНИЕ: стенд, pelt", log)
+
+
+class EmptyInputTest(unittest.TestCase):
+    def test_bench_sample_needs_at_least_one_series(self):
+        with self.assertRaises(ValueError):
+            cp_bench.bench_sample(noisy_panel(3), 0, seed=1)
+
+    def test_calibration_needs_series_and_a_grid(self):
+        with self.assertRaises(ValueError):
+            cp_bench.calibrate_kernel_penalty(noisy_panel(3).iloc[:, :0], (1.0,), "ratio", grid=[1.0])
+        with self.assertRaises(ValueError):
+            cp_bench.calibrate_kernel_penalty(noisy_panel(3), (1.0,), "ratio", grid=[])
 
 
 if __name__ == "__main__":

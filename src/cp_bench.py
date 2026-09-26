@@ -30,7 +30,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from functools import partial
 
 import numpy as np
@@ -41,22 +41,18 @@ from src.changepoints import DETECTORS, Detection
 MIN_HISTORY = 8      # раньше восьми точек ни один метод не имеет шансов
 RECENT_WINDOW = 3    # разладка засчитывается, если найдена вблизи текущего конца
 
-# Сетка штрафа ядра по умолчанию — для прямых вызовов и тестов; прогон берёт сетку
-# из конфига (bench.kernel_pen_grid). Стоимость rbf на отрезке из n точек не больше n − 1,
-# а в окне стенда не больше 24 точек: штраф 100 не пропускает ни одного излома, 0,001 —
-# почти любой. Шаг геометрический: доля ложных тревог меняется с порядком штрафа,
-# а не с его приращением.
-KERNEL_PEN_GRID = np.geomspace(0.001, 100, 40)
-
+# n_failed — шаги, на которых детектор упал: протокол считает их шагами без флага,
+# и без счётчика такой детектор выглядел бы молчаливым, а не сломанным.
 BENCH_COLUMNS = [
     "detector", "mode", "penalty", "penalty_effective", "kind", "magnitude", "position",
-    "series_id", "detected", "delay", "false_alarm", "signal",
+    "series_id", "detected", "delay", "false_alarm", "signal", "n_failed",
 ]
 SUMMARY_KEY = ["detector", "mode", "penalty"]
 SUMMARY_COLUMNS = [
     "обнаружено, %", "задержка, медиана", "задержка, среднее", "доля с задержкой 0, %",
-    "ложных на чистых, %", "J Юдена", "n испорченных", "n чистых",
+    "ложных на чистых, %", "J Юдена", "n испорченных", "n чистых", "n_failed",
 ]
+CALIBRATION_COLUMNS = ["penalty", "kernel_pen", "fa_pelt", "fa_kernel", "n_failed_pelt", "n_failed_kernel"]
 
 
 def inject(
@@ -135,17 +131,15 @@ def month_offset(mode: str) -> int:
     return 1 if mode == "ratio" else 0
 
 
-def streaming_signal(
-    y: np.ndarray, detector: str, mode: str = "raw", penalty: float | None = None,
-) -> int | None:
-    """Момент первого сигнала при последовательном просмотре ряда.
+def _flag_months(
+    y: np.ndarray, detector: str, mode: str, penalty: float | None, failed: list[int] | None = None,
+) -> Iterator[int]:
+    """Месяцы флага при последовательном просмотре ряда — единственная копия правила протокола.
 
-    Возвращает индекс t, на котором детектор впервые сообщил о разладке вблизи
-    конца доступной истории, либо None, если не сообщил ни разу.
-
-    `penalty` — штраф стенда (`detector_with_penalty`). Без него перебор штрафа
-    до потокового прогона не доходил: детектор звался со штрафом по умолчанию
-    при любом значении сетки.
+    Флаг в месяц t: детектор на y[:t+1] после `preprocess` нашёл излом в последних
+    RECENT_WINDOW точках. Шаг, на котором детектор упал, — шаг без флага, но его месяц
+    дописывается в `failed`: сбой не должен выглядеть молчанием. Генератор ленивый:
+    `streaming_signal` берёт первый флаг, и дальше детектор не зовётся.
     """
     fn = detector_with_penalty(detector, penalty)
     offset = month_offset(mode)
@@ -154,71 +148,111 @@ def streaming_signal(
         try:
             found = fn(window).breakpoints
         except Exception:
+            if failed is not None:
+                failed.append(t)
             continue
         if any(b + offset >= t - RECENT_WINDOW for b in found):
-            return t
-    return None
+            yield t
+
+
+def streaming_signal(
+    y: np.ndarray, detector: str, mode: str = "raw", penalty: float | None = None,
+    failed: list[int] | None = None,
+) -> int | None:
+    """Момент первого сигнала при последовательном просмотре ряда.
+
+    Возвращает индекс t, на котором детектор впервые сообщил о разладке вблизи
+    конца доступной истории, либо None, если не сообщил ни разу.
+
+    `penalty` — штраф стенда (`detector_with_penalty`). Без него перебор штрафа
+    до потокового прогона не доходил: детектор звался со штрафом по умолчанию
+    при любом значении сетки. `failed` — куда дописать месяцы сбоев детектора.
+    """
+    return next(_flag_months(y, detector, mode, penalty, failed), None)
 
 
 def bench_sample(wide: pd.DataFrame, n_series: int, seed: int) -> pd.DataFrame:
     """Случайная выборка рядов стенда. Порядковый номер ряда в ней сеет его возмущение."""
+    if n_series < 1:
+        raise ValueError(f"в выборке стенда должен быть хотя бы один ряд, n_series = {n_series}")
     rng = np.random.default_rng(seed)
     columns = rng.choice(wide.columns, size=min(n_series, wide.shape[1]), replace=False)
     return wide.loc[:, list(columns)]
 
 
 def calibrate_kernel_penalty(
-    sample: pd.DataFrame, penalties: Sequence[float], mode: str,
-    grid: np.ndarray = KERNEL_PEN_GRID,
+    sample: pd.DataFrame, penalties: Sequence[float], mode: str, grid: Sequence[float],
 ) -> pd.DataFrame:
     """Штраф ядра, при котором доля ложных тревог как у PELT при номинальном штрафе.
 
     Номинальный штраф ядра несопоставим с методами l2 (`detect_kernel`): при одном
     числе сравнивалась бы строгость, а не метод. На нетронутых рядах `sample` в режиме
     `mode` по потоковому протоколу для каждого номинального штрафа берётся значение
-    из `grid`, при котором доля ложных тревог ядра ближе всего к доле PELT; при равной
-    доле ложных тревог — самый чувствительный штраф, то есть меньший. Близость меряется
-    числом рядов с тревогой, а не процентом: у процентов равные расстояния вверх и вниз
-    расходятся в последнем разряде, и ничью решал бы шум округления. Доли в таблице —
-    в процентах, как «ложных на чистых, %» в сводке.
+    из `grid`, при котором доля ложных тревог ядра ближе всего к доле PELT; из точек,
+    одинаково близких к ней, — самый чувствительный штраф, то есть меньший. Близость
+    меряется числом рядов с тревогой, а не процентом: у процентов равные расстояния вверх
+    и вниз расходятся в последнем разряде, и ничью решал бы шум округления. Доли в таблице —
+    в процентах, как «ложных на чистых, %» в сводке. `n_failed_pelt`, `n_failed_kernel` —
+    шаги, на которых упал PELT при номинальном штрафе и ядро при выбранном: протокол
+    считает их шагами без тревоги, и доля с ними занижена.
     """
+    if sample.shape[1] == 0:
+        raise ValueError("калибровать штраф ядра не на чем: в выборке стенда нет рядов")
+    grid = np.asarray(grid, dtype=float)
+    if grid.size == 0:
+        raise ValueError("сетка калибровки штрафа ядра пуста")
     series = [sample[col].to_numpy(dtype=float) for col in sample.columns]
 
-    def alarms(detector: str, penalty: float) -> int:
-        return sum(streaming_signal(y, detector, mode, penalty=penalty) is not None for y in series)
+    def alarms(detector: str, penalty: float) -> tuple[int, int]:
+        failed: list[int] = []
+        count = sum(streaming_signal(y, detector, mode, penalty=penalty, failed=failed) is not None
+                    for y in series)
+        return count, len(failed)
 
-    grid = np.asarray(grid, dtype=float)
-    kernel = np.array([alarms("kernel_rbf", pen) for pen in grid])
+    scanned = [alarms("kernel_rbf", pen) for pen in grid]
+    kernel = np.array([count for count, _ in scanned])
     rows = []
     for penalty in penalties:
-        pelt = alarms("pelt", penalty)
+        pelt, pelt_failed = alarms("pelt", penalty)
         distance = np.abs(kernel - pelt)
         tied = np.flatnonzero(distance == distance.min())
         best = tied[np.argmin(grid[tied])]
         rows.append({
             "penalty": penalty, "kernel_pen": float(grid[best]),
             "fa_pelt": pelt / len(series) * 100, "fa_kernel": kernel[best] / len(series) * 100,
+            "n_failed_pelt": pelt_failed, "n_failed_kernel": scanned[best][1],
         })
-    return pd.DataFrame(rows, columns=["penalty", "kernel_pen", "fa_pelt", "fa_kernel"])
+    return pd.DataFrame(rows, columns=CALIBRATION_COLUMNS)
+
+
+def effective_penalty(
+    detector: str, penalty: float, kernel_penalties: dict[float, float] | None,
+) -> float | None:
+    """Штраф вызова детектора при номинальном штрафе: у ядра — калиброванный, у CUSUM
+    штрафа нет — свой порог. Одно место и для стенда, и для реальных данных."""
+    if detector == "cusum":
+        return None
+    if detector != "kernel_rbf":
+        return penalty
+    if kernel_penalties is None:
+        raise ValueError(
+            "штраф ядра без калибровки несопоставим с методами l2: "
+            "передайте kernel_penalties (calibrate_kernel_penalty)"
+        )
+    return kernel_penalties[penalty]
 
 
 def _settings(
     detectors: Sequence[str], penalties: Sequence[float], kernel_penalties: dict[float, float] | None,
 ) -> list[tuple[str, float, float | None]]:
     """Настройки стенда: (детектор, номинальный штраф, штраф вызова)."""
-    if "kernel_rbf" in detectors and kernel_penalties is None:
-        raise ValueError(
-            "штраф ядра без калибровки несопоставим с методами l2: "
-            "передайте kernel_penalties (calibrate_kernel_penalty)"
-        )
     settings = []
     for detector in detectors:
         if detector == "cusum":
             settings.append((detector, np.nan, None))  # свой порог: один прогон, штраф пуст
             continue
         for penalty in penalties:
-            effective = kernel_penalties[penalty] if detector == "kernel_rbf" else penalty
-            settings.append((detector, penalty, effective))
+            settings.append((detector, penalty, effective_penalty(detector, penalty, kernel_penalties)))
     return settings
 
 
@@ -264,21 +298,23 @@ def run_bench(
                     "detector": detector, "mode": mode, "penalty": penalty,
                     "penalty_effective": np.nan if effective is None else effective, "series_id": col,
                 }
-                # нетронутый ряд: любой сигнал здесь — ложная тревога
-                signal = streaming_signal(base, detector, mode, penalty=effective)
+                # нетронутый ряд: обнаруживать нечего, любой сигнал здесь — ложная тревога
+                failed: list[int] = []
+                signal = streaming_signal(base, detector, mode, penalty=effective, failed=failed)
                 rows.append({
                     **common, "kind": "none", "magnitude": 0.0, "position": np.nan,
-                    "detected": signal is not None, "delay": np.nan,
-                    "false_alarm": signal is not None, "signal": np.nan if signal is None else signal,
+                    "detected": False, "delay": np.nan, "false_alarm": signal is not None,
+                    "signal": np.nan if signal is None else signal, "n_failed": len(failed),
                 })
                 for kind, magnitude, position, y in spoiled:
-                    signal = streaming_signal(y, detector, mode, penalty=effective)
+                    failed = []
+                    signal = streaming_signal(y, detector, mode, penalty=effective, failed=failed)
                     hit = signal is not None and signal >= position
                     rows.append({
                         **common, "kind": kind, "magnitude": magnitude, "position": position,
                         "detected": hit, "delay": (signal - position) if hit else np.nan,
                         "false_alarm": signal is not None and signal < position,
-                        "signal": np.nan if signal is None else signal,
+                        "signal": np.nan if signal is None else signal, "n_failed": len(failed),
                     })
         if log is not None:
             log(f"  ряд {i + 1}/{sample.shape[1]} ({col}): {time.perf_counter() - started:.0f} с")
@@ -295,7 +331,8 @@ def summarise(bench: pd.DataFrame, by: Sequence[str] = ()) -> pd.DataFrame:
 
     J Юдена — обнаружено минус ложных, то есть TPR − FPR: детектор, кричащий всегда,
     получает стопроцентное обнаружение и должен быть за это наказан. Штраф CUSUM пуст,
-    и группировка не должна его терять (`dropna=False`).
+    и группировка не должна его терять (`dropna=False`). `n_failed` — шаги, на которых
+    детектор упал, по испорченным строкам группы и чистым строкам её тройки.
     """
     key = SUMMARY_KEY + list(by)
     spoiled = bench[bench["kind"] != "none"]
@@ -307,6 +344,7 @@ def summarise(bench: pd.DataFrame, by: Sequence[str] = ()) -> pd.DataFrame:
     detection = pd.DataFrame({
         "обнаружено, %": by_spoiled["detected"].mean() * 100,
         "n испорченных": by_spoiled.size(),
+        "failed_spoiled": by_spoiled["n_failed"].sum(),
     })
     delay = pd.DataFrame({
         "задержка, медиана": by_hit.median(),
@@ -316,6 +354,7 @@ def summarise(bench: pd.DataFrame, by: Sequence[str] = ()) -> pd.DataFrame:
     alarms = pd.DataFrame({
         "ложных на чистых, %": by_clean["false_alarm"].mean() * 100,
         "n чистых": by_clean.size(),
+        "failed_clean": by_clean["n_failed"].sum(),
     })
     # Слияние по колонкам, а не по индексу: pandas сопоставляет пустой штраф CUSUM
     # с пустым только при слиянии колонок.
@@ -326,48 +365,40 @@ def summarise(bench: pd.DataFrame, by: Sequence[str] = ()) -> pd.DataFrame:
     )
     out["J Юдена"] = out["обнаружено, %"] - out["ложных на чистых, %"]
     out["n чистых"] = out["n чистых"].fillna(0).astype(int)
+    out["n_failed"] = (out["failed_spoiled"] + out["failed_clean"].fillna(0)).astype(int)
     order = [*by, "J Юдена"]
     ascending = [True] * len(by) + [False]
     return out[key + SUMMARY_COLUMNS].sort_values(order, ascending=ascending, kind="stable").reset_index(drop=True)
 
 
-def realtime_signals(y: np.ndarray, detector: str, mode: str, penalty: float | None) -> list[int]:
+def realtime_signals(
+    y: np.ndarray, detector: str, mode: str, penalty: float | None, failed: list[int] | None = None,
+) -> list[int]:
     """Начала эпизодов тревоги ряда при последовательном просмотре — для панели на реальных данных.
 
-    Флаг в месяц t — правило `streaming_signal`: детектор на y[:t+1] нашёл излом в последних
-    RECENT_WINDOW точках. Сигнал — начало эпизода: флаг в t и ни одного флага в t − 1, …,
-    t − RECENT_WINDOW; месяцы до MIN_HISTORY считаются месяцами без флага, так что в первый
-    проверяемый месяц сигнал возможен — как на стенде. Первый сигнал совпадает
-    со `streaming_signal`.
+    Флаги — те же, что у `streaming_signal` (`_flag_months`). Сигнал — начало эпизода:
+    флаг в t и ни одного флага в t − 1, …, t − RECENT_WINDOW; месяцы до MIN_HISTORY
+    считаются месяцами без флага, так что в первый проверяемый месяц сигнал возможен —
+    как на стенде. Первый сигнал совпадает со `streaming_signal`.
 
     Эпизод кончается только после RECENT_WINDOW месяцев подряд без флага. Излом считается
     недавним RECENT_WINDOW месяцев, и тревога живёт столько же после последнего флага —
     новой константы нет. Разовый сдвиг уровня в темпах роста — одиночный выброс: PELT
-    сначала ставит излом у конца окна, при штрафе от 2 на шаг-два теряет его и затем
+    сначала ставит излом у конца окна, при строгом штрафе на шаг-два теряет его и затем
     отсекает выброс вторым изломом. С одним лишь переходом «нет флага → флаг» такой
-    перерыв давал второй эпизод через пять-шесть месяцев после сдвига; с гистерезисом это
-    один эпизод. На синтетике при штрафе 3 второй эпизод после сдвига остался у одного
-    ряда из 120 — там флагов не было ровно три месяца.
+    перерыв давал второй эпизод через несколько месяцев после сдвига; с гистерезисом
+    второй остаётся, только если флагов не было RECENT_WINDOW месяцев подряд.
 
     Ограничение: события, чьи серии флагов у ряда подходят друг к другу ближе чем на
     RECENT_WINDOW месяцев без флага, сливаются в один эпизод — второе у ряда не видно.
     Сливается и с шумом: ложный флаг в последние RECENT_WINDOW месяцев перед событием
-    поглощает начало его эпизода — на синтетике при штрафе 1 у 30–65% рядов, при 3 — до 15%.
-    Перерыв ровно в RECENT_WINDOW месяцев и больше — уже два эпизода. Шаг, на котором
-    детектор упал, считается шагом без флага, как в `streaming_signal`.
+    поглощает начало его эпизода, и при мягком штрафе, когда ложных флагов много, так
+    теряется заметная часть начал. Перерыв ровно в RECENT_WINDOW месяцев и больше — уже
+    два эпизода.
     """
-    fn = detector_with_penalty(detector, penalty)
-    offset = month_offset(mode)
     signals: list[int] = []
     last_flag: int | None = None
-    for t in range(MIN_HISTORY, len(y)):
-        window = preprocess(y[: t + 1], mode)
-        try:
-            found = fn(window).breakpoints
-        except Exception:
-            continue
-        if not any(b + offset >= t - RECENT_WINDOW for b in found):
-            continue
+    for t in _flag_months(y, detector, mode, penalty, failed):
         if last_flag is None or t - last_flag > RECENT_WINDOW:
             signals.append(t)
         last_flag = t
@@ -382,8 +413,10 @@ def panel_realtime(
 
     Каждый ряд просматривается в расширяющемся окне (`realtime_signals`, там же правило
     эпизода и его ограничение). По месяцам: `month` (ГГГГ-ММ), `n_signals` — рядов,
-    у которых эпизод начался в этом месяце, `share` — их процент от рядов панели. Первые
-    MIN_HISTORY месяцев детектор не запускается, и доля там нулевая по построению.
+    у которых эпизод начался в этом месяце, `share` — их процент от рядов панели,
+    `n_failed` — рядов, у которых в этом месяце упал детектор: такой ряд остаётся
+    в знаменателе доли без шанса попасть в числитель. Первые MIN_HISTORY месяцев
+    детектор не запускается, и доля там нулевая по построению.
 
     События — месяцы в терминах панели: месяц, с которого уровень ряда стал другим
     (излом b в ряду темпов роста — месяц b + 1). Окно события — от его месяца до месяца
@@ -395,15 +428,18 @@ def panel_realtime(
     потоковый аналог доли изломов по полному ряду, накопленный за окно.
     """
     months = pd.DatetimeIndex(wide.index).strftime("%Y-%m")
+    failed: list[int] = []
     per_series = [
-        realtime_signals(wide[col].to_numpy(dtype=float), detector, mode, penalty) for col in wide.columns
+        realtime_signals(wide[col].to_numpy(dtype=float), detector, mode, penalty, failed)
+        for col in wide.columns
     ]
     counts = np.zeros(len(months), dtype=int)
     for signals in per_series:
         for t in signals:
             counts[t] += 1
     share = counts / wide.shape[1] * 100
-    monthly = pd.DataFrame({"month": months, "share": share, "n_signals": counts})
+    n_failed = np.bincount(np.asarray(failed, dtype=int), minlength=len(months))
+    monthly = pd.DataFrame({"month": months, "share": share, "n_signals": counts, "n_failed": n_failed})
 
     index = {month: i for i, month in enumerate(months)}
     unknown = [event for event in events if event not in index]

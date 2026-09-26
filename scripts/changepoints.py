@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.cp_bench import (  # noqa: E402
-    bench_sample, calibrate_kernel_penalty, detector_with_penalty, month_offset,
+    bench_sample, calibrate_kernel_penalty, detector_with_penalty, effective_penalty, month_offset,
     panel_realtime, preprocess, run_bench, summarise,
 )
 from src.data import build_matrix, load_panel  # noqa: E402
@@ -96,6 +96,14 @@ def edge_warnings(calibration: pd.DataFrame, grid: np.ndarray) -> list[str]:
     ]
 
 
+def failure_warning(what: str, n_failed: int) -> list[str]:
+    """Строка «ВНИМАНИЕ» о шагах, на которых детектор упал. Протокол считает их шагами
+    без тревоги, и доли с ними занижены; без строки в логе это прошло бы молча."""
+    if not n_failed:
+        return []
+    return [f"ВНИМАНИЕ: {what}: детектор упал на {int(n_failed)} шагах — они засчитаны как шаги без тревоги"]
+
+
 def save(frame: pd.DataFrame, path: Path, whole: Sequence[str] = ()) -> None:
     """CSV целиком; колонки `whole` — целые с пропусками: «14», а не «14.0», пусто — нет значения."""
     frame.astype({column: "Int64" for column in whole}).to_csv(path, index=False)
@@ -134,6 +142,10 @@ def main() -> int:
     print(table(calibration, ".4g"))
     for line in edge_warnings(calibration, grid):
         print(line)
+    for row in calibration.itertuples(index=False):
+        for line in (failure_warning(f"калибровка, PELT при штрафе {row.penalty:g}", row.n_failed_pelt)
+                     + failure_warning(f"калибровка, ядро при штрафе {row.kernel_pen:.4g}", row.n_failed_kernel)):
+            print(line)
     kernel_pens = dict(zip(calibration["penalty"], calibration["kernel_pen"]))
 
     stage = time.perf_counter()
@@ -151,13 +163,18 @@ def main() -> int:
     print(f"стенд: {len(bench)} строк, {time.perf_counter() - stage:.0f} с")
     print("\nСВОДКА: задержка в месяцах — среди обнаруженных; CUSUM — со своим порогом, штраф пуст")
     print(table(summary))
+    for row in summary.itertuples(index=False):
+        penalty = "—" if pd.isna(row.penalty) else f"{row.penalty:g}"  # у CUSUM штрафа нет
+        for line in failure_warning(f"стенд, {row.detector} / {row.mode} / штраф {penalty}", row.n_failed):
+            print(line)
 
     # Штраф выбирается по стенду до того, как посчитаны реальные данные: иначе правило
     # можно было бы подогнать под картину на них.
     detector, mode = realtime["detector"], realtime["mode"]
     chosen = select_penalty(summary, detector, mode)
     candidates = summary[(summary["detector"] == detector) & (summary["mode"] == mode)]
-    print(f"\nПРАВИЛО ВЫБОРА ШТРАФА: {cfg['selection']['rule']}")
+    # Текст правила собирается из конфига: детектор и режим те же, что у select_penalty.
+    print(f"\nПРАВИЛО ВЫБОРА ШТРАФА: {cfg['selection']['rule'].format(detector=detector, mode=mode)}")
     print(f"  {detector} / {mode}: " + "; ".join(
         f"штраф {p:g} → J Юдена {j:.1f}" for p, j in zip(candidates["penalty"], candidates["J Юдена"])))
     print(f"  выбран штраф: {chosen:g}")
@@ -172,7 +189,7 @@ def main() -> int:
           f"порог {realtime['threshold_share']}% МО; для сравнения — изломы по полному ряду")
     monthly_parts, event_parts, offline_parts, break_parts = [], [], [], []
     for penalty in penalties:
-        effective = kernel_pens[penalty] if detector == "kernel_rbf" else penalty  # как на стенде
+        effective = effective_penalty(detector, penalty, kernel_pens)  # как на стенде
         monthly, events = panel_realtime(
             wide, detector, mode, effective, realtime["threshold_share"], realtime["events"]
         )
@@ -181,8 +198,11 @@ def main() -> int:
         breaks = offline_breaks(wide, detector, mode, effective)
         break_parts.append(breaks.assign(penalty=penalty))
         offline_parts.append(offline_shares(breaks, wide).assign(penalty=penalty))
-        print(f"  штраф {penalty:g}: {time.perf_counter() - stage:.0f} с")
-    shares = pd.concat(monthly_parts, ignore_index=True)[["penalty", "month", "share", "n_signals"]]
+        n_failed = int(monthly["n_failed"].sum())
+        print(f"  штраф {penalty:g}: {time.perf_counter() - stage:.0f} с, шагов со сбоем детектора: {n_failed}")
+        for line in failure_warning(f"реальные данные, {detector} / {mode} / штраф {penalty:g}", n_failed):
+            print(line)
+    shares = pd.concat(monthly_parts, ignore_index=True)[["penalty", "month", "share", "n_signals", "n_failed"]]
     events = pd.concat(event_parts, ignore_index=True)[
         ["penalty", "selected", "event", "crossed_month", "delay", "max_share", "share_in_window"]
     ]
