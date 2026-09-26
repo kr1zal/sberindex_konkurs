@@ -18,6 +18,7 @@ from unittest import mock
 import numpy as np
 import pandas as pd
 import yaml
+from ruptures.exceptions import BadSegmentationParameters, NotEnoughPoints
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -98,16 +99,23 @@ def pattern_detector(pattern: str):
     return detect
 
 
-def exploding_detector(window, **kwargs):
-    """Заглушка сломанного детектора: падает на каждом шаге."""
-    raise RuntimeError("детектор сломан")
+def raising_detector(error: type[Exception]):
+    """Заглушка, которая на каждом шаге бросает `error`."""
+    def detect(window, **kwargs):
+        raise error("заглушка")
+    return detect
+
+
+# Сбой детектора — исключение ruptures на слишком коротком окне; другие исключения
+# стенд не глотает (`_flag_months`), поэтому сломанные заглушки бросают исключения ruptures.
+exploding_detector = raising_detector(BadSegmentationParameters)
 
 
 def flaky_pelt(window, penalty=3.0):
     """PELT, который падает на окнах короче полного ряда темпов роста (23 точки на 24
     месяцах): в потоке сбой на всех шагах, кроме последнего, по полному ряду — как обычно."""
     if len(window) < 23:
-        raise RuntimeError("детектор сломан на коротком окне")
+        raise NotEnoughPoints
     return detect_pelt(window, penalty=penalty)
 
 
@@ -690,6 +698,28 @@ class DetectorFailureTest(unittest.TestCase):
             self.assertEqual(realtime_signals(y, "exploding", "ratio", None, failed), [])
             self.assertEqual(len(failed), len(y) - MIN_HISTORY)
 
+    def test_short_window_errors_of_ruptures_are_failures(self):
+        # На окнах короче протокольных ruptures бросает ровно эти два исключения
+        # (так показал опыт на таких окнах): шаг с ними — сбой, а не молчание.
+        y = noisy_panel(1).iloc[:, 0].to_numpy(float)
+        for error in (BadSegmentationParameters, NotEnoughPoints):
+            failed: list[int] = []
+            with self.subTest(error.__name__), mock.patch.dict(cp_bench.DETECTORS, {"broken": raising_detector(error)}):
+                self.assertIsNone(streaming_signal(y, "broken", "ratio", failed=failed))
+                self.assertEqual(failed, list(range(MIN_HISTORY, len(y))))
+
+    def test_other_detector_errors_propagate(self):
+        # Ошибка в коде детектора или в его аргументах — не короткое окно: засчитанная шагом
+        # без флага, она выглядела бы тихим детектором. AssertionError — так ruptures
+        # отвергает неположительный штраф.
+        y = noisy_panel(1).iloc[:, 0].to_numpy(float)
+        for error in (TypeError, ValueError, RuntimeError, AssertionError):
+            with self.subTest(error.__name__), mock.patch.dict(cp_bench.DETECTORS, {"broken": raising_detector(error)}):
+                with self.assertRaises(error):
+                    streaming_signal(y, "broken", "ratio")
+                with self.assertRaises(error):
+                    realtime_signals(y, "broken", "ratio", None)
+
     def test_failures_reach_the_summary_and_the_panel_table(self):
         panel = noisy_panel(3)
         bench_args = {**BENCH, "detectors": ("pelt", "exploding", "cusum"), "kernel_penalties": None}
@@ -742,7 +772,7 @@ class CalibrationFailureTest(unittest.TestCase):
 
         def kernel(window, penalty=3.0):
             if penalty == 2.0:
-                raise RuntimeError("ядро сломано при штрафе 2")
+                raise BadSegmentationParameters("ядро сломано при штрафе 2")
             return threshold_detector(window, penalty)
 
         with mock.patch.dict(cp_bench.DETECTORS, {"pelt": exploding_detector, "kernel_rbf": kernel}):
@@ -762,7 +792,7 @@ class CalibrationFailureTest(unittest.TestCase):
 
         def kernel(window, penalty=3.0):
             if np.isclose(penalty, edge):
-                raise RuntimeError("ядро сломано в одной точке сетки")
+                raise BadSegmentationParameters("ядро сломано в одной точке сетки")
             return detect_kernel(window, penalty=penalty)
 
         log = run_main(Path(tmp.name), CONFIG, shifted_panel(8), {"pelt": flaky_pelt, "kernel_rbf": kernel})

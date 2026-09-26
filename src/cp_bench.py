@@ -35,6 +35,7 @@ from functools import partial
 
 import numpy as np
 import pandas as pd
+from ruptures.exceptions import BadSegmentationParameters, NotEnoughPoints
 
 from src.changepoints import DETECTORS, Detection
 
@@ -140,7 +141,10 @@ def _flag_months(
 
     Флаг в месяц t: детектор на y[:t+1] после `preprocess` нашёл излом в последних
     RECENT_WINDOW точках. Шаг, на котором детектор упал, — шаг без флага, но его месяц
-    дописывается в `failed`: сбой не должен выглядеть молчанием. Генератор ленивый:
+    дописывается в `failed`: сбой не должен выглядеть молчанием. Сбой — только исключение,
+    которым ruptures отказывает слишком короткому окну (`BadSegmentationParameters`,
+    `NotEnoughPoints`); прочие — ошибка в коде или аргументах, и засчитанная шагом без флага
+    она выглядела бы тихим детектором, поэтому падает наружу. Генератор ленивый:
     `streaming_signal` берёт первый флаг, и дальше детектор не зовётся.
     """
     fn = detector_with_penalty(detector, penalty)
@@ -149,7 +153,7 @@ def _flag_months(
         window = preprocess(y[: t + 1], mode)
         try:
             found = fn(window).breakpoints
-        except Exception:
+        except (BadSegmentationParameters, NotEnoughPoints):
             if failed is not None:
                 failed.append(t)
             continue
