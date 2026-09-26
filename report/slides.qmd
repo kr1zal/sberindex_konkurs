@@ -462,8 +462,8 @@ Markdown(
 )
 ```
 
-**На сырых данных детекторы находят декабрьский скачок расходов, а не структурные
-изменения.** Вскрылось только потому, что в стенд положены ряды без структурных изменений.
+**На сырых данных детекторы находят сезонность и структуру рядов, а не структурные
+изменения.** Вскрылось благодаря нетронутым рядам в стенде.
 
 ## Интерпретация на реальных данных {.smaller}
 
@@ -560,8 +560,8 @@ _cp_with0 = set(_cp_os.loc[_cp_os["month"] == _cp_e0, "series_id"])
 _cp_pair = len(_cp_with0 & set(_cp_os.loc[_cp_os["month"] == _cp_e1, "series_id"]))
 _cp_jans = [m for m in _cp_months[1:] if m.endswith("-01")]
 Markdown(
-    f"{_GEN[len(_cp_events)].capitalize()} событий недостаточно для вывода о причинности — это "
-    f"совпадение и гипотеза.\n\n"
+    f"{_GEN[len(_cp_events)].capitalize()} событий недостаточно для вывода о причинности: связь "
+    f"с денежной политикой — совпадение и гипотеза.\n\n"
     + (f"{_cp_ym(_cp_e0).capitalize()} и {_cp_ym(_cp_e1)} по полному ряду — не два шока: у "
        f"{_num(_cp_pair, 0)} из {_num(len(_cp_with0), 0)} "
        f"{_plural(len(_cp_with0), 'ряда', 'рядов', 'рядов')} с изломом в "
@@ -705,12 +705,21 @@ Markdown(
 
 ```{python}
 # Строка про изломы — из тех же файлов стенда, что слайды об обнаружении.
+# Обнаружение без врезки в декабре: там засчитывается и сам декабрьский скачок.
+_cpb = pd.read_csv("../results/cp_bench.csv", usecols=["detector", "mode", "penalty", "kind", "position",
+                                                       "detected"])
+_cp_b = _cpb[(_cpb["detector"] == "pelt") & (_cpb["mode"] == _cp_mode) & (_cpb["penalty"] == _cp_sel)
+             & (_cpb["kind"] != "none")]
+_cp_decp = [p for p in _cp_b["position"].unique() if _cp_months[int(p)].endswith("-12")]
+_cp_det_no = (_cp_b.loc[~_cp_b["position"].isin(_cp_decp), "detected"].astype(str).str.lower() == "true").mean() * 100
 _cp_cross = [e for e in _cp_events if isinstance(_cp_EV.loc[(_cp_off_p, e), "crossed_month"], str)]
 _cp_sel_cross = [e for e in _cp_events if isinstance(_cp_EV.loc[(_cp_sel, e), "crossed_month"], str)]
 _cp_concl = (
     f"**Изломы: {'решает преобразование, а не алгоритм' if _cp_thesis else 'преобразование решает не всё'}.** "
-    f"PELT на темпах роста: обнаружено {_num(_cp_pr['обнаружено, %'], 1)}%, задержка "
-    f"{_cp_n01(_cp_pr['задержка, медиана'])} мес., ложных тревог "
+    f"PELT на темпах роста: обнаружено {_num(_cp_pr['обнаружено, %'], 1)}%"
+    + (f" (без врезки в {_cp_ym(_cp_months[int(_cp_decp[0])], _CP_IN)} — {_num(_cp_det_no, 1)}%)"
+       if _cp_decp else "")
+    + f", медиана задержки {_cp_n01(_cp_pr['задержка, медиана'])} мес., ложных тревог "
     f"{_num(_cp_pr['ложных на чистых, %'], 1)}% (на сырых рядах {_num(_cp_prw['ложных на чистых, %'], 1)}%). "
     f"В реальном времени при выбранном штрафе "
     + (f"порог {_num(_cp_thr, 0)}% не перейдён ни разу" if not _cp_sel_cross else
