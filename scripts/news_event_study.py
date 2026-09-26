@@ -51,7 +51,7 @@ from src.cp_bench import preprocess  # noqa: E402
 from src.data import build_matrix, load_panel  # noqa: E402
 from src.regions import attach_regions, load_dictionary  # noqa: E402
 
-PENALTY = 1.0  # то же значение, на котором построен основной результат по разладкам
+PENALTY = 1.0  # штраф офлайновой картины (три месяца массового согласия по полному ряду); стенд выбирает 3,0
 LAGS = (0, 1, 2)  # новости месяца t против разладок в t, t+1, t+2
 FEATURES = ["intensity", "t_ceny", "t_dohody", "t_zanjatost", "t_proizvodstvo", "t_kredit", "t_torgovlja"]
 ALPHA = 0.05
