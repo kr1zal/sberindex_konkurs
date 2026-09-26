@@ -99,6 +99,22 @@ def pattern_detector(pattern: str):
     return detect
 
 
+def mark_detector(window, **kwargs):
+    """Заглушка с флагами, записанными в самом ряду (режим raw): излом у конца окна, если
+    последнее значение окна — 1; отказ ruptures короткому окну, если −1."""
+    if window[-1] == -1.0:
+        raise BadSegmentationParameters("заглушка")
+    return Detection("mark", [len(window) - 1] if window[-1] == 1.0 else [])
+
+
+def marked(flags=(), failed=()) -> np.ndarray:
+    """Ряд для `mark_detector`: флаги в месяцы `flags`, сбои в месяцы `failed`."""
+    y = np.zeros(24)
+    y[list(flags)] = 1.0
+    y[list(failed)] = -1.0
+    return y
+
+
 def raising_detector(error: type[Exception]):
     """Заглушка, которая на каждом шаге бросает `error`."""
     def detect(window, **kwargs):
@@ -191,7 +207,10 @@ BENCH = {
     "positions": (14,), "magnitudes": (4.0,), "kinds": ("level", "variance"), "modes": ("ratio",),
     "detectors": ("pelt", "kernel_rbf", "cusum"), "penalties": (1.0, 3.0), "seed": 7,
     "kernel_penalties": {1.0: 0.5, 3.0: 2.0},
+    # правила зачёта v1: без верхней границы задержки и без правила близнеца
+    "max_delay": None, "twin_rule": False,
 }
+V2_RULES = {"max_delay": 3, "twin_rule": True}
 
 
 class RunBenchTest(unittest.TestCase):
@@ -249,14 +268,144 @@ class RunBenchTest(unittest.TestCase):
         expected = [(position, [BENCH["seed"], i, position]) for i in range(5) for position in (11, 14)]
         self.assertEqual(seeds, expected)
 
+    def twin_flags(self, row) -> list[int]:
+        """Все флаги нетронутого близнеца строки — заново, по ряду панели и настройке строки."""
+        effective = None if np.isnan(row.penalty_effective) else row.penalty_effective
+        y = self.panel[row.series_id].to_numpy(float)
+        return list(cp_bench._flag_months(y, row.detector, row.mode, effective))
+
+    def test_rows_follow_the_v2_rules_with_real_detectors(self):
+        bench = run_bench(self.panel, **{**BENCH, **V2_RULES})
+        clean = bench[bench["kind"] == "none"]
+        self.assertFalse(clean["twin_flag_at_signal"].any() or clean["late"].any())
+        spoiled = bench[bench["kind"] != "none"]
+        after = spoiled["signal"] >= 14
+        self.assertTrue((spoiled["late"] == (after & (spoiled["signal"] - 14 > 3))).all())
+        self.assertTrue((spoiled["detected"] == (after & ~spoiled["late"] & ~spoiled["twin_flag_at_signal"])).all())
+        self.assertTrue((spoiled["false_alarm"] == (spoiled["signal"] < 14)).all())
+        hit = spoiled[spoiled["detected"]]
+        self.assertTrue((hit["delay"] == hit["signal"] - 14).all())
+        self.assertTrue(spoiled.loc[~spoiled["detected"], "delay"].isna().all())
+        for row in spoiled.itertuples(index=False):
+            with self.subTest(row.series_id, detector=row.detector, penalty=row.penalty, kind=row.kind):
+                self.assertEqual(row.twin_flag_at_signal, row.signal in self.twin_flags(row))
+        # До врезки окна испорченного ряда и близнеца совпадают: флаг близнеца там есть по построению.
+        early = spoiled[spoiled["false_alarm"]]
+        self.assertGreater(len(early), 0)
+        self.assertTrue(early["twin_flag_at_signal"].all())
+        # оба правила здесь действительно срабатывают
+        self.assertGreater(spoiled["late"].sum(), 0)
+        self.assertGreater((after & ~spoiled["late"] & spoiled["twin_flag_at_signal"]).sum(), 0)
+
+    def test_v1_rules_keep_every_signal_after_the_injection(self):
+        bench = run_bench(self.panel, **BENCH)
+        spoiled = bench[bench["kind"] != "none"]
+        after = spoiled["signal"] >= 14
+        self.assertFalse(spoiled["late"].any())
+        # флаг близнеца в месяц сигнала записан и без правила — но сигнал засчитан
+        self.assertGreater((after & spoiled["twin_flag_at_signal"]).sum(), 0)
+        self.assertTrue((spoiled["detected"] == after).all())
+        summary = summarise(bench)
+        self.assertTrue((summary["n late"] == 0).all() and (summary["n twin-vetoed"] == 0).all())
+
+
+class ScoringRulesTest(unittest.TestCase):
+    """Правила зачёта v2 на заданных флагах (`mark_detector`): свои у нетронутого близнеца
+    и у испорченного ряда — врезка в 14 подменена рядом с флагами испорченного."""
+
+    def score(self, twin, spoiled, *, max_delay=3, twin_rule=True, twin_failed=()):
+        """Испорченная и чистая строки стенда одного ряда."""
+        panel = pd.DataFrame({"мо_0": marked(twin, twin_failed)}, index=MONTHS)
+        with mock.patch.dict(cp_bench.DETECTORS, {"mark": mark_detector}), \
+                mock.patch.object(cp_bench, "inject", lambda *args, **kwargs: marked(spoiled)):
+            bench = run_bench(panel, positions=(14,), magnitudes=(1.0,), kinds=("level",), modes=("raw",),
+                              detectors=("mark",), penalties=(1.0,), seed=0,
+                              max_delay=max_delay, twin_rule=twin_rule)
+        clean, row = bench.iloc[0], bench.iloc[1]
+        self.assertEqual((clean["kind"], row["kind"]), ("none", "level"))
+        return row, clean
+
+    def test_signal_four_months_after_the_injection_is_late(self):
+        row, _ = self.score([], [18])
+        self.assertTrue(row["late"])
+        self.assertFalse(row["detected"])
+        self.assertTrue(np.isnan(row["delay"]))
+        self.assertFalse(row["false_alarm"])
+
+    def test_signal_exactly_max_delay_after_the_injection_is_detected(self):
+        row, _ = self.score([], [17])
+        self.assertFalse(row["late"])
+        self.assertTrue(row["detected"])
+        self.assertEqual(row["delay"], 3)
+
+    def test_without_max_delay_the_late_signal_is_detected(self):
+        row, _ = self.score([], [18], max_delay=None, twin_rule=False)
+        self.assertFalse(row["late"])
+        self.assertTrue(row["detected"])
+        self.assertEqual(row["delay"], 4)
+
+    def test_signal_in_a_month_the_twin_flags_is_vetoed(self):
+        row, _ = self.score([16], [16])
+        self.assertTrue(row["twin_flag_at_signal"])
+        self.assertFalse(row["detected"] or row["late"])
+        self.assertTrue(np.isnan(row["delay"]))
+
+    def test_twin_flag_in_a_neighbouring_month_does_not_veto(self):
+        for twin in ([15], [17]):
+            with self.subTest(twin=twin):
+                row, _ = self.score(twin, [16])
+                self.assertFalse(row["twin_flag_at_signal"])
+                self.assertTrue(row["detected"])
+                self.assertEqual(row["delay"], 2)
+
+    def test_without_twin_rule_the_signal_counts_and_the_twin_flag_is_still_written(self):
+        row, _ = self.score([16], [16], twin_rule=False)
+        self.assertTrue(row["twin_flag_at_signal"])
+        self.assertTrue(row["detected"])
+        self.assertEqual(row["delay"], 2)
+
+    def test_veto_sees_twin_flags_after_its_first(self):
+        # Вето нужны все флаги близнеца: он тревожит первым в 14 и ещё раз в 16 — в месяц сигнала
+        # испорченного ряда.
+        row, clean = self.score([14, 16], [16])
+        self.assertEqual(clean["signal"], 14)  # сигнал чистой строки — первый флаг близнеца
+        self.assertTrue(clean["false_alarm"])
+        self.assertTrue(row["twin_flag_at_signal"])
+        self.assertFalse(row["detected"])
+
+    def test_vetoed_first_signal_is_a_miss_and_the_next_flag_is_not_searched(self):
+        # Сигнал — первый флаг испорченного ряда; снятый, он не заменяется следующим (17).
+        row, _ = self.score([16], [16, 17])
+        self.assertEqual(row["signal"], 16)
+        self.assertFalse(row["detected"])
+
+    def test_twin_failure_is_counted_over_the_whole_scan_and_lifts_the_veto(self):
+        # Сбой близнеца после его первого флага (в 16) виден в n_failed чистой строки;
+        # в этот месяц близнец «молчит», и сигнал испорченного ряда в 16 засчитан.
+        row, clean = self.score([14], [16], twin_failed=[16])
+        self.assertEqual(clean["n_failed"], 1)
+        self.assertFalse(row["twin_flag_at_signal"])
+        self.assertTrue(row["detected"])
+
+    def test_twin_flag_is_false_without_a_signal_and_on_the_clean_row(self):
+        row, clean = self.score([16], [])
+        self.assertTrue(np.isnan(row["signal"]))
+        self.assertFalse(row["twin_flag_at_signal"] or row["late"] or row["detected"])
+        self.assertFalse(clean["twin_flag_at_signal"] or clean["late"])
+
 
 def bench_rows(detector, penalty, spoiled, clean, magnitude=1.0) -> list[dict]:
-    """Строки стенда: `spoiled` — пары (обнаружено, задержка), `clean` — ложные тревоги."""
+    """Строки стенда: `spoiled` — пары (обнаружено, задержка) при врезке в 14 по правилам v1,
+    `clean` — ложные тревоги."""
     rows = [{"detector": detector, "mode": "ratio", "penalty": penalty, "kind": "level",
-             "magnitude": magnitude, "detected": hit, "delay": delay, "false_alarm": False, "n_failed": 0}
+             "magnitude": magnitude, "position": 14.0, "signal": 14.0 + delay if hit else np.nan,
+             "detected": hit, "delay": delay, "false_alarm": False, "n_failed": 0,
+             "late": False, "twin_flag_at_signal": False}
             for hit, delay in spoiled]
     rows += [{"detector": detector, "mode": "ratio", "penalty": penalty, "kind": "none",
-              "magnitude": 0.0, "detected": False, "delay": np.nan, "false_alarm": alarm, "n_failed": 0}
+              "magnitude": 0.0, "position": np.nan, "signal": 10.0 if alarm else np.nan,
+              "detected": False, "delay": np.nan, "false_alarm": alarm, "n_failed": 0,
+              "late": False, "twin_flag_at_signal": False}
              for alarm in clean]
     return rows
 
@@ -290,6 +439,26 @@ class SummariseTest(unittest.TestCase):
         self.assertEqual(cusum["detector"], "cusum")
         self.assertTrue(np.isnan(cusum["penalty"]))
         self.assertAlmostEqual(cusum["J Юдена"], 50.0 - 100.0)
+
+    def test_late_and_twin_vetoed_signals_are_counted_apart(self):
+        # Врезка в 14, max_delay 3, правило близнеца включено. Сигналы испорченных строк:
+        # засчитан (15); поздний (19); поздний в месяц флага близнеца (19) — только в «n late»;
+        # снят близнецом (16); до врезки (10, флаг близнеца там по построению); сигнала нет.
+        def row(signal, detected, late, twin):
+            return {"detector": "pelt", "mode": "ratio", "penalty": 1.0, "kind": "level", "magnitude": 1.0,
+                    "position": 14.0, "signal": signal, "detected": detected,
+                    "delay": signal - 14 if detected else np.nan, "false_alarm": signal < 14,
+                    "n_failed": 0, "late": late, "twin_flag_at_signal": twin}
+
+        spoiled = [row(15.0, True, False, False), row(19.0, False, True, False), row(19.0, False, True, True),
+                   row(16.0, False, False, True), row(10.0, False, False, True), row(np.nan, False, False, False)]
+        summary = summarise(pd.DataFrame(spoiled + bench_rows("pelt", 1.0, [], [False, True]))).iloc[0]
+        self.assertEqual((summary["n late"], summary["n twin-vetoed"]), (2, 1))
+        self.assertAlmostEqual(summary["обнаружено, %"], 100 / 6)
+        self.assertAlmostEqual(summary["ложных на чистых, %"], 50.0)
+        # засчитано + поздние + снятые близнецом = сигналы не раньше врезки: 15, 19, 19, 16
+        detected = round(summary["обнаружено, %"] * summary["n испорченных"] / 100)
+        self.assertEqual(detected + summary["n late"] + summary["n twin-vetoed"], 4)
 
     def test_by_magnitude_shares_the_clean_rate(self):
         bench = pd.DataFrame(
@@ -593,6 +762,7 @@ CONFIG = {
     "data": {"path": "panel.parquet", "category": "Все категории", "max_gap": 2},
     "bench": {"n_series": 3, "seed": 5, "positions": [14], "magnitudes": [4.0], "kinds": ["level"],
               "modes": ["ratio"], "detectors": ["pelt", "kernel_rbf", "cusum"], "penalties": [1.0, 3.0],
+              "max_delay": 3, "twin_rule": True,
               # своя сетка, не протокольная: калиброванный штраф обязан взяться именно из неё
               "kernel_pen_grid": {"min": 0.002, "max": 50, "points": 25}},
     "selection": {"rule": "J Юдена у {detector} на режиме {mode}, среди штрафов из сетки; при равенстве — меньший штраф"},
@@ -683,6 +853,21 @@ class MainTest(unittest.TestCase):
                 table = self.read(name)
                 self.assertEqual(len(table), 2 * 24)
                 self.assertEqual(sorted(table["penalty"].unique()), [1.0, 3.0])
+
+    def test_bench_header_shows_the_scoring_rules(self):
+        header = next(line for line in self.log.splitlines() if line.startswith("СТЕНД:"))
+        self.assertIn("max_delay 3", header)
+        self.assertIn("twin_rule True", header)
+
+    def test_bench_follows_the_configured_scoring_rules(self):
+        spoiled = self.read("cp_bench.csv").query("kind != 'none'")
+        after = spoiled["signal"] >= spoiled["position"]
+        late = after & (spoiled["signal"] - spoiled["position"] > CONFIG["bench"]["max_delay"])
+        vetoed = after & ~late & spoiled["twin_flag_at_signal"]
+        self.assertTrue((spoiled["late"] == late).all())
+        self.assertTrue((spoiled["detected"] == (after & ~late & ~vetoed)).all())
+        # правило близнеца здесь действительно снимает сигналы: сдвиг панели общий у всех рядов
+        self.assertGreater(vetoed.sum(), 0)
 
 
 class DetectorFailureTest(unittest.TestCase):

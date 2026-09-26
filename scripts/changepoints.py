@@ -153,13 +153,15 @@ def main() -> int:
     kernel_pens = dict(zip(calibration["penalty"], calibration["kernel_pen"]))
 
     stage = time.perf_counter()
+    max_delay, twin_rule = bench_cfg["max_delay"], bench_cfg["twin_rule"]  # null — без границы задержки
     print(f"\nСТЕНД: {sample.shape[1]} рядов; позиции {bench_cfg['positions']}, величины "
           f"{bench_cfg['magnitudes']}, возмущения {bench_cfg['kinds']}, режимы {bench_cfg['modes']}, "
-          f"штрафы {penalties}")
+          f"штрафы {penalties}; зачёт: max_delay {max_delay}, twin_rule {twin_rule}")
     bench = run_bench(
         sample, positions=bench_cfg["positions"], magnitudes=bench_cfg["magnitudes"],
         kinds=bench_cfg["kinds"], modes=bench_cfg["modes"], detectors=bench_cfg["detectors"],
-        penalties=penalties, seed=bench_cfg["seed"], kernel_penalties=kernel_pens, log=print,
+        penalties=penalties, seed=bench_cfg["seed"], max_delay=max_delay, twin_rule=twin_rule,
+        kernel_penalties=kernel_pens, log=print,
     )
     save(bench, out_dir / "cp_bench.csv", whole=("position", "delay", "signal"))
     summary = summarise(bench)

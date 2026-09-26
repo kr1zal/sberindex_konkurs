@@ -25,7 +25,16 @@
 **Неизвестное число изломов.** Все методы, кроме CUSUM, работают в штрафном режиме
 и сами решают, есть ли излом; штраф пробрасывается из стенда. У CUSUM свой порог.
 
-Протокол — `configs/changepoints.yaml`, прогон — `scripts/changepoints.py`.
+**Два правила зачёта (протокол v2).** В v1 сигнал не раньше врезки засчитывался всегда,
+и врезка в декабрь 2023 засчитывала обнаружением сам декабрьский скачок расходов, а поздние
+сигналы — тот же скачок годом позже: июньская врезка «находилась» в декабре с задержкой 6.
+Теперь сигнал позже `max_delay` месяцев после врезки — пропуск, и сигнал в месяц, когда
+тревожит и нетронутый близнец испорченного ряда, — тоже: сезонность и общие шоки бьют
+по обоим рядам пары, и парный дизайн вычитает их вклад по построению. Правила решают
+только, засчитан ли первый сигнал, сам сигнал они не меняют (`run_bench`).
+
+Протокол — `configs/changepoints.yaml` (v1 — `configs/changepoints_v1.yaml`),
+прогон — `scripts/changepoints.py`.
 """
 from __future__ import annotations
 
@@ -44,14 +53,16 @@ RECENT_WINDOW = 3    # разладка засчитывается, если н�
 
 # n_failed — шаги, на которых детектор упал: протокол считает их шагами без флага,
 # и без счётчика такой детектор выглядел бы молчаливым, а не сломанным.
+# twin_flag_at_signal пишется при любом сигнале, и когда правило близнеца выключено:
+# по нему видно, сколько сигналов правило сняло бы.
 BENCH_COLUMNS = [
     "detector", "mode", "penalty", "penalty_effective", "kind", "magnitude", "position",
-    "series_id", "detected", "delay", "false_alarm", "signal", "n_failed",
+    "series_id", "detected", "delay", "false_alarm", "signal", "n_failed", "twin_flag_at_signal", "late",
 ]
 SUMMARY_KEY = ["detector", "mode", "penalty"]
 SUMMARY_COLUMNS = [
     "обнаружено, %", "задержка, медиана", "задержка, среднее", "доля с задержкой 0, %",
-    "ложных на чистых, %", "J Юдена", "n испорченных", "n чистых", "n_failed",
+    "ложных на чистых, %", "J Юдена", "n испорченных", "n чистых", "n_failed", "n late", "n twin-vetoed",
 ]
 CALIBRATION_COLUMNS = [
     "penalty", "kernel_pen", "fa_pelt", "fa_kernel", "n_failed_pelt", "n_failed_kernel", "n_failed_grid",
@@ -145,7 +156,8 @@ def _flag_months(
     которым ruptures отказывает слишком короткому окну (`BadSegmentationParameters`,
     `NotEnoughPoints`); прочие — ошибка в коде или аргументах, и засчитанная шагом без флага
     она выглядела бы тихим детектором, поэтому падает наружу. Генератор ленивый:
-    `streaming_signal` берёт первый флаг, и дальше детектор не зовётся.
+    `streaming_signal` берёт первый флаг, и дальше детектор не зовётся; `run_bench`
+    исчерпывает его для нетронутого близнеца — правилу близнеца нужны все его флаги.
     """
     fn = detector_with_penalty(detector, penalty)
     offset = month_offset(mode)
@@ -275,6 +287,8 @@ def run_bench(
     detectors: Sequence[str],
     penalties: Sequence[float],
     seed: int,
+    max_delay: int | None,
+    twin_rule: bool,
     kernel_penalties: dict[float, float] | None = None,
     log: Callable[[str], None] | None = None,
 ) -> pd.DataFrame:
@@ -287,9 +301,26 @@ def run_bench(
     `kernel_penalties[номинальный]`: в строке номинальный — в `penalty`, сопоставимый
     с остальными методами, а вызванный — в `penalty_effective`.
 
-    Сигнал до врезки на испорченном ряде — ложная тревога, не раньше неё — обнаружение
-    с задержкой `signal − position`. Испорченные ряды общие для всех детекторов:
-    методы сравниваются на одних и тех же случайных числах.
+    Сигнал испорченного ряда — его первый флаг (`streaming_signal`). Сигнал до врезки —
+    ложная тревога. Сигнал не раньше врезки засчитывается обнаружением с задержкой
+    `signal − position`, если его не снимает одно из двух правил:
+
+    - `max_delay` — сигнал позже `max_delay` месяцев после врезки поздний (`late`), это
+      пропуск. В протоколе граница равна RECENT_WINDOW: флаг в месяц t говорит об изломе
+      не раньше t − RECENT_WINDOW, и сигнал позже указывает на излом уже после врезки.
+      В v1 границы не было, и июньская врезка «находилась» декабрьским скачком
+      с задержкой 6. None — без границы, как в v1;
+    - `twin_rule` — сигнал в месяц, когда флаг есть и у нетронутого близнеца (тот же ряд,
+      детектор, режим и штраф), — пропуск: тревога была бы и без врезки. В v1 врезка
+      в декабрь засчитывала обнаружением сам декабрьский скачок; сезонность и общие шоки
+      бьют по обоим рядам пары, и парный дизайн вычитает их по построению. Вето точное
+      по месяцу: флаг близнеца в соседнем месяце сигнал не снимает.
+
+    Снятый или поздний сигнал — пропуск, следующий флаг испорченного ряда не ищется:
+    сигнал остаётся тем, что увидел бы оператор. `twin_flag_at_signal` пишется при любом
+    сигнале, и при выключенном правиле; до врезки окна пары совпадают, и там он истинен
+    по построению. Испорченные ряды общие для всех детекторов: методы сравниваются
+    на одних и тех же случайных числах.
     """
     settings = _settings(detectors, penalties, kernel_penalties)
     rows = []
@@ -307,23 +338,33 @@ def run_bench(
                     "detector": detector, "mode": mode, "penalty": penalty,
                     "penalty_effective": np.nan if effective is None else effective, "series_id": col,
                 }
-                # нетронутый ряд: обнаруживать нечего, любой сигнал здесь — ложная тревога
+                # Нетронутый ряд: обнаруживать нечего, любой сигнал здесь — ложная тревога.
+                # Он же близнец испорченных строк, и вето нужен его флаг в месяц их сигнала,
+                # а тот бывает и после первого флага: флаги — полным списком, один раз
+                # на настройку, а сбои — за весь просмотр (сбой в месяц t снимает вето).
                 failed: list[int] = []
-                signal = streaming_signal(base, detector, mode, penalty=effective, failed=failed)
+                twin = list(_flag_months(base, detector, mode, effective, failed))
+                signal = twin[0] if twin else None
                 rows.append({
                     **common, "kind": "none", "magnitude": 0.0, "position": np.nan,
                     "detected": False, "delay": np.nan, "false_alarm": signal is not None,
                     "signal": np.nan if signal is None else signal, "n_failed": len(failed),
+                    "twin_flag_at_signal": False, "late": False,
                 })
+                twin_flags = set(twin)
                 for kind, magnitude, position, y in spoiled:
                     failed = []
                     signal = streaming_signal(y, detector, mode, penalty=effective, failed=failed)
-                    hit = signal is not None and signal >= position
+                    after = signal is not None and signal >= position
+                    late = after and max_delay is not None and signal - position > max_delay
+                    twin_flag = signal is not None and signal in twin_flags
+                    hit = after and not late and not (twin_rule and twin_flag)
                     rows.append({
                         **common, "kind": kind, "magnitude": magnitude, "position": position,
                         "detected": hit, "delay": (signal - position) if hit else np.nan,
                         "false_alarm": signal is not None and signal < position,
                         "signal": np.nan if signal is None else signal, "n_failed": len(failed),
+                        "twin_flag_at_signal": twin_flag, "late": late,
                     })
         if log is not None:
             log(f"  ряд {i + 1}/{sample.shape[1]} ({col}): {time.perf_counter() - started:.0f} с")
@@ -342,10 +383,19 @@ def summarise(bench: pd.DataFrame, by: Sequence[str] = ()) -> pd.DataFrame:
     получает стопроцентное обнаружение и должен быть за это наказан. Штраф CUSUM пуст,
     и группировка не должна его терять (`dropna=False`). `n_failed` — шаги, на которых
     детектор упал, по испорченным строкам группы и чистым строкам её тройки.
+
+    Сколько сигналов сняло каждое правило зачёта (`run_bench`), — по испорченным строкам
+    группы: `n late` — поздние, `n twin-vetoed` — не раньше врезки, не поздние
+    и не засчитанные, то есть снятые близнецом. Счётчики не пересекаются: поздний сигнал
+    в месяц флага близнеца — только в `n late`, иначе отчёт не сказал бы, сколько сняло
+    каждое правило. Засчитано + `n late` + `n twin-vetoed` = испорченные строки с сигналом
+    не раньше врезки.
     """
     key = SUMMARY_KEY + list(by)
     spoiled = bench[bench["kind"] != "none"]
     clean = bench[bench["kind"] == "none"]
+    after = spoiled["signal"] >= spoiled["position"]
+    spoiled = spoiled.assign(vetoed=after & ~spoiled["late"] & ~spoiled["detected"])
 
     by_spoiled = spoiled.groupby(key, dropna=False)
     by_hit = spoiled[spoiled["detected"]].groupby(key, dropna=False)["delay"]
@@ -354,6 +404,8 @@ def summarise(bench: pd.DataFrame, by: Sequence[str] = ()) -> pd.DataFrame:
         "обнаружено, %": by_spoiled["detected"].mean() * 100,
         "n испорченных": by_spoiled.size(),
         "failed_spoiled": by_spoiled["n_failed"].sum(),
+        "n late": by_spoiled["late"].sum(),
+        "n twin-vetoed": by_spoiled["vetoed"].sum(),
     })
     delay = pd.DataFrame({
         "задержка, медиана": by_hit.median(),
