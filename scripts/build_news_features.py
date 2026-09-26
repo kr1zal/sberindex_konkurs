@@ -211,8 +211,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"старые доли тем воспроизводятся старым словарём: да "
               f"(исходный файл — {NEWS / 'national.parquet'}, копии ещё нет)")
     else:
-        print(f"копии исходного файла нет — сверка воспроизведения пропущена "
-              f"(в {NEWS} не исходный файл: старый словарь его не воспроизводит)")
+        print(f"копии исходного файла нет — сверка воспроизведения пропущена: старый словарь "
+              f"не воспроизводит {NEWS / 'national.parquet'} (пересборка или расхождение сборки)")
     table = dictionary_table(frame["norm"], hits)
 
     monthly = aligned(monthly_features(frame), old["monthly.parquet"], "monthly.parquet")
@@ -244,7 +244,8 @@ def main(argv: list[str] | None = None) -> int:
             shutil.copy2(news_dir / name, target)
             print(f"старый {name} скопирован в {target.relative_to(ROOT)}")
         else:
-            print(f"копию {name} не создаю: в {NEWS} не исходный файл, а под датой до 25.09 должен лежать исходный")
+            print(f"копию {name} не создаю: старый словарь не воспроизводит {NEWS / 'national.parquet'}, "
+                  "а под датой до 25.09 должен лежать исходный файл")
     save_datasets(None, monthly, news_dir, national=national)
     for name in FILES:
         written = pd.read_parquet(news_dir / name)
