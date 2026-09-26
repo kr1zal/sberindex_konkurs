@@ -274,10 +274,10 @@ class SummariseTest(unittest.TestCase):
 
 
 class CalibrationTest(unittest.TestCase):
-    def test_nearest_false_alarm_rate_and_middle_of_a_tie(self):
+    def test_nearest_false_alarm_rate_and_smallest_pen_on_tie(self):
         clean = noisy_panel(6, n_months=16, seed=3)
         # Штраф 1e6 не пропускает у PELT ни одного излома: доля ложных 0, и на хвосте сетки,
-        # где ядро тоже молчит, ближайших значений несколько — берётся середина плато.
+        # где ядро тоже молчит, ближайших значений несколько — берётся меньший штраф.
         grid = np.array([0.05, 0.5, 5.0, 25.0, 30.0])
         table = cp_bench.calibrate_kernel_penalty(clean, (1.0, 1e6), "ratio", grid=grid)
         self.assertEqual(list(table.columns), ["penalty", "kernel_pen", "fa_pelt", "fa_kernel"])
@@ -294,8 +294,7 @@ class CalibrationTest(unittest.TestCase):
                 pelt = alarms("pelt", row.penalty)
                 self.assertAlmostEqual(row.fa_pelt, 100 * pelt / n)
                 distance = np.abs(kernel - pelt)
-                plateau = grid[distance == distance.min()]
-                self.assertEqual(row.kernel_pen, plateau[(len(plateau) - 1) // 2])
+                self.assertEqual(row.kernel_pen, grid[distance == distance.min()].min())
                 self.assertAlmostEqual(row.fa_kernel, 100 * kernel[grid == row.kernel_pen][0] / n)
         # ничья на самом деле разыграна: PELT молчит, и ядро молчит больше чем при одном штрафе
         self.assertEqual(alarms("pelt", 1e6), 0)
@@ -308,25 +307,31 @@ class CalibrationTest(unittest.TestCase):
         with mock.patch.dict(cp_bench.DETECTORS, {"pelt": threshold_detector, "kernel_rbf": threshold_detector}):
             return cp_bench.calibrate_kernel_penalty(sample, (penalty,), "raw", grid=np.asarray(grid, float))
 
-    def test_plateau_of_equal_rates_gives_its_middle(self):
+    def test_plateau_of_equal_rates_gives_its_smallest_pen(self):
         # Уровни 0,5; 1,5 и трижды 6,5: при штрафе 2 у PELT тревога у трёх рядов, у ядра —
-        # тоже три при штрафах 2…6. Середина плато — 4; меньший конец (2) — самое тревожное
-        # ядро с той же долей ложных.
+        # тоже три при штрафах 2…6. Берётся 2 — самое чувствительное ядро при той же доле
+        # ложных тревог; середина плато (4) зависела бы от того, где кончается сетка.
         table = self.calibrate([0.5, 1.5, 6.5, 6.5, 6.5], 2.0, [1, 2, 3, 4, 5, 6, 7])
-        self.assertEqual(table.loc[0, "kernel_pen"], 4.0)
+        self.assertEqual(table.loc[0, "kernel_pen"], 2.0)
         self.assertEqual((table.loc[0, "fa_pelt"], table.loc[0, "fa_kernel"]), (60.0, 60.0))
 
-    def test_even_plateau_gives_the_lower_middle(self):
-        table = self.calibrate([0.5, 1.5, 5.5, 5.5, 5.5], 2.0, [1, 2, 3, 4, 5, 6, 7])  # плато 2…5
+    def test_plateau_reaching_the_upper_edge_gives_its_inner_end(self):
+        # Как при штрафе 3 на крошечном прогоне: у PELT ни одной тревоги, ядро молчит от 3
+        # до конца сетки. Выбор — 3, внутри сетки; предупреждения о крае нет.
+        grid = [1, 2, 3, 4, 5, 6, 7]
+        table = self.calibrate([0.5, 1.5, 2.5, 2.5, 2.5], 3.0, grid)
         self.assertEqual(table.loc[0, "kernel_pen"], 3.0)
+        self.assertEqual(script.edge_warnings(table, np.asarray(grid, float)), [])
 
-    def test_plateau_touching_the_edge_is_not_an_edge_choice(self):
-        # Обе доли 100% на всей сетке, как у штрафа 1,0 на крошечном прогоне: середина
-        # плато внутри сетки, и предупреждения о крае нет.
+    def test_plateau_from_the_lower_edge_gives_the_edge_and_a_warning(self):
+        # Обе доли 100% на всей сетке, как у штрафа 1,0 на крошечном прогоне: меньший штраф —
+        # нижний край, и лог это отмечает.
         grid = [1, 2, 3, 4, 5, 6, 7]
         table = self.calibrate([9.0] * 5, 2.0, grid)
-        self.assertEqual(table.loc[0, "kernel_pen"], 4.0)
-        self.assertEqual(script.edge_warnings(table, np.asarray(grid, float)), [])
+        self.assertEqual(table.loc[0, "kernel_pen"], 1.0)
+        lines = script.edge_warnings(table, np.asarray(grid, float))
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("ВНИМАНИЕ: калибровка на краю сетки"))
 
 
 class PanelRealtimeTest(unittest.TestCase):
