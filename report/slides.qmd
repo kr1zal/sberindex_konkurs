@@ -42,9 +42,18 @@ def _plural(n, one, few, many):
         return many
     return {1: one, 2: few, 3: few, 4: few}.get(n % 10, many)
 
+def _and_join(items):
+    """«a», «a и b», «a, b и c»."""
+    items = [str(i) for i in items]
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " и " + items[-1]
+
 # Числа слайдов — из тех же файлов, что отчёт: руками переписанные не обновились бы
 # при перепрогоне.
 _sum = pd.read_csv("../results/summary.csv", index_col=0)
+_ps = pd.read_csv("../results/per_series.csv", usecols=["model", "fold", "mae", "error"])
+_pf = (_ps[_ps["error"].isna() & _ps["mae"].notna()]
+       .pivot_table(index="model", columns="fold", values="mae"))
+_ORD = {0: "первом", 1: "втором", 2: "третьем"}
 ```
 
 ## Задача
@@ -119,7 +128,7 @@ _k = round(_fy["MAE"] / _pp["MAE"])
 Markdown(
     f"Один флаг: на полной панели MAE **{_num(_fy['MAE'], 0)} ₽** против {_num(_pp['MAE'], 0)} "
     f"у эталона — в **{_k} {_plural(_k, 'раз', 'раза', 'раз')}** больше, R² пул "
-    f"{_num(_fy['R² пул'], 2)}; подгонка многократно дороже."
+    f"{_num(_fy['R² пул'], 2)}; подгонка дороже."
 )
 ```
 
@@ -309,14 +318,32 @@ for _m, _label in _hz_rows.items():
 Markdown("\n".join(_hlines))
 ```
 
-**Наукаст: 45,9% над эталоном.** Известный агрегат за текущий месяц добавляет
-двадцать два рубля: движение страны на месяц предсказуемо, остаток — разброс.
-
-**Год вперёд: у панельных моделей нет обучающих примеров**, двухэтапная
-обходит эталон на 40%. Даже оракул общего движения не разносит точнее 1 350.
-
-**Ошибка растёт не с расстоянием, а с календарём.** От декабря наивная
-ошибается на 7 036 в январе и на 1 211 в августе.
+```{python}
+# Строки под таблицей — числами того же файла: переписанные руками «двадцать два рубля»
+# и «точнее 1 350» с ним разошлись (точно — 21,4 и 1 356).
+_hzi = _hz.set_index(["horizon", "model"])
+_known1, _plain1 = _hzi.loc[(1, "two_stage_known"), "MAE"], _hzi.loc[(1, "two_stage"), "MAE"]
+_hs = pd.read_csv("../results/horizons_steps.csv")
+_st = _hs[(_hs["horizon"] == 12) & (_hs["model"] == "naive_last")]
+_st = _st[_st["fold"] == _st["fold"].min()]
+_te = int(_st["train_end"].iloc[0])  # шаг s — месяц te + s, счёт с января 2023
+_st = _st.set_index("step")["mae"]
+_month_in = ["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе",
+             "сентябре", "октябре", "ноябре", "декабре"]
+_month_of = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
+             "сентября", "октября", "ноября", "декабря"]
+Markdown(
+    f"**Наукаст: {_num(_hzi.loc[(1, _sum['MAE'].idxmin()), 'к Prophet, %'], 1)}% над эталоном.** "
+    f"Известный агрегат за текущий месяц добавляет {_num(_plain1 - _known1, 1)} рубля: движение "
+    f"страны на месяц предсказуемо, остаток — разброс.\n\n"
+    f"**Год вперёд: у панельных моделей нет обучающих примеров**, двухэтапная обходит эталон "
+    f"на {_num(_hzi.loc[(12, 'two_stage'), 'к Prophet, %'], 0)}%. Даже оракул общего движения "
+    f"не разносит точнее {_num(_hzi.loc[(12, 'two_stage_known'), 'MAE'], 0)}.\n\n"
+    f"**Ошибка растёт не с расстоянием, а с календарём.** От {_month_of[(_te - 1) % 12]} наивная "
+    f"ошибается на {_num(_st.max(), 0)} в {_month_in[(_te + _st.idxmax() - 1) % 12]} и на "
+    f"{_num(_st.min(), 0)} в {_month_in[(_te + _st.idxmin() - 1) % 12]}."
+)
+```
 
 ## Чем короче история, тем ценнее перенос
 
@@ -406,38 +433,47 @@ plt.show()
 ## Что не сработало {.smaller}
 
 ```{python}
-# Дообучение — по сводке; повтор с тем же сидом — по снимку первого сидированного прогона
-# и текущим строкам: третий фолд в них расходится.
+# Дообучение — по сводке и пофолдово; повтор с тем же сидом — по снимку первого
+# сидированного прогона и текущим строкам: третий фолд в них расходится.
 _zsn = {"chronos_small": "Chronos-Bolt", "moirai": "Moirai", "timesfm": "TimesFM 2.5"}
 _loss = pd.Series({m: -_sum.loc[m, "к наивной, %"] for m in _zsn}).sort_values(ascending=False)
 _ftm, _zsm = _sum.loc["chronos_ft", "MAE"], _sum.loc["chronos_small", "MAE"]
 _vn, _vp = _sum.loc["chronos_ft", "к наивной, %"], _sum.loc["chronos_ft", "к Prophet, %"]
 _top = _sum["MAE"].idxmin()
+# Средние по трём фолдам прячут фолд, где наивная промахивается сильнее всех.
+_zs_note = "; ".join(
+    f"на {_ORD.get(f, f)} фолде {_and_join(_zsn[m] for m in ms)} наивную "
+    f"{'обходит' if len(ms) == 1 else 'обходят'}"
+    for f, ms in ((f, [m for m in _zsn if _pf.loc[m, f] < _pf.loc["naive_last", f]])
+                  for f in _pf.columns) if ms)
 _level = (f"доводит его лишь до уровня наивной (на {_num(abs(_vn), 1)}% "
           f"{'лучше' if _vn > 0 else 'хуже'})" if abs(_vn) < 5
           else f"{'обходит' if _vn > 0 else 'не догоняет'} наивную на {_num(abs(_vn), 1)}%")
+_vs_pp = (f"эталону уступает {_num(-_vp, 1)}%" if _vp < 0 else f"эталон обходит на {_num(_vp, 1)}%")
 _ft_line = (
     f"**Фундаментальные модели без дообучения.** {_zsn[_loss.index[0]]} проигрывает наивной "
     f"на {_num(_loss.iloc[0], 0)}%, "
     + ", ".join(f"{_zsn[m]} на {_num(v, 0)}%" for m, v in _loss.iloc[1:].items())
+    + (f" — в среднем; {_zs_note}" if _zs_note else "")
     + ". **Три** разных семейства сходятся, значит дело не в архитектуре. Дообучение Chronos "
     f"снимает {_num((1 - _ftm / _zsm) * 100, 0)}% ошибки ({_num(_zsm, 0)} → {_num(_ftm, 0)}) и "
-    f"{_level}: эталону уступает {_num(-_vp, 1)}%, панельной модели — в "
-    f"{_num(_ftm / _sum.loc[_top, 'MAE'], 1)} раза."
+    f"{_level}: {_vs_pp}, панельной модели — в {_num(_ftm / _sum.loc[_top, 'MAE'], 1)} раза."
 )
 try:
-    _r1 = pd.read_csv("../results/realizations/chronos_ft__20260926T030901.csv")
-    _r2 = pd.read_csv("../results/per_series.csv", usecols=["model", "fold", "mae"])
-    _f1 = _r1.groupby("fold")["mae"].mean()
-    _f2 = _r2[_r2["model"] == "chronos_ft"].groupby("fold")["mae"].mean()
+    _f1 = pd.read_csv("../results/realizations/chronos_ft__20260926T030901.csv").groupby("fold")["mae"].mean()
+    _f2 = _pf.loc["chronos_ft"]
     _diff = [f for f in _f1.index if abs(_f1[f] - _f2[f]) >= 0.01]
     if _diff:
-        _ft_line += (f" Повтор с тем же сидом расходится на "
-                     f"{ {0: 'первом', 1: 'втором', 2: 'третьем'}.get(_diff[-1], _diff[-1]) } фолде: "
-                     f"{_num(_f1[_diff[-1]], 0)} против {_num(_f2[_diff[-1]], 0)}.")
+        _ft_line += (f" Повтор с тем же сидом расходится на {_ORD.get(_diff[-1], _diff[-1])} "
+                     f"фолде: {_num(_f1[_diff[-1]], 0)} против {_num(_f2[_diff[-1]], 0)}.")
 except FileNotFoundError:
     pass
-_ft_line += (f" Больше параметров хуже: дообученный base даёт {_num(_sum.loc['chronos_ft_base', 'MAE'], 0)} "
+# «Хуже» — по среднему; если base где-то лучше small, так и сказать.
+_b_mean_worse = _sum.loc["chronos_ft_base", "MAE"] > _ftm
+_b_some_better = bool((_pf.loc["chronos_ft_base"] < _pf.loc["chronos_ft"]).any())
+_b_says = ("Больше параметров хуже" if _b_mean_worse and not _b_some_better else
+           "Больше параметров в среднем хуже" if _b_mean_worse else "Больше параметров лучше")
+_ft_line += (f" {_b_says}: дообученный base даёт {_num(_sum.loc['chronos_ft_base', 'MAE'], 0)} "
              f"против {_num(_ftm, 0)} у small.")
 Markdown(_ft_line)
 ```
@@ -500,8 +536,15 @@ Markdown(
 трёх фолдах. По фолдам интервалы накрывают ноль у всех конструкций. Приводим
 обе оценки и не выбираем удобную.
 
-**Главный практический вывод.** Три дополнительных месяца истории меняют качество
-прогноза сильнее, чем переход от наивной модели к градиентному бустингу:
-на фолдах с обучением 18 и 21 точка MAE около 1 040, на фолде с 15 точками — заметно хуже.
+```{python}
+# MAE базовой панельной модели по фолдам — из файла: здесь стояло «около 1 040» прежних прогонов.
+_gbf = _pf.loc["global_gbm"]
+Markdown(
+    f"**Главный практический вывод.** Три дополнительных месяца истории меняют качество "
+    f"прогноза сильнее, чем переход от наивной модели к градиентному бустингу: на фолдах "
+    f"с обучением 18 и 21 точка MAE базовой панельной модели в среднем "
+    f"{_num(_gbf.drop(index=0).mean(), 0)}, на фолде с 15 точками — {_num(_gbf[0], 0)}."
+)
+```
 
 **Для задач такого рода длина ряда важнее выбора метода.**

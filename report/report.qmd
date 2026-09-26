@@ -76,6 +76,24 @@ def plural(n: int, one: str, few: str, many: str) -> str:
         return many
     return {1: one, 2: few, 3: few, 4: few}.get(n % 10, many)
 
+def and_join(items) -> str:
+    """«a», «a и b», «a, b и c»: склейка через « и » давала «на первом и втором и третьем»."""
+    items = [str(i) for i in items]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " и " + items[-1]
+
+_NUMBER_WORDS = {
+    "им_м": ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять"],
+    "им_ж": ["ноль", "одна", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять"],
+    "дат": ["нулю", "одному", "двум", "трём", "четырём", "пяти", "шести", "семи", "восьми", "девяти", "десяти"],
+}
+
+def in_words(n: int, form: str) -> str:
+    """Малое число в прозе — словом: «по пяти реализациям», «две реализации», «три прогона».
+    `form` — «им_м», «им_ж» или «дат»; от одиннадцати — цифрами."""
+    return _NUMBER_WORDS[form][n] if 0 <= n <= 10 else str(n)
+
 def fold_r2(rows: pd.DataFrame) -> dict:
     """R² пул, медиана R² и MAE по фолдам: строки — фолды, колонки — модели.
 
@@ -116,8 +134,8 @@ _sum = table("../results/summary.csv", index_col=0)
 # процедур, и в одно среднее они не сводятся. Таблица — в разделе о фундаментальных моделях,
 # а считается здесь, потому что на её числа ссылается резюме.
 _SNAPSHOTS = {
-    "chronos_ft__20260926T025800.csv": ("основной прогон", False),
-    "chronos_ft__h3__20260926T031136.csv": ("прогон горизонтов, h = 3", False),
+    "chronos_ft__20260926T025800.csv": ("основной прогон до исправления", False),
+    "chronos_ft__h3__20260926T031136.csv": ("прогон горизонтов до исправления, h = 3", False),
     "chronos_ft__20260926T030901.csv": ("основной прогон, первый с сидом", True),
 }
 _real_rows = {}  # подпись → (исправлено ли, строки по рядам); None — происхождение не записано
@@ -126,8 +144,12 @@ for _path in sorted(Path("../results/realizations").glob("chronos_ft__*.csv")):
     if _path.name.startswith(("chronos_ft__2", "chronos_ft__h3__")):
         _label, _fixed = _SNAPSHOTS.get(_path.name, (f"снимок {_path.stem.split('__')[-1]}", None))
         _real_rows[_label] = (_fixed, read_results(_path, dtype={"error": object}))
-if "model" in _per:
-    _real_rows["основной прогон, повтор с тем же сидом"] = (True, _per[_per["model"] == "chronos_ft"])
+if "model" in _per and "chronos_ft" in set(_per["model"]):
+    # Текущие строки — «повтор с тем же сидом», только если снимок первого сидированного
+    # прогона на месте. Снимки в git не идут, и на чистом клоне это просто основной прогон.
+    _real_rows["основной прогон, повтор с тем же сидом"
+               if "основной прогон, первый с сидом" in _real_rows else "основной прогон"] = (
+        True, _per[_per["model"] == "chronos_ft"])
 try:
     _hzp = read_results("../results/horizons_per_series.csv", dtype={"error": object},
                         usecols=["model", "horizon", "fold", "mo", "mae", "error"])
@@ -139,6 +161,9 @@ if len(_hz3):
 
 _real_order = sorted(_real_rows, key=lambda k: {False: 0, True: 1, None: 2}[_real_rows[k][0]])
 _real_ready = len(_real_order) > 0
+# Детерминизм проверяется только сравнением двух реализаций после исправления и больше:
+# по одной реализации его не проверить, и пустые списки фолдов — не «совпали везде».
+_before, _after, _gap, _same_folds, _apart_folds = [], [], {}, [], []
 if _real_ready:
     _real_folds = pd.DataFrame({
         k: _real_rows[k][1][~refused(_real_rows[k][1])].groupby("fold")["mae"].mean()
@@ -148,7 +173,6 @@ if _real_ready:
     _after = [k for k in _real_order if _real_rows[k][0] is True]
     # Повтор после исправления сверяется ряд в ряд: на каких фолдах реализации совпали
     # до копейки, а на каких разошлись.
-    _gap = {}
     for _i, _a in enumerate(_after):
         for _b in _after[_i + 1:]:
             _m = (_real_rows[_a][1][["fold", "mo", "mae"]]
@@ -190,7 +214,7 @@ if _rs_ready:
     _lead_says = {2: "тоже впереди", 0: "позади",
                   1: f"впереди только {'пулом' if _lead == ['R² пул'] else 'медианой'}"}[len(_lead)]
     _rs["r2"] = Markdown(
-        f"По R², которого постановка требует наравне с MAE, лучшая модель {_lead_says}: пул "
+        f"По R², который постановка называет рядом с MAE, лучшая модель {_lead_says}: пул "
         f"{num(_sum.loc[_top, 'R² пул'], 3)} против {num(_sum.loc['prophet', 'R² пул'], 3)} "
         f"у эталона, медиана по парам ряд × фолд {num(_sum.loc[_top, 'R² медиана'], 2)} против "
         f"{num(_sum.loc['prophet', 'R² медиана'], 2)}; по обеим сводкам сразу — "
@@ -254,15 +278,14 @@ if _rs_ready and {"chronos_small", "chronos_ft"} <= set(_sum.index):
                   else "Без дообучения фундаментальные модели на основном горизонте "
                        "в лучшем случае на уровне наивной.")
     _repro = ""
-    if _real_ready and _apart_folds:
-        _before_best = _real_folds.loc[_before].mean(axis=1).min() if _before else np.nan
-        _after_low = _real_folds.loc[_after].mean(axis=1).min()
-        _repro = (f" Воспроизводится это число не до конца: повтор с тем же сидом разошёлся "
-                  f"на {' и '.join(_ORDINAL.get(f, str(f)) for f in _apart_folds)} "
-                  f"{'фолде' if len(_apart_folds) == 1 else 'фолдах'}"
-                  + (f", а прежние {rub(_before_best)} — лучшая из реализаций до исправления "
-                     f"валидации" if _before_best < _after_low else "")
-                  + ".")
+    if len(_after) >= 2 and _apart_folds:
+        _repro += (f" Воспроизводится это число не до конца: повтор с тем же сидом разошёлся "
+                   f"на {and_join(_ORDINAL.get(f, str(f)) for f in _apart_folds)} "
+                   f"{'фолде' if len(_apart_folds) == 1 else 'фолдах'}.")
+    if _before:
+        _repro += (f" До исправления валидации "
+                   + ("реализация давала " if len(_before) == 1 else "реализации давали ")
+                   + and_join(rub(v) for v in _real_folds.loc[_before].mean(axis=1)) + ".")
     _rs["foundation"] = Markdown(
         f"**Фундаментальные модели: zero-shot проигрывает наивной, {_ft_title}.** {_zero_says} "
         f"Дообучение Chronos снимает {num(_ft_cut, 0)}% его ошибки, {rub(_zs)} → {rub(_ft)}: "
@@ -287,7 +310,8 @@ if "доля добранных из непопавших" in _hbr:
 
 1. **Ловушка, в которую легко попасть на месячных данных.** Насильно включённая
    годовая сезонность на пятнадцати точках выдаёт отрицательное потребление
-   и многократно удорожает подгонку. Рассуждение «данные месячные, значит
+   и удорожает подгонку (замер — в [разделе о ловушке](#sec-trap)).
+   Рассуждение «данные месячные, значит
    нужна годовая сезонность» здесь стоит дорого — и Prophet от него защищается
    сам: его режим по умолчанию годовую сезонность на такой истории не включает
    и выводит предупреждение. Эталон конкурса работает как надо.
@@ -783,7 +807,8 @@ _best_by_len if "базовая" in _sweep else _sweep
 **Годовая сезонность на коротком месячном ряде — дорогая ловушка.** Рассуждение
 «данные месячные, значит нужна годовая сезонность» естественно и на пятнадцати
 точках катастрофично: прогноз уходит в отрицательное потребление, подгонка
-многократно дорожает, а результат становится зависимым от версии Stan.
+дорожает (замер на одном ряде — в [разделе о ловушке](#sec-trap)), а результат
+становится зависимым от версии Stan.
 Prophet от этого защищается сам, и это стоит знать тем, кто настраивает его
 руками. Воспроизводимый пример — на трёх строках кода.
 
@@ -1035,10 +1060,20 @@ print(report.as_text())
 | 1 | 1..18 | 19..21 |
 | 2 | 1..21 | 22..24 |
 
-**Насколько это важно.** Глобальная модель на фолдах 1–2 даёт MAE около 1 040, а в
-среднем по всем трём — около 1 490. Фолд с обучением в пятнадцать точек радикально
-тяжелее остальных; три дополнительных месяца истории меняют качество сильнее, чем
-переход от наивной модели к градиентному бустингу.
+```{python}
+#| echo: false
+# Числа базовой глобальной модели — из строк основного протокола: здесь стояли «около 1 040»
+# и «около 1 490» от прежних прогонов.
+_gb = (_ok[_ok["model"] == "global_gbm"].groupby("fold")["mae"].mean()
+       if "model" in _per else pd.Series(dtype=float))
+Markdown(
+    f"**Насколько это важно.** Глобальная модель на фолдах 1–2 даёт MAE "
+    f"{rub(_gb.drop(index=0).mean())}, а в среднем по всем трём — {rub(_gb.mean())}. Фолд "
+    f"с обучением в пятнадцать точек радикально тяжелее остальных — {rub(_gb[0])}; три "
+    f"дополнительных месяца истории меняют качество сильнее, чем переход от наивной модели "
+    f"к градиентному бустингу."
+) if len(_gb) else None
+```
 
 **Метрики.** MAE обязательна по условиям конкурса. Рядом считаются R², sMAPE и MASE.
 MASE добавлена потому, что уровни расходов по муниципалитетам различаются на порядок —
@@ -1250,7 +1285,7 @@ _r2_text if _r2_ready else None
 на каждом — сколько допускают двадцать четыре точки: девять, три, два и один.
 Таблицы и разбор — в разделе [Пять горизонтов](#sec-horizons).
 
-## Базовая модель конкурса и ловушка годовой сезонности
+## Базовая модель конкурса и ловушка годовой сезонности {#sec-trap}
 
 Сравнение с эталоном приведено в разделе [Результаты]. Здесь — про настройку,
 на которой легко обжечься, и про то, как Prophet от неё защищается.
@@ -1272,17 +1307,21 @@ _r2_text if _r2_ready else None
 
 ```{python}
 #| code-fold: true
-import logging
+import logging, time
 for name in ("prophet", "cmdstanpy"):
     logging.getLogger(name).setLevel(logging.CRITICAL)
 from src.models.prophet_model import ProphetModel
 
 y = wide["городской округ город Орёл"].to_numpy(float)
-out = {}
+out, seconds = {}, {}
 for label, kw in [("годовая включена насильно", dict(yearly_seasonality=True)),
                   ("Prophet по умолчанию", {})]:
-    pred = ProphetModel(**kw).set_index(wide.index).fit(y[:15]).predict(3)
-    out[label] = np.round(pred)
+    runs = []
+    for _ in range(3):  # медиана трёх подгонок: время одной зависит от фона машины
+        start = time.perf_counter()
+        pred = ProphetModel(**kw).set_index(wide.index).fit(y[:15]).predict(3)
+        runs.append(time.perf_counter() - start)
+    out[label], seconds[label] = np.round(pred), float(np.median(runs))
 out["факт"] = np.round(y[15:18])
 pd.DataFrame(out, index=["месяц +1", "месяц +2", "месяц +3"])
 ```
@@ -1306,11 +1345,24 @@ Prophet/Stan version**» — то есть результат ещё и нево
 и вовсе не даёт себе включить сезонность на такой истории, — это Prophet
 в плюс, а не в минус.
 
-Недоопределённость проявляется дважды. Статистически — приведённым прогнозом.
-Вычислительно — стоимостью подгонки: полнопанельный прогон с насильной сезонностью
-шёл 20 202 секунды, настройки по умолчанию на тех же рядах и фолдах — 141 секунду
-(журналы прогонов 26.09). Кратность мы не называем: во время первого прогона машине
-не хватало памяти, и часть этих пяти с половиной часов — подкачка, а не Stan.
+```{python}
+#| echo: false
+# Кратность подгонки — по замеру на одном ряде выше, при сборке отчёта. Время полнопанельного
+# прогона грязное: машина уходила в подкачку, и кратность по нему не считается.
+_slow, _fast = seconds["годовая включена насильно"], seconds["Prophet по умолчанию"]
+_fit_k = round(_slow / _fast)
+_secs = lambda v: num(v, 1) if v >= 1 else num(v, 2)
+Markdown(
+    f"Недоопределённость проявляется дважды. Статистически — приведённым прогнозом. "
+    f"Вычислительно — стоимостью подгонки: на ряде Орла подгонка с насильной сезонностью "
+    f"длится {_secs(_slow)} с против {_secs(_fast)} с у настроек по умолчанию — в {_fit_k} "
+    f"{plural(_fit_k, 'раз', 'раза', 'раз')} дольше (медиана трёх подгонок при сборке этого "
+    f"отчёта; кратность — на одном ряде, а не на панели). Полнопанельный прогон с насильной "
+    f"сезонностью шёл 20 202 секунды, настройки по умолчанию на тех же рядах и фолдах — 141 "
+    f"секунду (журналы прогонов 26.09), но во время первого прогона машине не хватало памяти, "
+    f"и кратность по этому времени мы не считаем."
+)
+```
 
 ```{python}
 #| echo: false
@@ -1549,9 +1601,9 @@ _hz_wide("MASE", lambda v: f"{v:.2f}".replace(".", ",")) if _hz_ready else _hz
 
 ```{python}
 #| echo: false
-#| tbl-cap: "R² пул по горизонтам: один R² по всем тестовым точкам горизонта, SST — вокруг среднего пула. Прочерк — у модели на этом горизонте нет обучающих примеров или её строки посчитаны до появления слагаемых R² и ещё не перегнаны."
-# Файл горизонтов посчитан до слагаемых пула: колонка есть, но пуста. Пустой таблицы
-# не показываем — до перепрогона вместо неё фраза.
+#| tbl-cap: "R² пул по горизонтам: один R² по всем тестовым точкам горизонта, SST — вокруг среднего пула. Прочерк — у модели на этом горизонте нет обучающих примеров."
+# Слагаемые пула есть у всех строк с перепрогона горизонтов 26.09. Файл без них (колонка
+# пуста) дал бы пустую таблицу — тогда вместо неё фраза.
 _hz_r2 = _hz_ready and "R² пул" in _hz and bool(_hz["R² пул"].notna().any())
 if _hz_r2:
     _hz_r2_out = _hz_wide("R² пул", lambda v: num(v, 3))
@@ -1579,12 +1631,20 @@ if _hz_ready:
         _cnt = _cnt.droplevel(0)
         for _m, _v in _cnt[_cnt < _cnt.max()].items():
             _rows_m = _hf[(_hf["horizon"] == _h) & (_hf["model"] == _m)]
-            _gone = ", ".join(str(t) for t in _rows_m.loc[_rows_m["MAE"].isna(), "train_end"])
-            _kept = ", ".join(str(t) for t in _rows_m.loc[_rows_m["MAE"].notna(), "train_end"])
+            _gone = list(_rows_m.loc[_rows_m["MAE"].isna(), "train_end"])
+            _kept = list(_rows_m.loc[_rows_m["MAE"].notna(), "train_end"])
+            # Фолд выпал целиком — назвать его; отказали только часть рядов — сказать это.
+            _why = (
+                f"{'фолда' if len(_gone) == 1 else 'фолдов'} с обучением {and_join(_gone)} мес. "
+                f"у него нет, и его MAE и R² пул — только по "
+                f"{'фолду' if len(_kept) == 1 else 'фолдам'} с обучением {and_join(_kept)} мес."
+                if _gone else
+                f"на части пар у него отказ ({rub(_rows_m['отказов'].sum())}), и его MAE и R² пул "
+                f"— по оставшимся парам."
+            )
             _short.append(
                 f"На горизонте {_h} «{_hz_ru.get(_m, _m)}» посчитан на {rub(_v)} парах ряд × фолд "
-                f"против {rub(_cnt.max())} у остальных: фолда с обучением {_gone} мес. у него нет, "
-                f"и его MAE и R² пул — только по фолду с обучением {_kept} мес."
+                f"против {rub(_cnt.max())} у остальных: {_why}"
             )
     if _short:
         _pairs_text = Markdown("**Оговорка к таблицам горизонтов.** " + " ".join(_short)
@@ -1613,11 +1673,21 @@ if _hz_ready:
 _h1.map(_dash) if _hz_ready else _hz
 ```
 
-**Известный агрегат почти ничего не добавляет на месяц вперёд.** 996 против
-1 018 у прогнозного варианта — двадцать два рубля. Движение страны на один месяц
-предсказуемо из её собственной сезонности, и знать его точно почти не нужно.
-Оставшаяся тысяча — межрядовый разброс, тот самый, который в разложении ошибки
-не двигала ни одна модель. Наукаст в узком смысле упирается в него же.
+```{python}
+#| echo: false
+# Разница — по точным числам файла: у округлённых 996 и 1 018 она выходит на рубль больше.
+if _hz_ready:
+    _known1 = _hz.set_index(["horizon", "model"]).loc[(1, "two_stage_known"), "MAE"]
+    _plain1 = _hz.set_index(["horizon", "model"]).loc[(1, "two_stage"), "MAE"]
+    _known_text = Markdown(
+        f"**Известный агрегат почти ничего не добавляет на месяц вперёд.** {rub(_known1)} против "
+        f"{rub(_plain1)} у прогнозного варианта — {num(_plain1 - _known1, 1)} рубля. Движение "
+        f"страны на один месяц предсказуемо из её собственной сезонности, и знать его точно почти "
+        f"не нужно. Оставшаяся тысяча — межрядовый разброс, тот самый, который в разложении ошибки "
+        f"не двигала ни одна модель. Наукаст в узком смысле упирается в него же."
+    )
+_known_text if _hz_ready else _hz
+```
 
 **На длинных горизонтах панельные модели теряют обучающие примеры, и остаётся
 двухэтапная.** На горизонте 6 базовая панельная модель при двенадцати месяцах
@@ -1652,7 +1722,7 @@ if _hz_ready:
     if _also12:
         _long_text += (
             " Оба ориентира обходят ещё "
-            + " и ".join(f"«{_hz_ru[m]}» ({rub(_fc12[m])})" for m in _also12)
+            + and_join(f"«{_hz_ru[m]}» ({rub(_fc12[m])})" for m in _also12)
             + (" — у фундаментальных моделей это единственный такой случай на всех горизонтах, "
                f"и держится он на {'одном фолде' if _hz_folds[12] == 1 else 'нескольких фолдах'}"
                if len(_fm_both) == 1 and _fm_both[0][0] == 12 and _fm_both[0][1] in _also12 else "")
@@ -1661,8 +1731,9 @@ if _hz_ready:
     if "two_stage_known" in _y12:
         _long_text += (
             f" Оракул агрегата на том же горизонте даёт {rub(_y12['two_stage_known'])}: даже точно "
-            f"зная движение страны на год вперёд, разнести его по территориям точнее, чем на "
-            f"{rub(_y12['two_stage_known'])} рублей, нельзя."
+            f"зная движение страны на год вперёд, этим правилом долей точнее "
+            f"{rub(_y12['two_stage_known'])} не разнести. Строгой нижней границей это число не "
+            f"является — правило долей выбирается бэктестом, см. оговорку в начале раздела."
         )
 Markdown(_long_text) if _hz_ready else _hz
 ```
@@ -1766,7 +1837,7 @@ if _hz_ready and "chronos_ft" in set(_hz["model"]):
     _worse = [w for w, v in (("наивной модели", _nv_h1), ("эталона", _pp_h1)) if _ft_h1 > v]
     _ft_text = (
         f"**Дообученный Chronos на горизонтах.** На наукасте — {rub(_ft_h1)}"
-        + (f", хуже {' и '.join(_worse)} ({rub(_nv_h1)} и {rub(_pp_h1)})" if len(_worse) == 2
+        + (f", хуже {and_join(_worse)} ({rub(_nv_h1)} и {rub(_pp_h1)})" if len(_worse) == 2
            else f" против {rub(_nv_h1)} у наивной и {rub(_pp_h1)} у эталона")
         + f": у наивной он выигрывает {on_folds(int((_ft1 < _nv1).sum()), len(_ft1))}, а "
         f"{_MONTH_NOM[_last_te % 12]} промахивает "
@@ -1803,7 +1874,7 @@ if _hz_ready and "chronos_ft" in set(_hz["model"]):
     _refused_ft = _hft[_hft["MAE"].isna()]
     for _te_r, _grp in _refused_ft.groupby("train_end"):
         _ft_text += (f" При обучении {_te_r} мес. — на "
-                     + ("горизонтах " + " и ".join(str(h) for h in sorted(_grp["horizon"]))
+                     + ("горизонтах " + and_join(sorted(_grp["horizon"]))
                         if len(_grp) > 1 else f"горизонте {_grp['horizon'].iloc[0]}")
                      + " — отказ, и он в таблице прочерком.")
 Markdown(_ft_text) if _ft_text else None
@@ -2268,42 +2339,61 @@ _real_tab if _real_ready else None
 #| echo: false
 # Главная оговорка — фолд, где реализации расходятся сильнее всего: размах по всем
 # реализациям, отдельно до и после исправления, и насколько совпал повтор с тем же сидом.
+# О детерминизме — только при двух реализациях после исправления и больше: по одной его
+# не проверить, а пустой список разошедшихся фолдов — ещё не «совпали везде».
 _real_text = None
-if _real_ready and _after and "chronos_ft" in _sum.index:
-    _wide_f = (_real_folds.max() - _real_folds.min()).idxmax()
-    _am = _real_folds.loc[_after]
-    _real_text = (f"**Главная оговорка — {_ORDINAL_NOM.get(_wide_f, _wide_f)} фолд.** По "
-                  f"{len(_real_order)} реализациям его MAE лежит от {rub(_real_folds[_wide_f].min())} "
-                  f"до {rub(_real_folds[_wide_f].max())}.")
-    if len(_before) >= 2:
-        _bm = _real_folds.loc[_before]
+if _real_ready and "chronos_ft" in _sum.index:
+    if len(_real_order) == 1:
+        _real_text = (f"**Реализация дообучения здесь одна** — {rub(_real_folds.iloc[0].mean())} "
+                      f"на трёх фолдах. Снимков других прогонов в каталоге нет, и детерминизм "
+                      f"по одной реализации не проверить.")
+    else:
+        _wide_f = (_real_folds.max() - _real_folds.min()).idxmax()
+        _real_text = (f"**Главная оговорка — {_ORDINAL_NOM.get(_wide_f, _wide_f)} фолд.** По "
+                      f"{in_words(len(_real_order), 'дат')} реализациям его MAE лежит от "
+                      f"{rub(_real_folds[_wide_f].min())} до {rub(_real_folds[_wide_f].max())}.")
+        if len(_before) >= 2:
+            _bm = _real_folds.loc[_before]
+            _real_text += (
+                f" До исправления {in_words(len(_before), 'им_ж')} "
+                f"{plural(len(_before), 'реализация', 'реализации', 'реализаций')} одной процедуры "
+                f"давали {and_join(rub(v) for v in _bm.mean(axis=1))} — разница "
+                f"{rub(_bm.mean(axis=1).max() - _bm.mean(axis=1).min())} ₽ по среднему и "
+                f"{rub(_bm[_wide_f].max() - _bm[_wide_f].min())} на этом фолде."
+            )
+        if len(_after) >= 2:
+            _am = _real_folds.loc[_after]
+            _runs = (f"{in_words(len(_after), 'им_м')} "
+                     f"{plural(len(_after), 'прогон', 'прогона', 'прогонов')} с сидом")
+            _apart_says = "; ".join(
+                f"на {_ORDINAL.get(f, f)} — от {rub(_am[f].min())} до {rub(_am[f].max())}, "
+                f"на отдельном ряду до {rub(_gap[f])} ₽" for f in _apart_folds)
+            if _same_folds and _apart_folds:
+                _real_text += (
+                    f" После исправления {_runs} совпали на "
+                    f"{and_join(_ORDINAL.get(f, f) for f in _same_folds)} "
+                    f"{'фолде' if len(_same_folds) == 1 else 'фолдах'} до копейки на ряд и "
+                    f"разошлись {_apart_says}. Детерминизм, стало быть, подтверждён не целиком: "
+                    f"сид воспроизводит выборку батчей и dropout, но не все вычисления на MPS."
+                )
+            elif _apart_folds:
+                _real_text += (f" После исправления {_runs} разошлись на всех фолдах: "
+                               f"{_apart_says}. Повтора сид не обеспечивает.")
+            else:
+                _real_text += (f" После исправления {_runs} совпали до копейки на ряд на всех "
+                               f"фолдах: детерминизм подтверждён.")
+        elif len(_after) == 1:
+            _real_text += (" Реализация после исправления одна, и детерминизм по одной "
+                           "реализации не проверить.")
+        if _before and _after:
+            _real_text += (" Реализации до и после исправления — оценки разных процедур, и в одно "
+                           "среднее мы их не сводим.")
         _real_text += (
-            f" До исправления {len(_before)} {plural(len(_before), 'реализация', 'реализации', 'реализаций')} "
-            f"одной процедуры расходились на {rub(_bm.mean(axis=1).max() - _bm.mean(axis=1).min())} ₽ "
-            f"по среднему и на {rub(_bm[_wide_f].max() - _bm[_wide_f].min())} — на этом фолде; "
-            f"{rub(_bm.mean(axis=1).min())} — лучшая из них, и её мы прежде приводили как результат "
-            f"дообучения."
+            f" В сводной таблице стоит последняя реализация основного прогона, "
+            f"{rub(_sum.loc['chronos_ft', 'MAE'])}"
+            + (f"; прогоны с сидом дают от {rub(_real_folds.loc[_after].mean(axis=1).min())} до "
+               f"{rub(_real_folds.loc[_after].mean(axis=1).max())}." if len(_after) >= 2 else ".")
         )
-    if _same_folds and _apart_folds:
-        _real_text += (
-            f" После исправления {len(_after)} {plural(len(_after), 'прогон', 'прогона', 'прогонов')} "
-            f"с сидом совпали на {' и '.join(_ORDINAL.get(f, str(f)) for f in _same_folds)} "
-            f"{'фолде' if len(_same_folds) == 1 else 'фолдах'} до копейки на ряд, а на "
-            f"{' и '.join(_ORDINAL.get(f, str(f)) for f in _apart_folds)} разошлись: "
-            + "; ".join(f"от {rub(_am[f].min())} до {rub(_am[f].max())}, на отдельном ряду — "
-                        f"до {rub(_gap[f])} ₽" for f in _apart_folds)
-            + ". Детерминизм, стало быть, подтверждён не целиком: сид воспроизводит выборку "
-            "батчей и dropout, но не все вычисления на MPS."
-        )
-    elif not _apart_folds:
-        _real_text += (f" После исправления {len(_after)} {plural(len(_after), 'прогон', 'прогона', 'прогонов')} "
-                       f"с сидом совпали до копейки на ряд на всех фолдах: детерминизм подтверждён.")
-    _real_text += (
-        f" Реализации до и после исправления — оценки разных процедур, и в одно среднее мы их "
-        f"не сводим. В сводной таблице стоит последняя реализация основного прогона, "
-        f"{rub(_sum.loc['chronos_ft', 'MAE'])}; прогоны с сидом дают от "
-        f"{rub(_am.mean(axis=1).min())} до {rub(_am.mean(axis=1).max())}."
-    )
 Markdown(_real_text) if _real_text else None
 ```
 
@@ -2323,8 +2413,8 @@ Markdown(_real_text) if _real_text else None
 У Moirai размер патча выбирается по **отложенным месяцам обучающей части** —
 origin сдвигается на горизонт назад, кандидаты сравниваются на месяцах, которых
 модель при этом не видит. Выбор оказался не формальностью: на первом фолде
-по отложенным месяцам выигрывает патч 16, на втором и третьем — патч 8, и по тесту
-его подбирать было бы нельзя.
+по отложенным месяцам выигрывает патч 16, на втором и третьем — патч 8 (по журналу
+прогона), и по тесту его подбирать было бы нельзя.
 
 ```{python}
 #| echo: false
@@ -2371,10 +2461,13 @@ if "model" in _per:
           .pivot_table(index="model", columns="fold", values="mae").loc[_fnd])
     _f.columns = [f"фолд {c}" for c in _f.columns]
     _f["MAE"] = _f.mean(axis=1)
-    # Плюс здесь — хуже наивной, в отличие от «к наивной» сводки, где плюс — выигрыш.
-    _f["хуже наивной, %"] = (_f["MAE"] / _f.loc["naive_last", "MAE"] - 1) * 100
-    _f.index = [_lbl[i] for i in _f.index]
-_f if "model" in _per else _per
+    # Числа — как во всём отчёте; выигрыш у наивной — со знаком, как «к наивной» в сводке:
+    # плюс — лучше неё.
+    _f_show = _f.map(lambda v: num(v, 0))
+    _f_show["к наивной, %"] = ((1 - _f["MAE"] / _f.loc["naive_last", "MAE"]) * 100).map(
+        lambda v: num(v, 1, sign=True))
+    _f_show.index = [_lbl[i] for i in _f.index]
+_f_show if "model" in _per else _per
 ```
 
 Три семейства и три подхода вместо одного, и все дают согласованный вывод.
@@ -2397,6 +2490,23 @@ if "MAE" in _sum and set(_zs_names) <= set(_sum.index):
                      for m, v in _zs_loss.items()))
         + "."
     )
+    # Пофолдово: среднее по трём фолдам прячет фолд, где наивная промахивается сильнее всех.
+    if "model" in _per:
+        _zf = (_ok[_ok["model"].isin(list(_zs_names) + ["naive_last"])]
+               .pivot_table(index="model", columns="fold", values="mae"))
+        _zf_wins = [(f, [m for m in _zs_names if _zf.loc[m, f] < _zf.loc["naive_last", f]])
+                    for f in _zf.columns]
+        _zf_wins = [(f, ms) for f, ms in _zf_wins if ms]
+        if _zf_wins:
+            _zs_text += (
+                " Это средние по трём фолдам: "
+                + "; ".join(f"на {_ORDINAL.get(f, f)} фолде наивную "
+                            f"{'обходит' if len(ms) == 1 else 'обходят'} "
+                            f"{and_join(_zs_names[m] for m in ms)} — "
+                            f"{and_join(rub(_zf.loc[m, f]) for m in ms)} против "
+                            f"{rub(_zf.loc['naive_last', f])}" for f, ms in _zf_wins)
+                + "."
+            )
     if "MAE" in _hzr:
         _zh = _hzr.set_index(["horizon", "model"])["MAE"]
         _zh_all = sorted(set(_hzr["horizon"]))
@@ -2405,32 +2515,41 @@ if "MAE" in _sum and set(_zs_names) <= set(_sum.index):
         _zfolds = _hzr.drop_duplicates("horizon").set_index("horizon")["фолдов"]
         _exceptions = []  # (горизонт, фраза)
         for _h in [h for h in _zh_all if h not in _lose_all]:
+            _hfm = _hf[_hf["horizon"] == _h].pivot(index="model", columns="train_end", values="MAE")
             for _m in _zs_names:
                 _v = _zh.get((_h, _m), np.nan)
                 if np.isfinite(_v) and _v < _zh[(_h, "naive_last")]:
+                    # Обходит только в среднем — назвать фолды, где проигрывает.
+                    _lost = [te for te in _hfm.columns
+                             if _hfm.loc[_m, te] >= _hfm.loc["naive_last", te]]
                     _exceptions.append((_h,
                         f"на горизонте {_h} — {_zs_names[_m]} ({rub(_v)} против "
                         f"{rub(_zh[(_h, 'naive_last')])})"
                         + (f", причём обходит и эталон ({rub(_zh[(_h, 'prophet')])})"
                            if _v < _zh[(_h, "prophet")] else
-                           f", но не эталон ({rub(_zh[(_h, 'prophet')])})")))
+                           f", но не эталон ({rub(_zh[(_h, 'prophet')])})")
+                        + (f", и то лишь в среднем: при обучении "
+                           f"{and_join(f'{te} мес.' for te in _lost)} он хуже наивной — "
+                           + and_join(f"{rub(_hfm.loc[_m, te])} против "
+                                      f"{rub(_hfm.loc['naive_last', te])}" for te in _lost)
+                           if _lost else "")))
         if _lose_all and _exceptions:
             # «На длинных» — только если исключения и правда на горизонтах длиннее основного.
             _long_only = all(h > 3 for h, _ in _exceptions)
             _zs_text += (
-                f" На горизонтах {' и '.join(map(str, _lose_all))} так же проигрывают все три; "
+                f" На горизонтах {and_join(_lose_all)} в среднем проигрывают все три; "
                 + ("на длинных наивная модель сама слабеет, и её обходят: " if _long_only
                    else "а наивную обходят: ")
                 + "; ".join(t for _, t in _exceptions) + "."
             )
             _single = sorted({h for h, _ in _exceptions if _zfolds.get(h) == 1})
             if _single:
-                _zs_text += (f" Горизонт {' и '.join(map(str, _single))} — один фолд, и это одно "
+                _zs_text += (f" Горизонт {and_join(_single)} — один фолд, и это одно "
                              f"число без интервала.")
 Markdown(_zs_text) if _zs_text else None
 ```
 
-Три независимые архитектуры на основном горизонте сходятся,
+Три независимые архитектуры на основном горизонте в среднем сходятся,
 значит дело не в конкретной модели, а в самой задаче: фундаментальная модель
 инвариантна к масштабу и переносит статистику чужих рядов, а здесь решает
 общероссийское движение конкретных девяти месяцев, которого в чужих рядах нет.
@@ -2449,36 +2568,41 @@ if (_rs_ready and {"chronos_small", "chronos_ft"} <= set(_sum.index)
     _panel_top = _sum["MAE"].idxmin()
     _ft_mae, _pp_mae, _pt_mae = (_sum.loc["chronos_ft", "MAE"], _sum.loc["prophet", "MAE"],
                                  _sum.loc[_panel_top, "MAE"])
+    # Заголовок — одна фраза на ветку, разделитель — её часть: перед «но» запятая, перед «и» нет.
     if _vp >= 0:
         _ft_head = " и обходит даже эталон"
-        _ft_vs = f"и обходит даже эталон: {rub(_ft_mae)} против {rub(_pp_mae)}"
     elif abs(_vn) < 5:
         _ft_head = ", но только до уровня наивной модели"
-        _ft_vs = f"но до эталона конкурса не доходит: {rub(_ft_mae)} против {rub(_pp_mae)}"
     elif _vn > 0:
         _ft_head = " и обходит наивную модель, но не эталон"
-        _ft_vs = f"но до эталона конкурса не доходит: {rub(_ft_mae)} против {rub(_pp_mae)}"
     else:
         _ft_head = ", но остаётся хуже наивной модели"
-        _ft_vs = f"а эталону уступает тем более: {rub(_ft_mae)} против {rub(_pp_mae)}"
     # Первый фолд проигрывают наивной и все панельные модели — это проверяется, а не пишется.
     _f0m = _ok[_ok["fold"] == 0].groupby("model")["mae"].mean()
     _panel_m = [m for m in _f0m.index if str(m).startswith("global_gbm")]
     _panel_lose0 = bool(_panel_m) and all(_f0m[m] > _f0m["naive_last"] for m in _panel_m)
-    _nv_says = (
-        f"Модель перестаёт проигрывать наивной — в среднем обходит её на {num(_vn, 1)}%, пофолдово "
-        f"{on_folds(len(_won_nv), _fz.shape[1])}"
-        + (f"; первый фолд проигрывает{', как и все панельные модели' if _panel_lose0 else ''}, —"
-           if _lost_nv == [0] else " —")
-        if _vn > 0 else
-        f"Наивной модели она по-прежнему уступает — на {num(-_vn, 1)}% в среднем —"
-    )
+    # С наивной и с эталоном — отдельными фразами: союз между ними зависел бы от ветки.
+    if _vn > 0:
+        _nv_says = (f"Модель перестаёт проигрывать наивной: в среднем обходит её на "
+                    f"{num(_vn, 1)}%, пофолдово — {on_folds(len(_won_nv), _fz.shape[1])}"
+                    + (f"; первый фолд проигрывает"
+                       f"{', как и все панельные модели' if _panel_lose0 else ''}"
+                       if _lost_nv == [0] else "") + ".")
+    else:
+        _nv_says = (f"Наивной модели она по-прежнему уступает: на {num(-_vn, 1)}% в среднем"
+                    + (f", хотя пофолдово обходит её {on_folds(len(_won_nv), _fz.shape[1])}"
+                       if _won_nv else ", и ни на одном фолде её не обходит") + ".")
+    _pp_says = (f"Эталон конкурса она обходит: {rub(_ft_mae)} против {rub(_pp_mae)}." if _vp >= 0
+                else f"До эталона конкурса она не доходит: {rub(_ft_mae)} против {rub(_pp_mae)}.")
     _ft_paras.append(
         f"**Дообучение Chronos отыгрывает {num(_ft_cut, 0)}% ошибки{_ft_head}.** "
         f"Chronos-Bolt small: {rub(_zs)} без дообучения, {rub(_ft)} после. {_nv_says} "
-        f"{_ft_vs}. Панельной модели она уступает в {num(_ft_mae / _pt_mae, 1)} раза: "
+        f"{_pp_says} Панельной модели она уступает в {num(_ft_mae / _pt_mae, 1)} раза: "
         f"{rub(_ft_mae)} против {rub(_pt_mae)}."
     )
+    # Размах реализаций имеет смысл, только когда реализаций больше одной.
+    _wide = ((_real_folds.max() - _real_folds.min()).idxmax()
+             if _real_ready and len(_real_order) >= 2 else None)
     if "chronos_ft_base" in _fz.index:
         _b_worse = [f for f in _fz.columns if _fz.loc["chronos_ft_base", f] > _fz.loc["chronos_ft", f]]
         _b_better = [f for f in _fz.columns if f not in _b_worse]
@@ -2489,25 +2613,29 @@ if (_rs_ready and {"chronos_small", "chronos_ft"} <= set(_sum.index)
         _b_text = (f"{_b_head} Дообученный `base` (205 млн параметров) даёт {rub(_b_mae)} против "
                    f"{rub(_ft_mae)} у `small` (48 млн)")
         if _b_worse and _b_better:
-            _ords = lambda fs: " и ".join(_ORDINAL.get(f, str(f)) for f in fs)
+            _ords = lambda fs: and_join(_ORDINAL.get(f, str(f)) for f in fs)
             _pairs_txt = lambda fs: ", ".join(f"{rub(_fz.loc['chronos_ft_base', f])} против "
                                               f"{rub(_fz.loc['chronos_ft', f])}" for f in fs)
             _b_text += (f"; по фолдам `base` хуже на {_ords(_b_worse)} "
                         f"{'фолде' if len(_b_worse) == 1 else 'фолдах'} — {_pairs_txt(_b_worse)}, — "
                         f"и лучше на {_ords(_b_better)}: {_pairs_txt(_b_better)}")
-            if _real_ready and _b_better == [(_real_folds.max() - _real_folds.min()).idxmax()]:
+            if _wide is not None and _b_better == [_wide]:
                 _b_text += ", на том самом фолде, где реализации `small` расходятся сильнее всего"
-        _b_text += (". При двенадцати тысячах обучающих примеров первого фолда лишняя ёмкость "
-                    "скорее мешает, чем помогает." if _b_mae > _ft_mae else ".")
+        _b_text += (". При двенадцати тысячах обучающих примеров первого фолда (по журналу "
+                    "прогона) лишняя ёмкость скорее мешает, чем помогает." if _b_mae > _ft_mae else ".")
         _ft_paras.append(_b_text)
     _rubric = (f"Рубрика конкурса требует продемонстрировать «преимущества и ограничения» "
                f"фундаментальных моделей. И то, и другое здесь количественно. Преимущество — "
                f"дообучение снимает {num(_ft_cut, 0)}% ошибки zero-shot. Ограничения — отставание "
                f"от панельной модели в {num(_ft_mae / _pt_mae, 1)} раза")
-    if _real_ready:
-        _wf = (_real_folds.max() - _real_folds.min()).idxmax()
-        _rubric += (f" и разброс реализаций дообучения: на {_ORDINAL.get(_wf, _wf)} фолде "
-                    f"от {rub(_real_folds[_wf].min())} до {rub(_real_folds[_wf].max())}")
+    if _wide is not None:
+        # По всем реализациям размах смешивает процедуры до и после исправления — поэтому
+        # рядом размах после исправления.
+        _rubric += (f" и разброс реализаций дообучения на {_ORDINAL.get(_wide, _wide)} фолде: "
+                    f"от {rub(_real_folds[_wide].min())} до {rub(_real_folds[_wide].max())} по всем "
+                    f"реализациям"
+                    + (f", после исправления — от {rub(_real_folds.loc[_after, _wide].min())} до "
+                       f"{rub(_real_folds.loc[_after, _wide].max())}" if len(_after) >= 2 else ""))
     _ft_paras.append(_rubric + ".")
 Markdown("\n\n".join(_ft_paras)) if _ft_paras else None
 ```
@@ -2580,6 +2708,11 @@ if "тема" in _dict:
         f"денежно-кредитной политики и {num(_dd.loc['ceny', 'доля снятого, %'], 1)}% — темы цен, "
         f"в остальных темах — от {num(_rest.min(), 1)}% до {num(_rest.max(), 1)}%; частые снятые "
         f"слова в таблице показывают, что снят в основном мусор."
+        + (" У кредита и денежно-кредитной политики списки снятых слов одинаковы: корень ставки "
+           "`stavk` стоит в обеих темах, и «выставка» с «отставкой» уходили из обеих."
+           if {"kredit", "dkp"} <= set(_dd.index)
+           and _dd.loc["kredit", "частые снятые слова"] == _dd.loc["dkp", "частые снятые слова"]
+           else "")
         + (" Новый словарь только снимает: добавленных попаданий нет ни в одной теме."
            if "добавлено" in _dd and (_dd["добавлено"] == 0).all() else "")
         + "\n\n**Прежние числа новостной модели `two_stage_news` и трёх проверок ниже — "
@@ -2736,8 +2869,9 @@ if "p" in _nt:
         ("**Не прошла ни одна.** " if _nt_pass == 0 else f"**Прошли {_nt_pass}.** ")
         + f"Лучшее p — {num(_nt_best['p'], 4)} у "
         f"{_FEATURE_OF.get(_nt_best['признак'], _nt_best['признак'])} {_nt_where}, и это при "
-        f"пороге {num(0.05 / len(_nt), 5)}. На уровне 0,05 без всякой поправки значимы {_nt_sig} "
-        f"{plural(_nt_sig, 'гипотеза', 'гипотезы', 'гипотез')} из {len(_nt)} — при "
+        f"пороге {num(0.05 / len(_nt), 5)}. На уровне 0,05 без всякой поправки значимы "
+        f"{in_words(_nt_sig, 'им_ж')} {plural(_nt_sig, 'гипотеза', 'гипотезы', 'гипотез')} из "
+        f"{len(_nt)} — при "
         f"{num(0.05 * len(_nt), 1)}, которые в среднем даёт одна случайность на таком числе "
         f"проверок."
     )
@@ -2780,8 +2914,8 @@ if "model" in _per and {"two_stage", "two_stage_news"} <= set(_per["model"]):
     _tn_d = _tn.loc["two_stage_news"] - _tn.loc["two_stage"]
     _hurt = [f for f in _tn_d.index if _tn_d[f] > 0]
     _help = [f for f in _tn_d.index if _tn_d[f] <= 0]
-    _ords = lambda fs: " и ".join(_ORDINAL.get(f, str(f)) for f in fs)
-    _signed = lambda fs: " и ".join(f"{num(_tn_d[f], 0, sign=True)} ₽" for f in fs)
+    _ords = lambda fs: and_join(_ORDINAL.get(f, str(f)) for f in fs)
+    _signed = lambda fs: and_join(f"{num(_tn_d[f], 0, sign=True)} ₽" for f in fs)
     _tsn_text = (
         f"На очищенном словаре новости прогнозу {'вредят' if _tn_news > _tn_base else 'помогают'}: "
         f"{rub(_tn_news)} против {rub(_tn_base)} без них, на {rub(abs(_tn_news - _tn_base))} ₽ "
@@ -2814,7 +2948,7 @@ Markdown(_tsn_text) if _tsn_text else None
 
 Отбор признака на очищенном словаре стал устойчивее: на первом шаге все три фолда
 основного протокола берут тему доходов, на третьем — тему денежно-кредитной
-политики, ту самую, которую мы и ждали (журнал прогона 26.09). Прогноз от этого
+политики, ту самую, которую мы и ждали (по журналу прогона). Прогноз от этого
 лучше не стал, а выигрыш на одном фолде из трёх сигналом не назовёшь.
 
 ### Сколько теряется на заголовках
