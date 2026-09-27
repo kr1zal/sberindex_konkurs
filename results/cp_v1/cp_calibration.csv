@@ -1,0 +1,3 @@
+penalty,kernel_pen,fa_pelt,fa_kernel,n_failed_pelt,n_failed_kernel,n_failed_grid
+1.0,0.001,100.0,100.0,0,0,0
+3.0,2.0860644934719588,26.666666666666668,21.666666666666668,0,0,0

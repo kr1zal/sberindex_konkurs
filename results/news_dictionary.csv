@@ -1,0 +1,8 @@
+тема,заголовков до,заголовков после,снято,добавлено,"доля снятого, %",частые снятые слова,корреляция рядов
+ceny,28412,11358,17054,0,60.023933549204564,czentre 3988; czentr 1221; tsentre 974; tsentr 874; tsentra 683,0.9286204436193162
+dohody,11361,11121,240,0,2.112490097702667,ledohod 52; kompensirovat 37; kompensirujut 25; kompensiruyut 17; kompensiruet 13,0.9930285454973158
+zanjatost,22124,17839,4285,0,19.36810703308624,zarabotal 342; zarabotat 331; zarabotala 243; razrabotali 229; zarabotali 205,0.8857657424681785
+proizvodstvo,7559,7555,4,0,0.052917052520174625,vaicekhovskogo 3; khimcekha 1,0.9998395131014406
+kredit,18218,11317,6901,0,37.880118564057526,vystavka 1069; vystavke 592; vystavku 479; otstavku 344; postavki 289,0.8711367932956108
+torgovlja,18510,18385,125,0,0.6753106428957321,nezakrytye 13; narkotorgovecz 12; narkotorgovki 12; kriptotorgovczev 11; narkotorgovczev 10,0.9986376882361293
+dkp,6662,2580,4082,0,61.2728910237166,vystavka 1069; vystavke 592; vystavku 479; otstavku 344; postavki 289,0.7681950780764218
