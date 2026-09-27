@@ -974,114 +974,87 @@ Markdown(
 
 ## Выводы {.smaller}
 
+<!-- Девять тем шрифтом {.smaller} не помещались: 864 px из 760; при 0,9 — по строке на тему. -->
+::: {style="font-size: 0.9em;"}
+
 ```{python}
-# «Прогноз» — те же файлы, что слайды сравнения и горизонтов: summary.csv (модель
-# с минимальным MAE), per_series.csv (_pf, по фолдам) и results/horizons_folds.csv,
-# horizons_summary.csv (_hfs, _hz, _hz_rows — уже считаны на «Пять горизонтов»).
+# Состав и порядок — как в «Кратком резюме» отчёта: главный вывод, сильные результаты,
+# остальные; по строке на тему, одно-два числа и одна оговорка. Числа — из тех же файлов,
+# что слайды выше (summary.csv, per_series.csv → _pf, horizons_*.csv → _hz/_hzi/_hfs,
+# forecast_2025_aggregate_check.csv → _fc_chk, training_length_sweep.csv → _sw, news_panel.csv →
+# _c1n, cp_*.csv → _cp_*): здесь они только собраны в текст.
 _ccl_best = _sum["MAE"].idxmin()
-_ccl_win = _sum.loc[_ccl_best, "к Prophet, %"]
 _ccl_pb, _ccl_pp = _pf.loc[_ccl_best], _pf.loc["prophet"]
 _ccl_folds = sorted(_ccl_pb.index)
-_ccl_wins = [f for f in _ccl_folds if _ccl_pb[f] < _ccl_pp[f]]
-_ccl_lose = [f for f in _ccl_folds if f not in _ccl_wins]
-# Ровно один проигранный фолд — раньше единственный ожидаемый случай, отсюда
-# `_ccl_lose[0]`: при перепрогоне, где лучшая выигрывает все три (пусто) или
-# проигрывает больше одного (несколько), `_ORD[None]`/`_ccl_pp[None]` роняли рендер.
-_ccl_lf = _ccl_lose[0] if len(_ccl_lose) == 1 else None
-_ccl_ratio = _ccl_pb[_ccl_lf] / _ccl_pp[_ccl_lf] if _ccl_lf is not None else None
-_ccl_rw = (({2: "вдвое", 3: "втрое", 4: "вчетверо"}.get(round(_ccl_ratio))
-            if _ccl_ratio is not None and abs(_ccl_ratio - round(_ccl_ratio)) < 0.15 else None)
-           or (f"в {_num(_ccl_ratio, 1)} раза" if _ccl_ratio is not None else ""))
-if not _ccl_lose:
-    _ccl_lose_txt = f"на всех {_GEN[len(_ccl_folds)]} тестовых окнах"
-elif _ccl_lf is not None:
-    _ccl_lose_txt = (f"{len(_ccl_wins)} из {len(_ccl_folds)} тестовых окон; на {_ORD[_ccl_lf]} эталон точнее "
-                      f"({_num(_ccl_pp[_ccl_lf], 0)} против {_num(_ccl_pb[_ccl_lf], 0)}"
-                      + (f" — ошибка лучшей {_ccl_rw} больше" if _ccl_rw else "") + ")")
-else:  # проиграно несколько фолдов — числа одной парой не выразить, перечисляем фолды
-    _ccl_lose_txt = (f"{len(_ccl_wins)} из {len(_ccl_folds)} тестовых окон; на "
-                      f"{_and_join(_ORD[f] for f in _ccl_lose)} эталон точнее")
-
-# Счёт фолдовых побед по горизонтам — только пары модель/эталон с обеими числами:
-# на h=12 у панельных моделей нет обучающих примеров, строк с числом не будет вовсе.
-_hfp = _hfs[_hfs["model"] == "prophet"].set_index(["horizon", "fold"])["MAE"]
-_hfb = _hfs[_hfs["model"] == _ccl_best].set_index(["horizon", "fold"])["MAE"]
-_ccl_hz = []
-for _h in sorted(_hfs["horizon"].unique()):
-    _idx = sorted(set(i for i in _hfp.index if i[0] == _h and np.isfinite(_hfp[i]))
-                  & set(i for i in _hfb.index if i[0] == _h and np.isfinite(_hfb[i])))
-    if _idx:
-        _ccl_hz.append((_h, sum(1 for i in _idx if _hfb[i] < _hfp[i]), len(_idx)))
-_ccl_hz_str = ", ".join(f"h={h}: {w} из {n}" for h, w, n in _ccl_hz)
-_ccl_hz_w, _ccl_hz_n = sum(w for _, w, _ in _ccl_hz), sum(n for _, _, n in _ccl_hz)
-
-_ccl_h12 = _hz[(_hz["horizon"] == 12) & (_hz["model"] != "two_stage_known")]
-_ccl_h12b = _ccl_h12.loc[_ccl_h12["MAE"].idxmin()]
-# Шире `_hz_rows` таблицы «Пять горизонтов» (там только сюжетные четыре модели):
-# лучшей на h=12 может оказаться любая из configs/horizons.yaml — там их двенадцать
-# без оракула, и без подписи текст печатал бы сырой код модели.
-_ccl_h12_ru = {**_hz_rows, "seasonal_naive": "сезонно-наивная",
-               "two_stage_news": "двухэтапная с новостями", "global_gbm": "базовая панельная",
-               "global_gbm_cat": "панельная + доли категорий", "chronos_ft": "дообученный Chronos",
-               "chronos_small": "Chronos-Bolt small", "timesfm": "TimesFM 2.5", "moirai": "Moirai"}
-
-Markdown(
-    f"**Прогноз.** Лучшая модель обходит эталон на **{_num(_ccl_win, 1)}%** (MAE, 3 мес.) "
-    f"— {_ccl_lose_txt}. По фолдам горизонтов — {_ccl_hz_str}, итого "
-    f"**{_ccl_hz_w} из {_ccl_hz_n}** (h=12 — без обучающих примеров у панели). Год вперёд "
-    f"без оракула: {_ccl_h12_ru.get(_ccl_h12b['model'], 'другая модель')}, "
-    # Глагол по знаку: «+40% к эталону» читалось бы как ошибка на 40% больше.
-    + (f"обходит эталон на {_num(_ccl_h12b['к Prophet, %'], 0)}%." if _ccl_h12b['к Prophet, %'] > 0
-       else f"уступает эталону {_num(-_ccl_h12b['к Prophet, %'], 0)}%.")
-)
+_ccl_lose = [f for f in _ccl_folds if _ccl_pb[f] >= _ccl_pp[f]]
+# Фолдовая оговорка — как в резюме отчёта; при перепрогоне, где лучшая выигрывает все фолды
+# или проигрывает несколько, фраза меняется, а не роняет рендер.
+_ccl_fold_txt = (
+    f"на {len(_ccl_folds) - len(_ccl_lose)} {'фолде' if len(_ccl_folds) - len(_ccl_lose) == 1 else 'фолдах'} "
+    f"из {len(_ccl_folds)}, на "
+    f"{_and_join(_ORD.get(f, f) for f in _ccl_lose)} эталон точнее" if _ccl_lose else "на всех фолдах")
+_ccl = [
+    "**Главный вывод:** задача — прогноз одного числа и разнос его по территориям.",
+    f"**Информация со стороны:** {_num(_sum.loc[_ccl_best, 'к Prophet, %'], 1)}% к эталону (MAE, 3 мес.) "
+    f"против {_num(_sum.loc['global_gbm', 'к Prophet, %'], 1)}% у панели без переноса — {_ccl_fold_txt}.",
+]
+# Горизонты: наукаст лучшей модели основного протокола — если она есть в configs/horizons.yaml;
+# год вперёд — лучшая без оракула, число фолдов — из horizons_folds.csv.
+_ccl_h = []
+if (1, _ccl_best) in _hzi.index and (1, "prophet") in _hzi.index:
+    _ccl_h.append(f"наукаст — {_num(_hzi.loc[(1, _ccl_best), 'к Prophet, %'], 1)}% к эталону")
+_ccl_h12 = _hz[(_hz["horizon"] == 12) & _hz["MAE"].notna() & (_hz["model"] != "two_stage_known")]
+if len(_ccl_h12):
+    _ccl_y = _ccl_h12.loc[_ccl_h12["MAE"].idxmin()]
+    _ccl_ynf = int(_hfs.loc[(_hfs["horizon"] == 12) & (_hfs["model"] == _ccl_y["model"]), "MAE"].notna().sum())
+    _ccl_y_ru = {"two_stage": "двухэтапная", "moirai": "Moirai", "two_stage_news": "двухэтапная с новостями"}
+    _ccl_h.append(
+        f"на год — {_ccl_y_ru.get(_ccl_y['model'], 'другая модель')}"
+        + (f", {_num(_ccl_y['к наивной, %'], 0)}% и {_num(_ccl_y['к Prophet, %'], 0)}% к наивной и эталону"
+           if min(_ccl_y["к наивной, %"], _ccl_y["к Prophet, %"]) > 0 else
+           f", {_num(_ccl_y['MAE'], 0)} ₽")
+        + (f" ({'один фолд' if _ccl_ynf == 1 else f'{_ccl_ynf} фолда'})" if 0 < _ccl_ynf < 3 else ""))
+if _ccl_h:
+    _ccl.append("**Горизонты:** " + "; ".join(_ccl_h) + ".")
+_ccl_fc = _fc_chk.assign(e=_fc_chk["error_pct"].abs()).groupby(["method", "horizon"])["e"].mean()
+_ccl_own, _ccl_rules = _ccl_fc.loc["two_stage"], _ccl_fc.drop(index="two_stage")
+_ccl_rng = lambda lo, hi: _num(lo, 1) if _num(lo, 1) == _num(hi, 1) else f"{_num(lo, 1)}–{_num(hi, 1)}"
+_ccl.append(f"**Агрегат на факте {pd.Period(_fc_cfg['origin'], 'M').year + 1} года:** ошибка первого этапа "
+            f"{_ccl_rng(_ccl_own.min(), _ccl_own.max())}% против "
+            f"{_ccl_rng(_ccl_rules.min(), _ccl_rules.max())}% у простых правил.")
+_ccl_sw = _sw.set_index("обучение, мес")["базовая"]
+_ccl.append(f"**Закон переноса:** корреляция выигрыша с длиной обучения {_num(_sw_rho, 2)}; базовая модель "
+            f"при {_ccl_sw.index.max()} мес. точнее, чем при {_ccl_sw.index.min()}, в "
+            f"{_num(_ccl_sw.loc[_ccl_sw.index.min()] / _ccl_sw.loc[_ccl_sw.index.max()], 1)} раза.")
+if "prophet_forced_yearly" in _sum.index:
+    _ccl.append(f"**Ловушка:** насильная годовая сезонность — MAE {_num(_sum.loc['prophet_forced_yearly', 'MAE'], 0)} ₽ "
+                f"вместо {_num(_sum.loc['prophet', 'MAE'], 0)} ₽ у Prophet по умолчанию.")
+_ccl.append(f"**Фундаментальные:** без дообучения "
+            + ("хуже наивной" if (_loss > 0).all() else "в лучшем случае на уровне наивной")
+            + f", дообученный Chronos — {_num(_ftm, 0)} против {_num(_sum.loc['naive_last', 'MAE'], 0)} ₽ у неё.")
+_ccl.append(f"**Новости:** на наукасте ошибка "
+            + (f"ниже на {_num(-_c1n['diff_mean'], 1)} ₽" if _c1n["diff_mean"] < 0
+               else f"выше на {_num(_c1n['diff_mean'], 1)} ₽")
+            + f" на {_num(_c1n['n_series'], 0)} рядах, но интервал по фолдам "
+            + ("накрывает ноль" if _c1n["fold_ci_low"] < 0 < _c1n["fold_ci_high"] else "ноль не накрывает") + ".")
+# Изломы — то же условие тезиса и то же «раннего предупреждения не показано», что в резюме отчёта:
+# порог при выбранном штрафе не перейдён или все переходы — в декабре позже месяца события.
+_ccl_raw = [_cp_S.loc[(d, "raw"), "ложных на чистых, %"] for d in _cp_dets if d not in _cp_own]
+_ccl_rat = [_cp_S.loc[(d, _cp_mode), "ложных на чистых, %"] for d in _cp_dets if d not in _cp_own]
+_ccl_prng = lambda v: (_cp_pct(min(v)) if round(min(v), 1) == round(max(v), 1)
+                       else f"{_cp_pct(min(v))[:-1]}–{_cp_pct(max(v))}")
+_ccl_cross = [e for e in _cp_events if isinstance(_cp_EV.loc[(_cp_sel, e), "crossed_month"], str)]
+_ccl_no_early = not _ccl_cross or all(_cp_dec(_cp_sel, e) for e in _ccl_cross)
+_ccl.append(
+    ("**Изломы:** решает преобразование — ложных " if _cp_thesis else
+     "**Изломы:** преобразование решает не всё — ложных ")
+    + f"{_ccl_prng(_ccl_raw)} на сырых рядах, {_ccl_prng(_ccl_rat)} на темпах роста; уровень "
+    + ("скромный" if _cp_S.loc[(_cp_det, _cp_mode), "J Юдена"] < 20 else "заметный")
+    + (", раннего предупреждения нет." if _ccl_no_early else "."))
+Markdown("\n".join(f"- {line}" for line in _ccl))
 ```
 
-```{python}
-# Строка про изломы — из тех же файлов стенда, что слайды об обнаружении, с тем же условием
-# тезиса и той же оговоркой: доля засчитанных обнаружений с сигналом в декабре и обнаружение без них.
-_cp_cross = [e for e in _cp_events if isinstance(_cp_EV.loc[(_cp_off_p, e), "crossed_month"], str)]
-_cp_sel_cross = [e for e in _cp_events if isinstance(_cp_EV.loc[(_cp_sel, e), "crossed_month"], str)]
-_cp_concl = (
-    f"**Изломы: {'решает преобразование, а не алгоритм' if _cp_thesis else 'преобразование решает не всё'}.** "
-    f"{_CP_DET[_cp_det]} на темпах роста при штрафе {_cp_pen(_cp_sel)}: обнаружено "
-    f"{_cp_pct(_cp_pr['обнаружено, %'])}"
-    + (f" ({_cp_pct(_cp_dec_share)} — сигналы в декабре, без них {_cp_pct(_cp_det_nodec)})" if _cp_n_dec else "")
-    + f", медиана задержки {_cp_n01(_cp_pr['задержка, медиана'])} мес., ложных тревог "
-    f"{_cp_pct(_cp_pr['ложных на чистых, %'])} (на сырых рядах {_cp_pct(_cp_prw['ложных на чистых, %'])}). "
-    f"В реальном времени при выбранном штрафе "
-    + (f"порог {_num(_cp_thr, 0)}% не перейдён ни разу" if not _cp_sel_cross else
-       "порог перейдён: " + "; ".join(f"{_cp_ym(e)} — задержка {int(_cp_EV.loc[(_cp_sel, e), 'delay'])} мес."
-                                      + (", в самом декабре" if _cp_dec(_cp_sel, e) else "")
-                                      for e in _cp_sel_cross))
-    + (f"; при штрафе {_cp_pen(_cp_off_p)} — "
-       + (("только " if len(_cp_cross) < len(_cp_events) else "")
-          + "; ".join(f"{_cp_ym(e)}, с задержкой {int(_cp_EV.loc[(_cp_off_p, e), 'delay'])} мес."
-                      + (", и порог перейдён в самом декабре" if _cp_dec(_cp_off_p, e) else "")
-                      for e in _cp_cross) if _cp_cross else
-          ("тоже ни разу" if not _cp_sel_cross else "ни разу"))
-       if _cp_off_p != _cp_sel else "")
-)
-Markdown(_cp_concl if _cp_concl.endswith(".") else _cp_concl + ".")
-```
-
-```{python}
-# Оба абзаца переиспользуют переменные слайдов «Что не сработало»: _loss/_zsn/_ftm/_vp
-# (модели) и _nt (новости) — там же они и посчитаны, здесь только собраны в текст.
-Markdown(
-    f"**Фундаментальные модели:** без дообучения на основном горизонте (3 мес.) в среднем "
-    f"хуже наивной у всех трёх семейств (от {_num(_loss.min(), 0)}% до {_num(_loss.max(), 0)}%), "
-    f"дообученный Chronos доходит "
-    f"лишь до её уровня ({_num(_ftm, 0)} против {_num(_sum.loc['naive_last', 'MAE'], 0)}), "
-    f"эталону уступает {_num(-_vp, 1)}%. "
-    f"**Новости:** {len(_nt)} {_plural(len(_nt), 'гипотеза', 'гипотезы', 'гипотез')} "
-    f"на национальном уровне, порог объявлен заранее, "
-    + ("не прошла ни одна." if not _nt["прошёл"].any() else f"прошли {int(_nt['прошёл'].sum())}.")
-)
-```
-
-**Главный вывод.** Задача — прогноз одного числа и разнос. Перенос замещает
-недостающую историю ровно в той мере, в какой её недостаёт — длину ряда
-не заменить, можно только занять недостающую сезонность у того, у кого она есть.
+:::
 
 ## Что из этого следует
 
