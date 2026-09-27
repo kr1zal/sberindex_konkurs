@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import gzip
 import io
 import re
 import subprocess
@@ -261,6 +262,46 @@ class SaveRealizationTest(unittest.TestCase):
         self.assertRegex(results_guard.realization_stamp(), re.compile(r"^\d{8}T\d{6}$"))
 
 
+class ResolveResultsTest(unittest.TestCase):
+    """Путь к файлу результатов: обычный CSV, если есть, иначе его снимок `.csv.gz`.
+
+    Публичный клон несёт только снимки трёх крупных файлов (`scripts/export_results.py`);
+    рабочий каталог с прогонами — только обычные CSV; в разработке недолго бывают оба
+    сразу (снимок не обновлён после свежего прогона) — тогда в силе обычный файл.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.path = self.dir / "per_series.csv"
+        self.gz = self.dir / "per_series.csv.gz"
+
+    def test_only_plain_csv_present(self):
+        self.path.write_text("mo,mae\nмо_0,1.0\n", encoding="utf-8")
+        self.assertEqual(results_guard.resolve_results(self.path), self.path)
+
+    def test_only_gz_snapshot_present(self):
+        with gzip.open(self.gz, "wt", encoding="utf-8") as f:
+            f.write("mo,mae\nмо_0,1.0\n")
+        self.assertEqual(results_guard.resolve_results(self.path), self.gz)
+
+    def test_both_present_plain_csv_wins(self):
+        # Обычный файл новее снимка по построению (снимок делается отдельной командой
+        # с прежнего прогона) — при обоих в силе тот, что точнее и свежее.
+        self.path.write_text("mo,mae\nмо_0,1.0\n", encoding="utf-8")
+        with gzip.open(self.gz, "wt", encoding="utf-8") as f:
+            f.write("mo,mae\nмо_0,2.0\n")
+        self.assertEqual(results_guard.resolve_results(self.path), self.path)
+
+    def test_neither_present_names_both_paths(self):
+        with self.assertRaises(FileNotFoundError) as caught:
+            results_guard.resolve_results(self.path)
+        message = str(caught.exception)
+        self.assertIn(str(self.path), message)
+        self.assertIn(str(self.gz), message)
+
+
 class ReadResultsTest(unittest.TestCase):
     """Файлы результатов читаются числами ровно такими, какими они записаны."""
 
@@ -272,6 +313,19 @@ class ReadResultsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "per_series.csv"
             pd.DataFrame({"mae": values}).to_csv(path, index=False)
+            back = results_guard.read_results(path)
+        self.assertTrue(np.array_equal(back["mae"].to_numpy(), values))
+
+    def test_numbers_survive_the_gz_snapshot_round_trip(self):
+        # read_results идёт через resolve_results: на чистом клоне обычного файла
+        # нет, и это же округление чисел должно пережить gzip-снимок.
+        values = np.concatenate([[1217.032436222938, 0.6207988257547953],
+                                 np.random.default_rng(4).uniform(0, 5000, 200)])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "per_series.csv"
+            gz = Path(tmp) / "per_series.csv.gz"
+            pd.DataFrame({"mae": values}).to_csv(gz, index=False, compression="gzip")
+            self.assertFalse(path.exists())
             back = results_guard.read_results(path)
         self.assertTrue(np.array_equal(back["mae"].to_numpy(), values))
 

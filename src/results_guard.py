@@ -121,6 +121,28 @@ def uneven_series(per_series: pd.DataFrame) -> pd.Series | None:
     return counts if counts.nunique() > 1 else None
 
 
+def resolve_results(path: Path) -> Path:
+    """Путь, который действительно читать: обычный файл результатов, если он есть,
+    иначе его сжатый снимок `path` + `.gz` (`per_series.csv` → `per_series.csv.gz`).
+
+    Конвейер (`src/run.py`, `scripts/horizons.py`, `scripts/forecast_forward.py`) всегда
+    пишет обычные CSV вне git — начисто на каждый прогон. В git попадают только снимки
+    трёх крупных файлов, сделанные отдельной командой (`scripts/export_results.py`)
+    и потому не обязанные совпадать по времени с последним прогоном: обычный файл,
+    когда он есть, новее и точнее снимка, поэтому проверяется первым. `.gz` находится
+    только на чистом клоне или когда конвейер после клонирования ещё не запускался.
+
+    Падает `FileNotFoundError`, называющим оба пути, если нет ни одного, — это исключение
+    ловит `table()` отчёта, чтобы явно сказать, каких данных не хватает, а не упасть
+    на разборе несуществующего файла где-то внутри pandas."""
+    if path.exists():
+        return path
+    gz = Path(f"{path}.gz")
+    if gz.exists():
+        return gz
+    raise FileNotFoundError(f"нет ни обычного файла результатов, ни его снимка: {path}, {gz}")
+
+
 def read_results(path: Path, **kwargs) -> pd.DataFrame:
     """Файл результатов — числами ровно такими, какими они записаны. Прочие аргументы —
     как у `pd.read_csv`.
@@ -128,8 +150,11 @@ def read_results(path: Path, **kwargs) -> pd.DataFrame:
     Разбор чисел pandas по умолчанию не обратим: примерно каждое восьмое число читается
     на единицу последнего разряда не тем, что записано. Слияние читает файл и пишет его
     заново, и каждая партия сдвигала бы сохранённые метрики чужих моделей. Все чтения
-    файлов результатов в прогонах и бэкфилле идут через эту функцию — правило одно."""
-    return pd.read_csv(path, float_precision="round_trip", **kwargs)
+    файлов результатов в прогонах и бэкфилле идут через эту функцию — правило одно.
+
+    Путь проходит через `resolve_results`: обычный CSV или, если его нет, снимок `.csv.gz` —
+    pandas распознаёт gzip по расширению сам, без дополнительных аргументов."""
+    return pd.read_csv(resolve_results(path), float_precision="round_trip", **kwargs)
 
 
 def realization_stamp() -> str:
