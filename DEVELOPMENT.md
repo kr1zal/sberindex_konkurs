@@ -31,6 +31,7 @@ scripts/backfill_r2.py            разовый бэкфилл слагаемы
 scripts/news_event_study.py       новостной фон в месяцы массовых изломов
 scripts/error_decomposition.py    смещение против разброса между рядами
 scripts/news_national.py          новости на национальном уровне, 48 гипотез
+scripts/news_panel.py             новостные признаки в модели (global_gbm_news против global_gbm) и корреляция с изломами → results/news_panel.csv, news_breaks_corr.csv
 scripts/fetch_bodies.py           выборочная выкачка тел статей
 scripts/compare_headline_body.py  что теряется на заголовках
 scripts/build_news_features.py    пересборка data/news/monthly и national.parquet — единственный, кто их пишет

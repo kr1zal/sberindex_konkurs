@@ -204,6 +204,7 @@ scripts/build_news_features.py  пересборка новостных приз
 scripts/backfill_r2.py  разовый бэкфилл слагаемых R² пула в результаты, посчитанные до 25.09
 scripts/changepoints.py стенд разладок и потоковый сигнал на панели → десять results/cp_*.csv
 scripts/forecast_forward.py  прогноз на 2025 год и проверка федерального агрегата по факту
+scripts/news_panel.py   новостные признаки в модели и корреляция с изломами → results/news_panel.csv, news_breaks_corr.csv
 data/news/              агрегаты новостного корпуса; сырые заголовки в репозиторий не входят
 tests/                  тесты на синтетических кадрах
 ```
