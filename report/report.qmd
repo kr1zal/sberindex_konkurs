@@ -405,35 +405,57 @@ if len(_headlines):
 # `_pct` отсюда тихо подменили бы чужие.
 import importlib.util
 import yaml
-from src.cp_bench import MIN_HISTORY, RECENT_WINDOW
+from src.cp_bench import MIN_HISTORY, RECENT_WINDOW, inject
 from src.split import rolling_origin
 
-_cp = defaultdict(lambda: Markdown("—"))
-_cps = table("../results/cp_summary.csv")
-_cpm = table("../results/cp_summary_by_magnitude.csv")
-_cpc = table("../results/cp_calibration.csv")
-_cpb = table("../results/cp_bench.csv", usecols=["detector", "mode", "penalty", "kind", "magnitude",
-                                                  "position", "series_id", "detected", "delay",
-                                                  "false_alarm", "signal"])
-_cpr = table("../results/cp_realtime.csv")
-_cpe = table("../results/cp_realtime_events.csv", dtype={"crossed_month": object})
-_cpo = table("../results/cp_offline.csv")
-_cpos = table("../results/cp_offline_series.csv")
 _cp_cfg = yaml.safe_load(Path("../configs/changepoints.yaml").read_text(encoding="utf-8"))
+_cp_proto = f"v{_cp_cfg['protocol_version']}"
+
+
+def _cp_table(path, need=(), **kw):
+    """Файл стенда — или пустой кадр, если файла нет, в нём нет колонок `need` или он другой
+    версии протокола (колонка `protocol`): числа прежней версии в таблицы действующей молча
+    не встанут."""
+    try:
+        head = read_results(path, nrows=0)
+    except FileNotFoundError:
+        return pd.DataFrame()
+    if not {"protocol", *need} <= set(head.columns):
+        return pd.DataFrame()
+    frame = read_results(path, usecols=["protocol", *need] if need else None, **kw)
+    return frame if set(frame["protocol"]) == {_cp_proto} else pd.DataFrame()
+
+
+_cp = defaultdict(lambda: Markdown("—"))
+_cps = _cp_table("../results/cp_summary.csv")
+_cpm = _cp_table("../results/cp_summary_by_magnitude.csv")
+_cpp = _cp_table("../results/cp_summary_by_position.csv")
+_cpc = _cp_table("../results/cp_calibration.csv")
+_cpb = _cp_table("../results/cp_bench.csv", need=["detector", "mode", "penalty", "kind", "magnitude",
+                                                  "position", "series_id", "detected", "delay",
+                                                  "false_alarm", "signal", "late", "twin_flag_at_signal"])
+_cpr = _cp_table("../results/cp_realtime.csv")
+_cpe = _cp_table("../results/cp_realtime_events.csv", dtype={"crossed_month": object})
+_cpk = _cp_table("../results/cp_realtime_rank.csv", dtype={"event": object})
+_cpo = _cp_table("../results/cp_offline.csv")
+_cpos = _cp_table("../results/cp_offline_series.csv")
 _cp_nes_spec = importlib.util.spec_from_file_location("news_event_study",
                                                       "../scripts/news_event_study.py")
 _cp_nes = importlib.util.module_from_spec(_cp_nes_spec)
 _cp_nes_spec.loader.exec_module(_cp_nes)
 _cp_P_OFF = float(_cp_nes.PENALTY)
 # Без файлов стенда таблицы раздела показывают эту строку, а тексты — прочерк.
-_cp_missing = pd.DataFrame({"сообщение": ["прогон ещё не выполнен, запустите scripts/changepoints.py"]})
-_cp_ready = ("J Юдена" in _cps and "обнаружено, %" in _cpm and "kernel_pen" in _cpc
-             and "false_alarm" in _cpb and "selected" in _cpe and "share" in _cpr
+_cp_missing = pd.DataFrame({"сообщение": [f"файлов стенда протокола {_cp_proto} в results/ нет: "
+                                          f"запустите scripts/changepoints.py"]})
+_cp_ready = ("J Юдена" in _cps and "n twin-vetoed" in _cps and "обнаружено, %" in _cpm
+             and "position" in _cpp and "kernel_pen" in _cpc and "late" in _cpb
+             and "selected" in _cpe and "share" in _cpr and "rank" in _cpk
              and "share" in _cpo and "series_id" in _cpos
              and _cp_P_OFF in set(_cpr["penalty"]) and _cp_P_OFF in set(_cpo["penalty"]))
 
 _CP_DET = {"pelt": "PELT", "binseg": "BinSeg", "window": "Window", "bottomup": "BottomUp",
            "kernel_rbf": "ядровой (RBF)", "cusum": "CUSUM"}
+_CP_DET_GEN = {**_CP_DET, "kernel_rbf": "ядрового (RBF)"}
 _CP_MODE = {"ratio": "темпы роста", "raw": "сырые значения", "deseason": "без профиля месяца"}
 _CP_ON = {"ratio": "на темпах роста", "raw": "на сырых значениях",
           "deseason": "без профиля месяца"}
@@ -441,6 +463,11 @@ _CP_KIND = {"level": "сдвиг уровня", "trend": "сдвиг накло�
 _cp_MONTH_NOM = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август",
                  "сентябрь", "октябрь", "ноябрь", "декабрь"]
 _cp_ORD_GEN = {0: "первого", 1: "второго", 2: "третьего"}
+
+
+def _cp_true(column):
+    """Флаг из CSV: True/False читаются булевыми, но колонка с пропусками становится строковой."""
+    return column.astype(str).str.lower() == "true"
 
 
 def _cp_ym(month, case="им"):
@@ -469,27 +496,60 @@ def _cp_pen(p):
     return num(p, 0 if float(p).is_integer() else 1)
 
 
+def _cp_list(items):
+    """Перечень чисел с запятой внутри: «0,5; 1; 1,5 и 5» — через запятую их не разобрать."""
+    items = [str(i) for i in items]
+    return items[0] if len(items) == 1 else "; ".join(items[:-1]) + " и " + items[-1]
+
+
 def _cp_pct(v):
     """Процент с одним знаком; «100%», а не «100,0%»: ноль после запятой в тексте лишний."""
     text = num(v, 1)
     return f"{text[:-2] if text.endswith(',0') else text}%"
 
 
+def _cp_range(values):
+    """Диапазон процентов: «53,3–73,3%»; при совпавших краях — одно число, «0–0%» читалось бы опечаткой."""
+    lo, hi = _cp_pct(min(values)), _cp_pct(max(values))
+    return hi if lo == hi else f"{lo[:-1]}–{hi}"
+
+
+def _cp_from_to(values):
+    """«от −6,3 до +9,1» — J со знаком; одно значение у всех — «+13,9 у каждого»."""
+    lo, hi = num(min(values), 1, sign=True), num(max(values), 1, sign=True)
+    return f"{hi} у каждого" if lo == hi else f"от {lo} до {hi}"
+
+
 def _cp_n01(v):
-    """Медиана месяцев: целая — без знаков, дробная — с одним, пропуск — прочерк."""
+    """Медиана месяцев или ранг: целое — без знаков, дробное — с одним, пропуск — прочерк."""
     return num(v, 0 if float(v).is_integer() else 1)
 
 
 def _cp_mw(v):
     """«2 месяца», «5 месяцев», «1,5 месяца»: дробное число — в родительном единственного."""
     v = float(v)
+    if not np.isfinite(v):
+        return "—"
     if v.is_integer():
         return f"{num(v, 0)} {plural(int(v), 'месяц', 'месяца', 'месяцев')}"
     return f"{num(v, 1)} месяца"
 
 
+def _cp_mo(v):
+    """Число МО в фоне: медиана долей бывает серединой двух месяцев — тогда с одним знаком."""
+    return f"{_cp_n01(round(float(v), 1))} МО"
+
+
+def _cp_pct_small(v):
+    """Доля, которая бывает одним-двумя МО из двух тысяч: меньше 0,1% — с двумя знаками, иначе
+    один ряд печатался бы как «0%»."""
+    return f"{num(v, 2)}%" if 0 < v < 0.1 else _cp_pct(v)
+
+
 def _cp_times(a, b):
     """Во сколько раз a больше или меньше b, словами: «вдвое меньше», «в 1,4 раза больше»."""
+    if min(a, b) <= 0:
+        return "больше" if a > b else "меньше" if a < b else "столько же"
     r = max(a, b) / min(a, b)
     if r < 1.15:
         return "примерно столько же"
@@ -497,17 +557,57 @@ def _cp_times(a, b):
     return f"{word or f'в {num(r, 1)} раза'} {'больше' if a > b else 'меньше'}"
 
 
+# Первая версия стенда (`configs/changepoints_v1.yaml` → `results/cp_v1/`) — для её подраздела
+# и сравнения с ней. У исходных файлов v1 нет колонки `protocol` и колонок зачёта v2, у
+# регенерированных они есть, поэтому читаются только исходные колонки v1.
+_CP1_SUMMARY = ["detector", "mode", "penalty", "обнаружено, %", "задержка, медиана",
+                "доля с задержкой 0, %", "ложных на чистых, %", "J Юдена"]
+_CP1_BENCH = ["detector", "mode", "penalty", "kind", "magnitude", "position", "series_id",
+              "detected", "delay", "false_alarm", "signal"]
+
+
+def _cp1_table(name, cols, **kw):
+    """Файл первой версии — или пустой кадр, если его нет, в нём нет исходных колонок v1
+    или колонка `protocol` регенерированного файла называет другую версию."""
+    path = f"../results/cp_v1/{name}"
+    try:
+        head = read_results(path, nrows=0)
+    except FileNotFoundError:
+        return pd.DataFrame()
+    if not set(cols) <= set(head.columns):
+        return pd.DataFrame()
+    if "protocol" in head.columns and set(read_results(path, usecols=["protocol"])["protocol"]) != {"v1"}:
+        return pd.DataFrame()
+    return read_results(path, usecols=cols, **kw)
+
+
+_cp1s = _cp1_table("cp_summary.csv", _CP1_SUMMARY)
+_cp1b = _cp1_table("cp_bench.csv", _CP1_BENCH)
+_cp1e = _cp1_table("cp_realtime_events.csv", ["penalty", "selected"])
+_cp1_ready = "J Юдена" in _cp1s and "false_alarm" in _cp1b and "selected" in _cp1e
+_cp1_p_sel = float(_cp1e.loc[_cp_true(_cp1e["selected"]), "penalty"].iloc[0]) if _cp1_ready else None
+
 if _cp_ready:
-    _cp_rtc = _cp_cfg["realtime"]
+    _cp_rtc, _cp_bc = _cp_cfg["realtime"], _cp_cfg["bench"]
     _cp_det, _cp_mode = _cp_rtc["detector"], _cp_rtc["mode"]
     _cp_thr = float(_cp_rtc["threshold_share"])
     _cp_events = sorted(str(e) for e in _cp_rtc["events"])
-    _cp_p_sel = float(_cpe.loc[_cpe["selected"].astype(str).str.lower() == "true", "penalty"].iloc[0])
+    _cp_p_sel = float(_cpe.loc[_cp_true(_cpe["selected"]), "penalty"].iloc[0])
+    _cp_grid = sorted(float(p) for p in _cp_bc["penalties"])
+    # Правило может выбрать край сетки, и тогда лучший штраф мог лежать за ним: лог прогона
+    # пишет об этом «ВНИМАНИЕ», текст — словами.
+    _cp_sel_edge = (None if len(_cp_grid) < 2 else "наибольший" if _cp_p_sel == _cp_grid[-1]
+                    else "наименьший" if _cp_p_sel == _cp_grid[0] else None)
+    _cp_sel_edge_pr = {"наибольший": "наибольшем", "наименьший": "наименьшем"}.get(_cp_sel_edge)
+    _cp_max_delay = _cp_bc["max_delay"]  # None — без верхней границы задержки
+    _cp_twin_rule = bool(_cp_bc["twin_rule"])
     # Вторая картина — прежняя, если стенд выбрал другой штраф.
     _cp_p_alt = _cp_P_OFF if _cp_P_OFF != _cp_p_sel else None
     _cp_months = list(_cpr.loc[_cpr["penalty"] == _cp_p_sel, "month"])
     _cp_pos = {m: i for i, m in enumerate(_cp_months)}
+    _cp_first = _cp_months[MIN_HISTORY]  # первый проверяемый месяц: раньше детектор не запускается
     _cp_RT = _cpr.pivot(index="month", columns="penalty", values="share").reindex(_cp_months)
+    _cp_NS = _cpr.pivot(index="month", columns="penalty", values="n_signals").reindex(_cp_months)
     _cp_OFF = _cpo.pivot(index="month", columns="penalty", values="share").reindex(_cp_months)
     _cp_EV = _cpe.set_index(["penalty", "event"])
     # Окно события — до следующего события, у последнего — до конца панели, как в скрипте.
@@ -520,13 +620,16 @@ if _cp_ready:
     _cp_nn = pd.concat([_cpr["n_signals"] / _cpr["share"], _cpo["n_breaks"] / _cpo["share"]])
     _cp_nn = _cp_nn[np.isfinite(_cp_nn)]
     _cp_n_panel = int(round(float(_cp_nn.iloc[0]) * 100)) if len(_cp_nn) else None
+    # Ранговый вид (`results/cp_realtime_rank.csv`) — описание, а не второй порог: место доли
+    # месяца среди наблюдаемых месяцев того же штрафа и фон — медиана долей месяцев без событий.
+    _cp_KV = {p: g.set_index("month") for p, g in _cpk.groupby("penalty")}
 
     # Стенд при выбранном штрафе; CUSUM — со своим порогом, штраф у него пуст.
     _cp_sel_rows = _cps[(_cps["penalty"] == _cp_p_sel) | _cps["penalty"].isna()]
     _cp_S = _cp_sel_rows.set_index(["detector", "mode"])
     _cp_J, _cp_FA = _cp_S["J Юдена"], _cp_S["ложных на чистых, %"]
     _cp_own = set(_cps.loc[_cps["penalty"].isna(), "detector"])
-    _cp_dets = [d for d in _cp_cfg["bench"]["detectors"]
+    _cp_dets = [d for d in _cp_bc["detectors"]
                 if (d, "raw") in _cp_S.index and (d, _cp_mode) in _cp_S.index]
     _cp_pen_dets = [d for d in _cp_dets if d not in _cp_own]
     _cp_pr, _cp_prw = _cp_S.loc[(_cp_det, _cp_mode)], _cp_S.loc[(_cp_det, "raw")]
@@ -534,98 +637,111 @@ if _cp_ready:
                          & _cps["penalty"].notna()].set_index("penalty")
     _cp_gain = {d: _cp_J[(d, _cp_mode)] - _cp_J[(d, "raw")] for d in _cp_pen_dets}
     _cp_ratio_J = [_cp_J[(d, _cp_mode)] for d in _cp_pen_dets]
-    _cp_spread = max(_cp_ratio_J) - min(_cp_ratio_J)
+    _cp_spread = max(_cp_ratio_J) - min(_cp_ratio_J) if _cp_ratio_J else np.nan
     # Тезис держится, если у каждого из шести преобразование снижает ложные тревоги
     # и поднимает J, а разброс J между методами со штрафом на темпах роста меньше
     # выигрыша любого из них. Если нет — текст называет только невыполненное условие.
-    _cp_worse = [d for d in _cp_dets if not (_cp_J[(d, _cp_mode)] > _cp_J[(d, "raw")]
-                                             and _cp_FA[(d, _cp_mode)] < _cp_FA[(d, "raw")])]
-    _cp_close = _cp_spread < min(_cp_gain.values())
-    _cp_thesis = not _cp_worse and _cp_close
+    # Одно условие на все места: раздел, резюме, «Находки» и слайды.
 
     def _cp_why(Jd, gain, spread):
         """Невыполненные условия тезиса — только они; пустая строка, если тезис держится."""
         worse = [d for d in _cp_dets if not (Jd[(d, _cp_mode)] > Jd[(d, "raw")]
                                              and _cp_FA[(d, _cp_mode)] < _cp_FA[(d, "raw")])]
         return "; ".join(
-            ([f"у {and_join(_CP_DET[d] for d in worse)} {_CP_ON[_cp_mode]} ложных тревог не меньше "
+            ([f"у {and_join(_CP_DET_GEN[d] for d in worse)} {_CP_ON[_cp_mode]} ложных тревог не меньше "
               f"или J не выше, чем {_CP_ON['raw']}"] if worse else [])
             + ([f"разброс J между методами со штрафом {_CP_ON[_cp_mode]}, {num(spread, 1)} пункта, "
                 f"не меньше наименьшего выигрыша от смены преобразования, {num(min(gain.values()), 1)}"]
-               if not spread < min(gain.values()) else []))
+               if gain and not spread < min(gain.values()) else [])
+            + (["методов со штрафом при этом штрафе в сводке нет"] if not gain else []))
 
     _cp_why_not = _cp_why(_cp_J, _cp_gain, _cp_spread)
-    _cp_best = _cp_sel_rows.loc[_cp_sel_rows["J Юдена"].idxmax()]
+    _cp_thesis = not _cp_why_not
     _cp_n_ser = _cpb["series_id"].nunique()
+
+    # Лучший по J — с ничьими: у PELT и BinSeg на одних рядах числа бывают одинаковы, и лучший
+    # по первой строке файла был бы одним из двух наугад. Первым — детектор потокового сигнала.
+    _cp_bJ = _cp_sel_rows["J Юдена"].round(9)
+    _cp_order = {d: i for i, d in enumerate(_cp_bc["detectors"])}
+    _cp_best_keys = sorted(
+        _cp_sel_rows.loc[_cp_bJ == _cp_bJ.max(), ["detector", "mode"]].itertuples(index=False, name=None),
+        key=lambda k: (k != (_cp_det, _cp_mode), _cp_order.get(k[0], len(_cp_order)), k[1]))
+    _cp_best = _cp_S.loc[_cp_best_keys[0]]
+
+    def _cp_label(key):
+        """Метод в родительном — после «у»: «у ядрового (RBF) на сырых значениях»."""
+        d, m = key
+        return _CP_DET_GEN[d] + ("" if m == _cp_mode else f" {_CP_ON[m]}")
+
+    _cp_also = (f" и столько же у {and_join(_cp_label(k) for k in _cp_best_keys[1:])}"
+                if len(_cp_best_keys) > 1 else "")
+    if _cp_best_keys[0] == (_cp_det, _cp_mode):
+        _cp_best_says = f"лучший J — {num(_cp_best['J Юдена'], 1, sign=True)} у самого {_CP_DET_GEN[_cp_det]}{_cp_also}"
+    else:
+        _cp_best_says = (
+            f"лучший J — {num(_cp_best['J Юдена'], 1, sign=True)} у {_cp_label(_cp_best_keys[0])}{_cp_also}, "
+            f"и {'тот' if len(_cp_best_keys) == 1 else 'первый из них'} находит "
+            f"{_cp_times(_cp_best['обнаружено, %'], _cp_pr['обнаружено, %'])} "
+            f"({_cp_pct(_cp_best['обнаружено, %'])} против {_cp_pct(_cp_pr['обнаружено, %'])} у "
+            f"{_CP_DET_GEN[_cp_det]}), с медианной задержкой {_cp_mw(_cp_best['задержка, медиана'])} "
+            f"против {_cp_n01(_cp_pr['задержка, медиана'])}"
+        )
+    # «Скромный» — пока лучший J не дотягивает до пятой части шкалы.
+    _cp_level = "скромный" if _cp_best["J Юдена"] < 20 else "заметный"
 
     # Нетронутые ряды стенда: в каком месяце PELT на темпах роста поднял там тревогу.
     _cp_cl = _cpb[(_cpb["detector"] == _cp_det) & (_cpb["mode"] == _cp_mode)
                   & (_cpb["penalty"] == _cp_p_sel) & (_cpb["kind"] == "none")]
-    _cp_fa_at = [_cp_months[int(t)] for t in
-                 _cp_cl.loc[_cp_cl["false_alarm"].astype(str).str.lower() == "true", "signal"]]
+    _cp_fa_at = [_cp_months[int(t)] for t in _cp_cl.loc[_cp_true(_cp_cl["false_alarm"]), "signal"]]
     # То же на сырых значениях у всех шести методов: в каком месяце их первая тревога.
     _cp_raw_cl = _cpb[(_cpb["mode"] == "raw") & (_cpb["kind"] == "none")
                       & ((_cpb["penalty"] == _cp_p_sel) | _cpb["penalty"].isna())]
-    _cp_raw_fa = _cp_raw_cl[_cp_raw_cl["false_alarm"].astype(str).str.lower() == "true"]
+    _cp_raw_fa = _cp_raw_cl[_cp_true(_cp_raw_cl["false_alarm"])]
     _cp_raw_fa_at = pd.Series([_cp_months[int(t)] for t in _cp_raw_fa["signal"]], dtype=object)
-    # Самый частый месяц первой тревоги у каждого метода.
-    _cp_raw_fa_m = _cp_raw_fa.assign(month=[_cp_months[int(t)] for t in _cp_raw_fa["signal"]])
-    _cp_raw_top_by = {d: _cp_raw_fa_m.loc[_cp_raw_fa_m["detector"] == d, "month"].value_counts().index[0]
-                      for d in _cp_dets if (_cp_raw_fa_m["detector"] == d).any()}
+    # Самый частый месяц первой тревоги у каждого метода; при ничьей — все такие месяцы.
+    _cp_raw_fa_m = _cp_raw_fa.assign(month=list(_cp_raw_fa_at))
+    _cp_raw_top_by = {}
+    for _cp_d in _cp_dets:
+        _cp_vc = _cp_raw_fa_m.loc[_cp_raw_fa_m["detector"] == _cp_d, "month"].value_counts()
+        if len(_cp_vc):
+            _cp_raw_top_by[_cp_d] = tuple(sorted(_cp_vc.index[_cp_vc == _cp_vc.max()], key=_cp_pos.get))
 
-    # Врезка в декабре: одна из позиций стенда совпадает с декабрьским скачком, и обнаружением
-    # там засчитывается и сам скачок. Всё, что на неё опирается, считается и без неё.
-    def _cp_rows(d, m):
-        q = (_cpb["detector"] == d) & (_cpb["mode"] == m)
-        return _cpb[q & (_cpb["penalty"].isna() if d in _cp_own else _cpb["penalty"] == _cp_p_sel)]
+    # Испорченные строки PELT на темпах роста при штрафе p и засчитанные среди них: в каком
+    # месяце пришёл сигнал. Доля засчитанных с сигналом в декабре и обнаружение без них — разрез
+    # тех же строк, а не новый критерий; почему сигнал пришёл в декабре, раздел говорит по позициям
+    # и осторожно: где причины не разделить, так и сказано.
+    def _cp_spoiled(p):
+        return _cpb[(_cpb["detector"] == _cp_det) & (_cpb["mode"] == _cp_mode)
+                    & (_cpb["penalty"] == p) & (_cpb["kind"] != "none")]
 
-    def _cp_stats(rows):
-        """Обнаружено, %, медиана задержки и доля нулевой среди обнаруженных — по испорченным строкам."""
-        hit = rows[rows["detected"].astype(str).str.lower() == "true"]
-        n0 = int((hit["delay"] == 0).sum())
-        return {"det": len(hit) / len(rows) * 100 if len(rows) else np.nan,
-                "med": float(hit["delay"].median()) if len(hit) else np.nan,
-                "zero": n0 / len(hit) * 100 if len(hit) else np.nan, "hits": hit, "n0": n0}
+    def _cp_dec_cut(p):
+        rows = _cp_spoiled(p)
+        hit = rows[_cp_true(rows["detected"])]
+        month = hit["signal"].map(lambda t: _cp_months[int(t)])
+        dec = hit[month.str.endswith("-12")]
+        return {"n": len(rows), "hit": len(hit), "dec": len(dec),
+                "det": len(hit) / len(rows) * 100 if len(rows) else np.nan,
+                "det_nodec": (len(hit) - len(dec)) / len(rows) * 100 if len(rows) else np.nan,
+                "share": len(dec) / len(hit) * 100 if len(hit) else np.nan,
+                "groups": dec.assign(month=month.loc[dec.index]).groupby(["month", "position", "delay"]).size()}
 
-    _cp_decp = [int(p) for p in sorted(_cpb["position"].dropna().unique())
-                if _cp_months[int(p)].endswith("-12")]
-    _cp_dm = _cp_months[_cp_decp[0]] if _cp_decp else None  # месяц декабрьской врезки
-    if _cp_dm:
-        _cp_R = _cp_rows(_cp_det, _cp_mode)
-        _cp_Rs = _cp_R[_cp_R["kind"] != "none"]
-        _cp_W = _cp_rows(_cp_det, "raw")
-        _cp_Ws = _cp_W[_cp_W["kind"] != "none"]
-        _cp_st_all = _cp_stats(_cp_Rs)
-        _cp_st_no = _cp_stats(_cp_Rs[~_cp_Rs["position"].isin(_cp_decp)])
-        _cp_st_raw_no = _cp_stats(_cp_Ws[~_cp_Ws["position"].isin(_cp_decp)])
-        # Сырые значения при декабрьской врезке — по каждому типу и величине возмущения.
-        _cp_raw_dec = [_cp_stats(g)["det"] for _, g in
-                       _cp_Ws[_cp_Ws["position"].isin(_cp_decp)].groupby(["kind", "magnitude"])]
-        # Нулевые задержки при декабрьской врезке и те из них, где нетронутый двойник того же
-        # ряда поднимает тревогу в тот же месяц.
-        _cp_hits0 = _cp_st_all["hits"][_cp_st_all["hits"]["delay"] == 0]
-        _cp_hits0_dec = _cp_hits0[_cp_hits0["position"].isin(_cp_decp)]
-        _cp_twin_sig = _cp_R[_cp_R["kind"] == "none"].set_index("series_id")["signal"]
-        _cp_twin = sum(_cp_twin_sig.get(i) == t for i, t in zip(_cp_hits0_dec["series_id"],
-                                                                 _cp_hits0_dec["signal"]))
-        # J без декабрьской врезки: ложные тревоги от позиции врезки не зависят.
-        _cp_J_no = {}
-        for _cp_d in _cp_dets:
-            for _cp_md in ("raw", _cp_mode):
-                _cp_r = _cp_rows(_cp_d, _cp_md)
-                _cp_J_no[(_cp_d, _cp_md)] = (
-                    _cp_stats(_cp_r[(_cp_r["kind"] != "none") & ~_cp_r["position"].isin(_cp_decp)])["det"]
-                    - _cp_FA[(_cp_d, _cp_md)])
-        _cp_ratio_J_no = [_cp_J_no[(d, _cp_mode)] for d in _cp_pen_dets]
-        _cp_gain_no = {d: _cp_J_no[(d, _cp_mode)] - _cp_J_no[(d, "raw")] for d in _cp_pen_dets}
-        _cp_spread_no = max(_cp_ratio_J_no) - min(_cp_ratio_J_no)
-        _cp_why_no = _cp_why(_cp_J_no, _cp_gain_no, _cp_spread_no)
-        _cp_thesis_no = not _cp_why_no
-        # Верхней границы задержки нет: обнаружения в последнем декабре от последней врезки.
-        _cp_last_dec = max(m for m in _cp_months if m.endswith("-12"))
-        _cp_last_p = int(max(_cpb["position"].dropna()))
-        _cp_late = _cp_st_all["hits"][_cp_st_all["hits"]["signal"] == _cp_pos[_cp_last_dec]]
-        _cp_late_far = _cp_late[_cp_late["position"] == _cp_last_p]
+    _cp_dc = {p: _cp_dec_cut(p) for p in _cp_grid}
+    _cp_dsel = _cp_dc[_cp_p_sel]
+    _cp_ps = _cp_spoiled(_cp_p_sel)
+    # Сколько сигналов не раньше врезки сняло каждое правило зачёта (счётчики не пересекаются).
+    _cp_late_sel = int(_cp_rule_rows.loc[_cp_p_sel, "n late"])
+    _cp_veto_sel = int(_cp_rule_rows.loc[_cp_p_sel, "n twin-vetoed"])
+    _cp_after_sel = _cp_dsel["hit"] + _cp_late_sel + _cp_veto_sel
+
+    # Оговорка к числу обнаружения при выбранном штрафе — везде, где оно называется: без неё
+    # оно читалось бы как чувствительность детектора, а большая часть его может оказаться
+    # сигналами, пришедшими в декабре.
+    def _cp_dec_caveat():
+        """Доля обнаружений детектора потокового сигнала с сигналом в декабре и обнаружение без них."""
+        if not _cp_dsel["dec"]:
+            return ""
+        return (f"{_cp_pct(_cp_dsel['share'])} обнаружений {_CP_DET_GEN[_cp_det]} — сигналы в декабре, "
+                f"и без них он находит {_cp_pct(_cp_dsel['det_nodec'])}")
 
     # Офлайновая картина: месяцы массового согласия — те, что берёт событийная проверка.
     _cp_off = _cp_OFF[_cp_P_OFF]
@@ -691,6 +807,16 @@ if _cp_ready:
                      + and_join(num(_cp_EV.loc[(p, e), "max_share"], 1) for e in ms) + "%")
         return text
 
+    def _cp_rank_short(p):
+        """Месяц наибольшей доли при штрафе p, если это месяц события и он один: его место
+        среди наблюдаемых месяцев и число МО. Описание, а не второй порог."""
+        K = _cp_KV[p]
+        top = K.index[K["share"] == K["share"].max()]
+        if len(top) != 1 or top[0] not in _cp_events or not K["share"].max() > 0 or not _cp_n_panel:
+            return ""
+        return (f" — месяце события, первом по доле из {int(K['n_months'].iloc[0])} наблюдаемых "
+                f"месяцев, но это {rub(int(_cp_NS.loc[top[0], p]))} МО из {rub(_cp_n_panel)}")
+
     def _cp_dec_says(p, others=True):
         """Переход порога, пришедшийся на декабрь: доля декабря против месяцев между событием
         и переходом (и других декабрей) — сигнал может давать сам декабрьский скачок."""
@@ -718,7 +844,7 @@ if _cp_ready:
             _cp_EV.loc[(p, e), "crossed_month"].endswith("-12") and _cp_EV.loc[(p, e), "delay"] > 0
             for e in _cp_crossed[p])
 
-    # Резюме.
+    # Резюме. Заголовок — по тому же условию тезиса, что раздел и слайды.
     _cp_title = "решает преобразование ряда" if _cp_thesis else "преобразование ряда решает не всё"
     if not _cp_crossed[_cp_p_sel]:
         _cp_title += ", а общие шоки в реальном времени до порога не доходят"
@@ -727,18 +853,28 @@ if _cp_ready:
                       if len(_cp_crossed[_cp_p_sel]) == len(_cp_events) else
                       f"; в реальном времени видно {len(_cp_crossed[_cp_p_sel])} из "
                       f"{len(_cp_events)} событий")
+    _cp_rules = [f"не позже {in_words(int(_cp_max_delay), 'род')} "
+                 f"{plural(int(_cp_max_delay), 'месяца', 'месяцев', 'месяцев')} после врезки"
+                 if _cp_max_delay is not None else None,
+                 "в паре с нетронутым близнецом того же ряда" if _cp_twin_rule else None]
+    _cp_rules = [r for r in _cp_rules if r]
+    _cp_buts = ([f"{_cp_dec_caveat()}"] if _cp_dsel["dec"] else []) + (
+        [f"штраф {_cp_pen(_cp_p_sel)} — {_cp_sel_edge} в сетке, и лучший мог лежать за её краем"]
+        if _cp_sel_edge else [])
     _cp_summary = (
         f"**Точки структурных изменений: {_cp_title}.** На стенде — возмущения известной величины "
-        f"в {_cp_n_ser} настоящих рядах, потоковый протокол, число изломов неизвестно — "
-        f"{_CP_DET[_cp_det]} {_CP_ON[_cp_mode]} при штрафе {_cp_pen(_cp_p_sel)}, выбранном по стенду "
+        f"в {_cp_n_ser} настоящих рядах, потоковый протокол, число изломов неизвестно"
+        + (f", а обнаружение засчитывается {' и '.join(_cp_rules)}" if _cp_rules else "")
+        + f". {_CP_DET[_cp_det]} {_CP_ON[_cp_mode]} при штрафе {_cp_pen(_cp_p_sel)}, выбранном по стенду "
         f"до прогона на реальных данных, находит {_cp_pct(_cp_pr['обнаружено, %'])} возмущений "
-        f"с медианной задержкой {_cp_mw(_cp_pr['задержка, медиана'])}"
-        + (f" (без врезки в {_cp_ym(_cp_dm, 'пр')}, где засчитывается и сам декабрьский скачок, — "
-           f"{_cp_pct(_cp_st_no['det'])})" if _cp_dm else "")
-        + f" и тревожит на "
-        f"{_cp_pct(_cp_pr['ложных на чистых, %'])} нетронутых рядов; {_CP_ON['raw']} — на "
-        f"{_cp_pct(_cp_prw['ложных на чистых, %'])}. На панели при этом штрафе "
-        f"{_cp_rt_says(_cp_p_sel)}."
+        f"с медианной задержкой {_cp_mw(_cp_pr['задержка, медиана'])} и "
+        + (f"ни разу не тревожит на нетронутых рядах, а {_CP_ON['raw']} — на "
+           f"{_cp_pct(_cp_prw['ложных на чистых, %'])} из них." if _cp_pr["ложных на чистых, %"] == 0 else
+           f"тревожит на {_cp_pct(_cp_pr['ложных на чистых, %'])} нетронутых рядов; {_CP_ON['raw']} — на "
+           f"{_cp_pct(_cp_prw['ложных на чистых, %'])}.")
+        + (f" Но {'; а '.join(_cp_buts)}." if _cp_buts else "")
+        + f" На панели при этом штрафе {_cp_rt_says(_cp_p_sel)}"
+        + (_cp_rank_short(_cp_p_sel) if not _cp_crossed[_cp_p_sel] else "") + "."
     )
     if _cp_dec_says(_cp_p_sel, others=False):
         _cp_summary += " " + _cp_dec_says(_cp_p_sel, others=False)
@@ -763,50 +899,38 @@ if _cp_ready:
     # «Находки, полезные независимо от нашей модели».
     _cp_raw_pen = [_cp_FA[(d, "raw")] for d in _cp_pen_dets]
     _cp_rat_pen = [_cp_FA[(d, _cp_mode)] for d in _cp_pen_dets]
-    # Лучший по J — с тем, что он за это отдаёт: обнаружение и задержку против PELT.
-    _cp_best_on = "" if _cp_best["mode"] == _cp_mode else f" {_CP_ON[_cp_best['mode']]}"
-    # «Скромный» — пока лучший J не дотягивает до пятой части шкалы.
-    _cp_level = "скромный" if _cp_best["J Юдена"] < 20 else "заметный"
-    if _cp_best["detector"] == _cp_det and _cp_best["mode"] == _cp_mode:
-        _cp_best_says = (f"лучший J — у самого {_CP_DET[_cp_det]}, "
-                         f"{num(_cp_best['J Юдена'], 1, sign=True)}")
-    else:
-        _cp_best_says = (
-            f"лучший J — {num(_cp_best['J Юдена'], 1, sign=True)} у {_CP_DET[_cp_best['detector']]}"
-            f"{_cp_best_on}, и тот находит "
-            f"{_cp_times(_cp_best['обнаружено, %'], _cp_pr['обнаружено, %'])} "
-            f"({_cp_pct(_cp_best['обнаружено, %'])} против {_cp_pct(_cp_pr['обнаружено, %'])} у "
-            f"{_CP_DET[_cp_det]}), с медианной задержкой {_cp_mw(_cp_best['задержка, медиана'])} "
-            f"против {_cp_n01(_cp_pr['задержка, медиана'])}"
-        )
     _cp_own_on = "".join(f", {_CP_DET[d]} — на {_cp_pct(_cp_FA[(d, _cp_mode)])}"
                          for d in _cp_dets if d in _cp_own)
+    # Уровень — при каком штрафе и с какой оговоркой: число обнаружения без декабрьской
+    # оговорки не называется нигде.
+    _cp_level_says = (f"Абсолютный уровень при этом {_cp_level}"
+                      + (f" — при штрафе {_cp_pen(_cp_p_sel)}, {_cp_sel_edge_pr} в сетке" if _cp_sel_edge else "")
+                      + f": {_cp_best_says}"
+                      + (f"; {_cp_dec_caveat()}" if _cp_dsel["dec"] else "") + ".")
     if _cp_thesis:
         _cp_finding = (
             f"**В обнаружении структурных изменений решает преобразование ряда, а не алгоритм.** "
             f"{_cp_cap(_CP_ON['raw'])} {in_words(len(_cp_pen_dets), 'им_м')} "
             f"{plural(len(_cp_pen_dets), 'метод', 'метода', 'методов')} со штрафом тревожат на "
-            f"{num(min(_cp_raw_pen), 1)}–{_cp_pct(max(_cp_raw_pen))} нетронутых рядов"
+            f"{_cp_range(_cp_raw_pen)} нетронутых рядов"
             + "".join(f", {_CP_DET[d]} — на {_cp_pct(_cp_FA[(d, 'raw')])}"
                       for d in _cp_dets if d in _cp_own)
             + (f", и J Юдена у всех {in_words(len(_cp_dets), 'род')} отрицателен"
                if all(_cp_J[(d, "raw")] < 0 for d in _cp_dets) else "")
             + f". {_cp_cap(_CP_ON[_cp_mode])} у тех же {in_words(len(_cp_pen_dets), 'род')} — на "
-            f"{num(min(_cp_rat_pen), 1)}–{_cp_pct(max(_cp_rat_pen))}{_cp_own_on}, J методов со штрафом "
-            f"от {num(min(_cp_ratio_J), 1, sign=True)} до {num(max(_cp_ratio_J), 1, sign=True)}: "
-            f"разброс между ними — {num(_cp_spread, 1)} пункта, а выигрыш каждого от смены "
-            f"преобразования — от {num(min(_cp_gain.values()), 1)} до "
-            f"{num(max(_cp_gain.values()), 1)}. Абсолютный уровень при этом {_cp_level}: {_cp_best_says}."
+            f"{_cp_range(_cp_rat_pen)}{_cp_own_on}, J методов со штрафом "
+            f"{_cp_from_to(_cp_ratio_J)}: разброс между ними — {num(_cp_spread, 1)} пункта, а выигрыш "
+            f"каждого от смены преобразования — от {num(min(_cp_gain.values()), 1)} до "
+            f"{num(max(_cp_gain.values()), 1)}. {_cp_level_says}"
         )
     else:
         _cp_finding = (
             f"**В обнаружении структурных изменений преобразование ряда решает не всё.** "
-            f"{_cp_cap(_CP_ON['raw'])} методы со штрафом тревожат на {num(min(_cp_raw_pen), 1)}–"
-            f"{_cp_pct(max(_cp_raw_pen))} нетронутых рядов, {_CP_ON[_cp_mode]} — на "
-            f"{num(min(_cp_rat_pen), 1)}–{_cp_pct(max(_cp_rat_pen))}; J Юдена {_CP_ON[_cp_mode]} — "
-            f"от {num(min(_cp_ratio_J), 1, sign=True)} до {num(max(_cp_ratio_J), 1, sign=True)}. "
-            f"Тезис «решает преобразование, а не алгоритм» этим прогоном не подтверждается: "
-            f"{_cp_why_not}. {_cp_cap(_cp_best_says)}."
+            + (f"{_cp_cap(_CP_ON['raw'])} методы со штрафом тревожат на {_cp_range(_cp_raw_pen)} нетронутых "
+               f"рядов, {_CP_ON[_cp_mode]} — на {_cp_range(_cp_rat_pen)}; J Юдена {_CP_ON[_cp_mode]} — "
+               f"{_cp_from_to(_cp_ratio_J)}. " if _cp_pen_dets else "")
+            + f"Тезис «решает преобразование, а не алгоритм» этим прогоном не подтверждается: "
+            f"{_cp_why_not}. {_cp_level_says}"
         )
     _cp["finding"] = Markdown(_cp_finding)
 
@@ -860,6 +984,8 @@ if _cp_ready:
     _cp["found"] = Markdown(_cp_found)
 
     # «Как это применять»: раннее предупреждение — ровно то, что показывает таблица событий.
+    # Ранговый вид сигналом здесь не служит: место месяца считается среди всех месяцев панели,
+    # в том числе будущих для него, и в реальном времени его нет — текст говорит это прямо.
     def _cp_crossings(p):
         return "; ".join(
             f"в {_cp_ym(_cp_EV.loc[(p, e), 'crossed_month'], 'пр')}, "
@@ -914,6 +1040,9 @@ if _cp_ready:
                      + f"Цена такого штрафа — тревога на "
                      f"{_cp_pct(_cp_rule_rows.loc[_cp_p_alt, 'ложных на чистых, %'])} нетронутых "
                      f"рядов стенда. ")
+    _cp_warn += ("Ранговый вид из раздела об обнаружении здесь не помогает: место месяца считается "
+                 "среди всех месяцев панели, в том числе более поздних, — это описание задним числом, "
+                 "а не сигнал. ")
     _cp_k_sel = len(_cp_crossed[_cp_p_sel])
     if not _cp_k_sel and (_cp_p_alt is None or not _cp_crossed[_cp_p_alt]):
         _cp_warn += "Раннего предупреждения об общем шоке эта система на наших данных не даёт."
@@ -1680,6 +1809,33 @@ Markdown(f"{_cp['warning'].data}\n\n{_cp['fold_link'].data}")
 **Ложная тревога** — срабатывание там, где изменения не было.
 **Запаздывание (задержка)** — на сколько месяцев позже настоящего момента метод поднял флаг.
 Считается только среди обнаруженных: у пропущенного изменения задержки нет.
+
+**Врезка и позиция врезки** — возмущение известной величины, которое стенд вносит в настоящий
+ряд, и месяц, с которого оно начинается. Позиций несколько: при одной все задержки были бы
+измерены в одном месте ряда.
+
+**Нетронутый близнец и парный зачёт** — тот же ряд стенда без врезки, при том же детекторе,
+режиме и штрафе. Сигнал испорченного ряда засчитывается обнаружением, только если близнец
+в тот же месяц молчит: если нетронутый ряд тревожит в тот же месяц, тревога была бы и без
+врезки (в `results/cp_bench.csv` — колонка `twin_flag_at_signal`).
+
+**Граница задержки** — сигнал, пришедший позже заданного протоколом числа месяцев после
+врезки, обнаружением не считается: он говорит уже об изломе после врезки (колонка `late`).
+
+**Сетка штрафов** — штрафы, на каждом из которых стенд гоняет методы со штрафом. Штраф для
+реальных данных выбирается по стенду правилом из конфига до прогона на них.
+
+**Первый проверяемый месяц и эффект старта** — раньше минимальной истории детектор
+не запускается. В первый проверяемый месяц история у него самая короткая, и тревогу там
+поднимают все ряды, чей излом попал в первое окно: доля этого месяца завышена самим
+протоколом.
+
+**Эпизод тревоги** — подряд идущие флаги ряда; сигнал на панели — начало эпизода, так что
+один сдвиг даёт один сигнал.
+
+**Ранговый вид и фон** — описание потокового сигнала, а не второй порог: место доли
+месяца события среди наблюдаемых месяцев и её отношение к фону — медиане долей месяцев
+без событий.
 
 **J Юдена** — обнаружено минус ложных тревог, в процентных пунктах (TPR − FPR).
 Отрицательный J значит, что ложных тревог больше, чем обнаружений.
@@ -2832,42 +2988,79 @@ _bf if "model" in _per else _per
 
 ```{python}
 #| echo: false
-# Описание протокола — с числами из файлов стенда и констант кода: сколько рядов, какие
-# возмущения и в какие месяцы, какое окно считается «у конца».
+# Описание протокола — с числами из файлов стенда, конфига и констант кода: сколько рядов,
+# какие возмущения и в какие месяцы, какое окно считается «у конца», как засчитывается сигнал.
 if _cp_ready:
     _cp_b_pos = sorted(int(p) for p in _cpb["position"].dropna().unique())
     _cp_b_mag = sorted(float(v) for v in _cpb.loc[_cpb["kind"] != "none", "magnitude"].unique())
-    _cp_b_kind = [k for k in _cp_cfg["bench"]["kinds"] if k in set(_cpb["kind"])]
+    _cp_b_kind = [k for k in _cp_bc["kinds"] if k in set(_cpb["kind"])]
     _cp_b_pen = sorted(float(p) for p in _cpb["penalty"].dropna().unique())
+    # Врезка в месяц сезонного скачка засчитала бы обнаружением сам скачок — так вышло в v1.
+    _cp_b_season = [p for p in _cp_b_pos if _cp_months[p][5:] in ("12", "01")]
+    # Правила зачёта — отдельными предложениями, по конфигу: без границы или без близнеца
+    # текст не должен их обещать.
+    _cp_rules_md = []
+    if _cp_max_delay is not None:
+        _cp_rules_md.append(
+            f"сигнал пришёл не позже чем через {in_words(int(_cp_max_delay), 'им_м')} "
+            f"{plural(int(_cp_max_delay), 'месяц', 'месяца', 'месяцев')} после врезки"
+            + (": столько же излом считается недавним, и более поздний сигнал говорит уже об изломе "
+               "после врезки" if _cp_max_delay == RECENT_WINDOW else ""))
+    if _cp_twin_rule:
+        _cp_rules_md.append(
+            "в месяц сигнала не тревожит нетронутый близнец испорченного ряда — тот же ряд без врезки "
+            "при том же детекторе, режиме и штрафе: если нетронутый ряд тревожит в тот же месяц, "
+            "тревога была бы и без врезки; вето — точно по месяцу, флаг близнеца в соседнем месяце "
+            "сигнал не снимает")
+    _cp_rules_head = {2: "в паре с нетронутым близнецом и с границей задержки",
+                      1: "с границей задержки" if _cp_max_delay is not None else "в паре с нетронутым близнецом"}
     _cp_protocol = Markdown(
         f"**Потоковый протокол.** Задача требует выявлять шоки «как можно раньше». «Раньше» — "
         f"свойство онлайнового режима: офлайновый метод, видящий ряд целиком, на вопрос "
         f"о своевременности не отвечает вовсе. Поэтому все методы, включая офлайновые, гоняются "
         f"в расширяющемся окне: в момент `t` детектор получает только историю до `t` и поднимает "
         f"флаг, если нашёл излом среди {in_words(RECENT_WINDOW, 'род')} последних точек; первый "
-        f"флаг — сигнал. Раньше {in_words(MIN_HISTORY, 'род')} точек детектор не запускается. "
-        f"Сигнал до врезки возмущения — ложная тревога, и такое возмущение обнаруженным "
-        f"не считается; сигнал не раньше врезки — обнаружение, а задержка — месяцы от врезки "
-        f"до сигнала. Задержка становится сопоставимым числом для всех методов.\n\n"
+        f"флаг — сигнал. Раньше {in_words(MIN_HISTORY, 'род')} точек детектор не запускается: "
+        f"первый проверяемый месяц — {_cp_ym(_cp_first)}. Сигнал до врезки возмущения — ложная "
+        f"тревога, и такое возмущение обнаруженным не считается.\n\n"
+        + (f"**Зачёт — {_cp_rules_head[len(_cp_rules_md)]}.** Сигнал не раньше врезки засчитывается "
+           + ("обнаружением при двух условиях. Первое: " + _cp_rules_md[0] + ". Второе: "
+              + _cp_rules_md[1] + "." if len(_cp_rules_md) == 2 else
+              "обнаружением, только если " + _cp_rules_md[0] + ".")
+           + " Сигнал ряда — всегда его первый флаг: поздний или снятый близнецом первый сигнал — "
+           "пропуск, следующий флаг не ищется, как не искал бы его оператор, увидевший первую "
+           "тревогу. В `results/cp_bench.csv` у каждой строки две колонки зачёта: `late` — сигнал "
+           "позже границы и `twin_flag_at_signal` — у близнеца флаг в месяц сигнала (пишется и без "
+           "правила); сводки считают, сколько сигналов сняло каждое правило, — `n late` "
+           "и `n twin-vetoed`. Счётчики не пересекаются: засчитанные вместе с ними дают все "
+           "сигналы не раньше врезки. " if _cp_rules_md else
+           "**Зачёт.** Любой сигнал не раньше врезки засчитывается обнаружением. ")
+        + f"Задержка — месяцы от врезки до засчитанного сигнала — становится сопоставимым числом "
+        f"для всех методов.\n\n"
         f"**Неизвестное число изломов.** Все {in_words(len(_cp_dets), 'им_м')} "
         f"{plural(len(_cp_dets), 'метод', 'метода', 'методов')} сами решают, есть ли излом: "
-        f"{in_words(len(_cp_pen_dets), 'им_м')} — при штрафе за каждый излом, на сетке штрафов "
-        f"{and_join(_cp_pen(p) for p in _cp_b_pen)}, "
-        f"{and_join(_CP_DET[d] for d in _cp_dets if d in _cp_own)} — своим порогом. Прежний "
-        f"стенд задавал части методов ровно один излом — это сегментация при известном числе "
-        f"изломов, а не обнаружение. Но ложные тревоги на сырых рядах были не её артефактом: "
+        f"{in_words(len(_cp_pen_dets), 'им_м')} — при штрафе за каждый излом, на сетке из "
+        f"{in_words(len(_cp_b_pen), 'род')} штрафов — {_cp_list(_cp_pen(p) for p in _cp_b_pen)}, "
+        f"{and_join(_CP_DET[d] for d in _cp_dets if d in _cp_own)} — своим порогом. Ещё до первой "
+        f"версии стенда части методов задавался ровно один излом — это сегментация при известном "
+        f"числе изломов, а не обнаружение. Но ложные тревоги на сырых рядах были не её артефактом: "
         f"при неизвестном числе изломов и штрафе {_cp_pen(_cp_p_sel)} они остаются на уровне "
-        f"{num(min(_cp_raw_pen), 1)}–{_cp_pct(max(_cp_raw_pen))} нетронутых рядов у методов "
-        f"со штрафом"
-        + "".join(f" и {_cp_pct(_cp_FA[(d, 'raw')])} у {_CP_DET[d]}" for d in _cp_dets if d in _cp_own)
+        f"{_cp_range(_cp_raw_pen)} нетронутых рядов у методов со штрафом"
+        + "".join(f" и {_cp_pct(_cp_FA[(d, 'raw')])} у {_CP_DET_GEN[d]}" for d in _cp_dets if d in _cp_own)
         + " — их дают сами сырые ряды (ниже).\n\n"
         f"**Синтетика поверх настоящего шума.** В {_cp_n_ser} случайных рядов панели вносятся "
         f"возмущения {in_words(len(_cp_b_kind), 'род')} типов — "
         f"{and_join(_CP_KIND[k] for k in _cp_b_kind)} — величиной "
         f"{and_join(num(v, 0) for v in _cp_b_mag)}σ, где σ — стандартное отклонение месячных "
         f"приращений ряда, в {and_join(_cp_ym(_cp_months[p], 'пр') for p in _cp_b_pos)}: при одной "
-        f"позиции врезки все задержки были бы измерены в одном месте ряда. Разметка верна "
-        f"по построению, а шум, сезонность и масштаб — настоящие.\n\n"
+        f"позиции врезки все задержки были бы измерены в одном месте ряда. "
+        + ("Декабря и января среди месяцев врезки нет: врезка в месяц сезонного скачка засчитала бы "
+           "обнаружением сам скачок — так вышло в [первой версии стенда](#sec-cp-v1). "
+           if not _cp_b_season else
+           f"Среди месяцев врезки есть {and_join(_cp_ym(_cp_months[p]) for p in _cp_b_season)}: там "
+           f"обнаружением может засчитываться сам сезонный скачок, как в [первой версии "
+           f"стенда](#sec-cp-v1). ")
+        + "Разметка верна по построению, а шум, сезонность и масштаб — настоящие.\n\n"
         f"**Ряды без структурных изменений.** Каждый ряд выборки проходит стенд и нетронутым: "
         f"там любая тревога — ложная. Без таких рядов таблица показывала бы только полноту "
         f"и молчала о точности. Обнаружение и ложные тревоги сводятся в одно число — J Юдена, "
@@ -2882,11 +3075,14 @@ _cp_protocol if _cp_ready else _cp_missing
 
 ```{python}
 #| echo: false
-#| tbl-cap: "Стенд при штрафе, выбранном правилом до реальных данных, и CUSUM со своим порогом. Обнаружено — доля возмущений, найденных не раньше врезки; задержка — в месяцах и только среди обнаруженных; «задержка 0» — доля обнаруженных в месяц врезки; ложных — доля нетронутых рядов с тревогой; J Юдена — обнаружено минус ложных."
+#| tbl-cap: "Стенд при штрафе, выбранном правилом до реальных данных, и CUSUM со своим порогом. Обнаружено — доля возмущений, сигнал о которых засчитан: пришёл не раньше врезки, не позже границы задержки и в месяц, когда нетронутый близнец ряда молчит; задержка — в месяцах и только среди обнаруженных; «задержка 0» — доля обнаруженных в месяц врезки; ложных — доля нетронутых рядов с тревогой; J Юдена — обнаружено минус ложных."
 if _cp_ready:
-    _cp_m_order = [_cp_mode] + [m for m in _cp_cfg["bench"]["modes"] if m != _cp_mode]
-    _cp_bt = (_cp_sel_rows.assign(order=_cp_sel_rows["mode"].map({m: i for i, m in enumerate(_cp_m_order)}))
-              .sort_values(["order", "J Юдена"], ascending=[True, False], kind="stable"))
+    _cp_m_order = [_cp_mode] + [m for m in _cp_bc["modes"] if m != _cp_mode]
+    # При равном J — порядок детекторов из конфига: у PELT и BinSeg числа бывают одинаковы.
+    _cp_bt = (_cp_sel_rows.assign(order=_cp_sel_rows["mode"].map({m: i for i, m in enumerate(_cp_m_order)}),
+                                  J=_cp_sel_rows["J Юдена"].round(9),
+                                  d_order=_cp_sel_rows["detector"].map(_cp_order))
+              .sort_values(["order", "J", "d_order"], ascending=[True, False, True], kind="stable"))
     _cp_bench_tab = pd.DataFrame({
         "штраф": [_cp_pen(p) if pd.notna(p) else "свой порог" for p in _cp_bt["penalty"]],
         "обнаружено, %": _cp_bt["обнаружено, %"].map(lambda v: num(v, 1)).to_numpy(),
@@ -2902,9 +3098,10 @@ _cp_bench_tab if _cp_ready else _cp_missing
 
 ```{python}
 #| echo: false
-# Тезис — по числам таблицы (`_cp_thesis` считается в начале отчёта): держится, если у каждого
-# метода смена преобразования снижает ложные тревоги и поднимает J, а разброс J между методами
-# со штрафом меньше выигрыша любого из них. Декабрьский скачок — по самой панели.
+# Тезис — по числам таблицы (`_cp_thesis` считается в начале отчёта, то же условие проверяют
+# резюме, «Находки» и слайды): держится, если у каждого метода смена преобразования снижает
+# ложные тревоги и поднимает J, а разброс J между методами со штрафом меньше выигрыша любого
+# из них. Декабрьский скачок — по самой панели.
 if _cp_ready:
     _cp_wm = list(wide.index.strftime("%Y-%m"))
     _cp_jump = {m[:4]: float(np.median(wide.iloc[_cp_wm.index(m)].to_numpy()
@@ -2918,72 +3115,56 @@ if _cp_ready:
     if _cp_thesis:
         _cp_t += (
             f"Так у всех {in_words(len(_cp_dets), 'род')}: "
-            + (f"{_CP_ON['raw']} J отрицателен у каждого (от {num(min(_cp_raw_J), 1, sign=True)} до "
-               f"{num(max(_cp_raw_J), 1, sign=True)}) — тревога на нетронутом ряде случается чаще, "
-               f"чем обнаружение на испорченном, — " if all(v < 0 for v in _cp_raw_J) else
-               f"{_CP_ON['raw']} J от {num(min(_cp_raw_J), 1, sign=True)} до "
-               f"{num(max(_cp_raw_J), 1, sign=True)}, ")
+            + (f"{_CP_ON['raw']} J отрицателен у каждого ({_cp_from_to(_cp_raw_J)}) — тревога на "
+               f"нетронутом ряде случается чаще, чем обнаружение на испорченном, — "
+               if all(v < 0 for v in _cp_raw_J) else
+               f"{_CP_ON['raw']} J {_cp_from_to(_cp_raw_J)}, ")
             + f"а {_CP_ON[_cp_mode]} у {in_words(len(_cp_pen_dets), 'род')} методов со штрафом он "
             + ("положителен" if all(v > 0 for v in _cp_ratio_J) else "выше")
-            + f" (от {num(min(_cp_ratio_J), 1, sign=True)} до {num(max(_cp_ratio_J), 1, sign=True)})"
-            + ((f", но без врезки в {_cp_ym(_cp_dm, 'пр')} — лишь у "
-                f"{in_words(sum(v > 0 for v in _cp_ratio_J_no), 'род')} из "
-                f"{in_words(len(_cp_pen_dets), 'род')} " if all(v > 0 for v in _cp_ratio_J)
-                and not all(v > 0 for v in _cp_ratio_J_no) else f"; без врезки в {_cp_ym(_cp_dm, 'пр')} — ")
-               + f"(от {num(min(_cp_ratio_J_no), 1, sign=True)} до {num(max(_cp_ratio_J_no), 1, sign=True)})"
-               if _cp_dm else "")
-            + f". Разброс J между ними — {num(_cp_spread, 1)} пункта, выигрыш каждого от смены "
-            f"преобразования — от {num(min(_cp_gain.values()), 1)} до {num(max(_cp_gain.values()), 1)}"
-            + (f" (без декабрьской врезки — {num(_cp_spread_no, 1)} и от "
-               f"{num(min(_cp_gain_no.values()), 1)} до {num(max(_cp_gain_no.values()), 1)})" if _cp_dm else "")
-            + (": решает преобразование, а не алгоритм. " if not _cp_dm or _cp_thesis_no else
-               ": со всеми врезками решает преобразование, а без декабрьской это не подтверждается "
-               "(ниже). ")
+            + f" ({_cp_from_to(_cp_ratio_J)}). Разброс J между ними — {num(_cp_spread, 1)} пункта, "
+            f"выигрыш каждого от смены преобразования — от {num(min(_cp_gain.values()), 1)} до "
+            f"{num(max(_cp_gain.values()), 1)}: решает преобразование, а не алгоритм. "
         )
     else:
         _cp_t += f"**Заголовок подраздела этим прогоном не подтверждается:** {_cp_why_not}. "
     _cp_t += ("Причина — сезонность и структура самих сырых рядов, а не структурные изменения. "
-              "Декабрьский скачок расходов (у медианного муниципалитета "
-              + and_join(f"{num(v, 1, sign=True)}% в {y}" for y, v in _cp_jump.items())
-              + " году) на сырых рядах выглядит как сдвиг уровня, но он лишь одна из причин.")
-    if len(_cp_raw_fa_at):
-        _cp_first_dec = next(m for m in _cp_months[MIN_HISTORY:] if m.endswith("-12"))
+              + (("Декабрьский скачок расходов (у медианного муниципалитета "
+                  + and_join(f"{num(v, 1, sign=True)}% в {y}" for y, v in _cp_jump.items())
+                  + " году) на сырых рядах выглядит как сдвиг уровня, но он лишь одна из причин.")
+                 if _cp_jump else ""))
+    _cp_first_dec = next((m for m in _cp_months[MIN_HISTORY:] if m.endswith("-12")), None)
+    if len(_cp_raw_fa_at) and _cp_first_dec:
         _cp_winter = _cp_months[_cp_pos[_cp_first_dec]:_cp_pos[_cp_first_dec] + 3]
         _cp_n_winter = int(_cp_raw_fa_at.isin(_cp_winter).sum())
-        _cp_n_start = int((_cp_raw_fa_at == _cp_months[MIN_HISTORY]).sum())
-        _CP_DET_GEN = {**_CP_DET, "kernel_rbf": "ядрового (RBF)"}
+        _cp_n_start = int((_cp_raw_fa_at == _cp_first).sum())
         _cp_by_month = {}
-        for _cp_d, _cp_m in _cp_raw_top_by.items():
-            _cp_by_month.setdefault(_cp_m, []).append(_CP_DET_GEN[_cp_d])
+        for _cp_d, _cp_ms in _cp_raw_top_by.items():
+            _cp_by_month.setdefault(_cp_ms, []).append(_CP_DET_GEN[_cp_d])
         _cp_t += (f" Из {len(_cp_raw_fa_at)} первых тревог на нетронутых сырых рядах на "
                   f"{_cp_span(_cp_winter)} приходятся {_cp_n_winter}, на первый проверяемый месяц, "
-                  f"{_cp_ym(_cp_months[MIN_HISTORY])}, — {_cp_n_start}; чаще всего первая тревога — "
-                  + and_join(f"в {_cp_ym(m, 'пр')} у {and_join(ds)}"
-                             for m, ds in sorted(_cp_by_month.items()))
+                  f"{_cp_ym(_cp_first)}, — {_cp_n_start}; чаще всего первая тревога — "
+                  + and_join(("поровну " if len(ms) > 1 else "")
+                             + f"в {and_join(_cp_ym(m, 'пр') for m in ms)} у {and_join(ds)}"
+                             for ms, ds in sorted(_cp_by_month.items(), key=lambda kv: _cp_pos[kv[0][0]]))
                   + ".")
     _cp_t += "\n\n"
+    _cp_raw_veto = int(_cps.loc[(_cps["detector"] == _cp_det) & (_cps["mode"] == "raw")
+                                & (_cps["penalty"] == _cp_p_sel), "n twin-vetoed"].sum())
     if _cp_pr["обнаружено, %"] < _cp_prw["обнаружено, %"]:
-        _cp_t += (f"Обнаружение при переходе к темпам роста падает — у {_CP_DET[_cp_det]} с "
-                  f"{_cp_pct(_cp_prw['обнаружено, %'])} до {_cp_pct(_cp_pr['обнаружено, %'])}")
-        # Без декабрьской врезки падения может не быть: там на сырых срабатывает сам скачок.
-        _cp_nodrop = bool(_cp_dm) and _cp_st_no["det"] >= _cp_st_raw_no["det"]
-        if _cp_nodrop:
-            _cp_t += (f", — но это падение даёт одна врезка в {_cp_ym(_cp_dm, 'пр')}: {_CP_ON['raw']} там "
-                      f"срабатывает сам декабрьский скачок, а без неё обнаружение не падает — "
-                      f"{_cp_pct(_cp_st_raw_no['det'])} {_CP_ON['raw']} против "
-                      f"{_cp_pct(_cp_st_no['det'])} {_CP_ON[_cp_mode]}. ")
-        elif _cp_dm:
-            _cp_t += (f" (без врезки в {_cp_ym(_cp_dm, 'пр')} — с {_cp_pct(_cp_st_raw_no['det'])} до "
-                      f"{_cp_pct(_cp_st_no['det'])})")
-        if _cp_prw["J Юдена"] < 0:
-            _cp_t += (("При этом " if _cp_nodrop else ", — но ")
-                      + f"{_CP_ON['raw']} ложных тревог больше, чем обнаружений. ")
-        elif not _cp_nodrop:
-            _cp_t += ". "
+        _cp_t += (f"Обнаружение при переходе к темпам роста падает — у {_CP_DET_GEN[_cp_det]} с "
+                  f"{_cp_pct(_cp_prw['обнаружено, %'])} до {_cp_pct(_cp_pr['обнаружено, %'])}"
+                  + (f", — но {_CP_ON['raw']} ложных тревог больше, чем обнаружений" if _cp_prw["J Юдена"] < 0
+                     else "")
+                  + (f", а правило близнеца снимает там {_cp_raw_veto} "
+                     f"{plural(_cp_raw_veto, 'сигнал', 'сигнала', 'сигналов')}: в тот же месяц тревожит "
+                     f"и нетронутый ряд" if _cp_twin_rule and _cp_raw_veto else "")
+                  + ". ")
     else:
         _cp_t += (f"Обнаружение при этом не падает: {_cp_pct(_cp_pr['обнаружено, %'])} против "
                   f"{_cp_pct(_cp_prw['обнаружено, %'])}. ")
-    _cp_t += f"Абсолютный уровень и {_CP_ON[_cp_mode]} {_cp_level}: {_cp_best_says}."
+    _cp_t += (f"Абсолютный уровень и {_CP_ON[_cp_mode]} {_cp_level}: {_cp_best_says}"
+              + (f", но {_cp_dec_caveat()} ([ниже](#cp-december))" if _cp_dsel["dec"] else "")
+              + ".")
     _cp_t += "".join(f" {_CP_DET[d]} со своим порогом и {_CP_ON[_cp_mode]} тревожит на "
                      f"{_cp_pct(_cp_FA[(d, _cp_mode)])} нетронутых рядов "
                      f"(J {num(_cp_J[(d, _cp_mode)], 1, sign=True)})."
@@ -2993,12 +3174,12 @@ if _cp_ready:
         _cp_t += ("\n\nРежим с вычитанием среднего профиля месяца "
                   + ("провалился — " if min(_cp_des) > max(_cp_FA[(d, _cp_mode)] for d in _cp_dets)
                      else "даёт ")
-                  + f"от {num(min(_cp_des), 1)} до {_cp_pct(max(_cp_des))} ложных тревог. Причина: "
+                  + f"{_cp_range(_cp_des)} ложных тревог. Причина: "
                   "на двух годах истории на каждый месяц приходится максимум одно прошлое наблюдение, "
                   "и профиль оценивается по одной точке. Приводим как отрицательный результат.")
     # Калибровка ядра и выбор штрафа.
     _cp_kc = _cpc.set_index("penalty")
-    _cp_gr = _cp_cfg["bench"]["kernel_pen_grid"]
+    _cp_gr = _cp_bc["kernel_pen_grid"]
     _cp_edge = [p for p in _cp_kc.index if np.isclose(_cp_kc.loc[p, "kernel_pen"], _cp_gr["min"])
                 or np.isclose(_cp_kc.loc[p, "kernel_pen"], _cp_gr["max"])]
     _cp_t += ("\n\nШтраф ядрового метода с остальными несопоставим — стоимость считается "
@@ -3006,35 +3187,84 @@ if _cp_ready:
               f"{_CP_ON[_cp_mode]} (`results/cp_calibration.csv`): для каждого номинального штрафа "
               "берётся штраф ядра, при котором доля ложных тревог ближе всего к PELT, при равенстве — "
               "меньший.")
+    _cp_edge_by = {}
+    for _cp_q in _cp_edge:
+        if _cp_q != _cp_p_sel:
+            _cp_edge_by.setdefault((_cp_kc.loc[_cp_q, "fa_kernel"], _cp_kc.loc[_cp_q, "fa_pelt"]), []).append(_cp_q)
     if _cp_p_sel in _cp_kc.index:
         _cp_t += (f" При штрафе {_cp_pen(_cp_p_sel)} это {num(_cp_kc.loc[_cp_p_sel, 'kernel_pen'], 3)}"
                   + (", край сетки" if _cp_p_sel in _cp_edge else "")
                   + f": {_cp_pct(_cp_kc.loc[_cp_p_sel, 'fa_kernel'])} ложных тревог против "
                   f"{_cp_pct(_cp_kc.loc[_cp_p_sel, 'fa_pelt'])} у PELT"
-                  + "".join(f"; при штрафе {_cp_pen(p)} калибровка упёрлась в край сетки — ложных "
-                            f"тревог у ядра {_cp_pct(_cp_kc.loc[p, 'fa_kernel'])}, у PELT "
-                            f"{_cp_pct(_cp_kc.loc[p, 'fa_pelt'])}" for p in _cp_edge if p != _cp_p_sel)
+                  + "".join(f"; при {'штрафах' if len(ps) > 1 else 'штрафе'} {and_join(_cp_pen(p) for p in ps)} "
+                            f"калибровка упёрлась в край сетки — ложных тревог у ядра {_cp_pct(fk)}, у PELT "
+                            f"{_cp_pct(fp)}" for (fk, fp), ps in _cp_edge_by.items())
                   + ".")
     _cp_t += (f" {_cp_cap(_CP_ON['raw'])} и {_CP_ON['deseason']} ядро сопоставимо с PELT лишь "
               f"по построению {_CP_ON[_cp_mode]}.")
-    _cp_p_order = [_cp_p_sel] + [p for p in _cp_rule_rows.index if p != _cp_p_sel]
+    # Выбор штрафа, край сетки и что сняли правила зачёта при выбранном штрафе.
     _cp_t += (f"\n\nШтраф для реальных данных выбран по стенду до их прогона — правилом из конфига: "
-              f"наибольший J Юдена у {_CP_DET[_cp_det]} {_CP_ON[_cp_mode]} среди штрафов сетки, при "
-              f"равенстве меньший. При штрафе {_cp_pen(_cp_p_sel)} J равен "
-              f"{num(_cp_rule_rows.loc[_cp_p_sel, 'J Юдена'], 1, sign=True)}"
-              + "".join(f", при штрафе {_cp_pen(p)} — {num(_cp_rule_rows.loc[p, 'J Юдена'], 1, sign=True)}: "
-                        f"{_cp_pct(_cp_rule_rows.loc[p, 'ложных на чистых, %'])} ложных тревог при "
-                        f"обнаружении {_cp_pct(_cp_rule_rows.loc[p, 'обнаружено, %'])}"
-                        for p in _cp_p_order[1:])
-              + f". Выбран штраф {_cp_pen(_cp_p_sel)}.")
+              f"наибольший J Юдена у {_CP_DET_GEN[_cp_det]} {_CP_ON[_cp_mode]} среди штрафов сетки, при "
+              f"равенстве меньший (таблица ниже). Выбран штраф {_cp_pen(_cp_p_sel)}"
+              + (f" с J {num(_cp_rule_rows.loc[_cp_p_sel, 'J Юдена'], 1, sign=True)}" )
+              + (f" — {_cp_sel_edge} в сетке, так что лучший штраф мог лежать и за её краем; лог "
+                 f"прогона отмечает это строкой «ВНИМАНИЕ»" if _cp_sel_edge else "")
+              + ".")
+    # Ложных тревог нет — J равен обнаружению, а J не больше обнаружения при любом штрафе:
+    # за краем сетки он может вырасти, только если вырастет само обнаружение.
+    _cp_beyond = (f": за краем сетки J мог бы вырасти, только если вырастет само обнаружение"
+                  if _cp_sel_edge == "наибольший" else "")
+    if _cp_pen_dets and all(_cp_FA[(d, _cp_mode)] == 0 for d in _cp_pen_dets):
+        _cp_t += (f" Ложных тревог при нём нет ни у одного метода со штрафом {_CP_ON[_cp_mode]} — ниже "
+                  f"нуля им падать некуда, — и J равен доле обнаружения{_cp_beyond}.")
+    elif _cp_pr["ложных на чистых, %"] == 0:
+        _cp_t += (f" Ложных тревог у {_CP_DET_GEN[_cp_det]} {_CP_ON[_cp_mode]} при нём нет — ниже нуля им "
+                  f"падать некуда, — и его J равен доле обнаружения{_cp_beyond}.")
+    if _cp_max_delay is not None or _cp_twin_rule:
+        _cp_t += (f" Из {_cp_after_sel} "
+                  f"{plural(_cp_after_sel, 'сигнала', 'сигналов', 'сигналов')} {_CP_DET_GEN[_cp_det]} "
+                  f"{_CP_ON[_cp_mode]}, пришедших не раньше врезки, засчитано {_cp_dsel['hit']}"
+                  + (f", граница задержки сняла {_cp_late_sel if _cp_late_sel else 'ни одного'}"
+                     if _cp_max_delay is not None else "")
+                  + (f", правило близнеца — {_cp_veto_sel if _cp_veto_sel else 'ни одного'}"
+                     if _cp_twin_rule else "")
+                  + (": нетронутый близнец при этом штрафе не тревожит ни разу"
+                     if _cp_twin_rule and not _cp_veto_sel and _cp_pr["ложных на чистых, %"] == 0 else "")
+                  + ".")
+        _cp_softer = [p for p in reversed(_cp_grid)
+                      if p < _cp_p_sel and p in _cp_rule_rows.index
+                      and _cp_rule_rows.loc[p, "n twin-vetoed"] > 0][:2]
+        if _cp_twin_rule and not _cp_veto_sel and _cp_softer:
+            _cp_v = [int(_cp_rule_rows.loc[p, "n twin-vetoed"]) for p in _cp_softer]
+            _cp_t += (f" Действие правила близнеца видно на более мягких штрафах: при "
+                      f"{_cp_pen(_cp_softer[0])} оно снимает {_cp_v[0]} "
+                      f"{plural(_cp_v[0], 'сигнал', 'сигнала', 'сигналов')}"
+                      + (f", при {_cp_pen(_cp_softer[1])} — {_cp_v[1]}" if len(_cp_softer) > 1 else "")
+                      + ".")
 Markdown(_cp_t) if _cp_ready else _cp_missing
+```
+
+```{python}
+#| echo: false
+#| tbl-cap: "PELT на темпах роста на всей сетке штрафов — по этим строкам правило выбирает штраф для реальных данных. Без сигналов в декабре — доля обнаруженных, если не считать засчитанных сигналов, пришедших на декабрь (ниже). Снято — сигналы не раньше врезки, которые не засчитаны: позже границы задержки или в месяц тревоги нетронутого близнеца; счётчики не пересекаются."
+if _cp_ready:
+    _cp_rtab = pd.DataFrame({
+        "обнаружено, %": [num(_cp_rule_rows.loc[p, "обнаружено, %"], 1) for p in _cp_grid],
+        "без сигналов в декабре, %": [num(_cp_dc[p]["det_nodec"], 1) for p in _cp_grid],
+        "ложных на чистых, %": [num(_cp_rule_rows.loc[p, "ложных на чистых, %"], 1) for p in _cp_grid],
+        "J Юдена": [num(_cp_rule_rows.loc[p, "J Юдена"], 1, sign=True) for p in _cp_grid],
+        "снято: позже границы": [str(int(_cp_rule_rows.loc[p, "n late"])) for p in _cp_grid],
+        "снято: близнец": [str(int(_cp_rule_rows.loc[p, "n twin-vetoed"])) for p in _cp_grid],
+    }, index=pd.Index([_cp_pen(p) + (" — выбран" if p == _cp_p_sel else "") for p in _cp_grid],
+                      name="штраф"))
+_cp_rtab if _cp_ready else _cp_missing
 ```
 
 ```{python}
 #| echo: false
 #| tbl-cap: "PELT на темпах роста при выбранном штрафе — по величине возмущения, в долях σ. Ложные тревоги от величины не зависят: они считаются по нетронутым рядам."
 if _cp_ready:
-    _cp_M = (_cpm[(_cpm["detector"] == _cp_det) & (_cpm["mode"] == _cp_mode)]
+    _cp_M = (_cpm[(_cpm["detector"] == _cp_det) & (_cpm["mode"] == _cp_mode) & (_cpm["penalty"] == _cp_p_sel)]
              .set_index("magnitude").sort_index())
     _cp_mag_tab = pd.DataFrame({
         "обнаружено, %": _cp_M["обнаружено, %"].map(lambda v: num(v, 1)).to_numpy(),
@@ -3043,42 +3273,60 @@ if _cp_ready:
         "ложных на чистых, %": _cp_M["ложных на чистых, %"].map(lambda v: num(v, 1)).to_numpy(),
         "J Юдена": _cp_M["J Юдена"].map(lambda v: num(v, 1, sign=True)).to_numpy(),
     }, index=pd.Index([f"{num(m, 0)}σ" for m in _cp_M.index], name="величина возмущения"))
-_cp_mag_tab if _cp_ready else _cp_missing
+(_cp_mag_tab if _cp_ready and len(_cp_M) else
+ Markdown("В сводке по величине нет строк PELT на темпах роста при выбранном штрафе.") if _cp_ready
+ else _cp_missing)
 ```
 
 ```{python}
 #| echo: false
-# Фраза о величине 2σ, о нулевой задержке и о «ложных» тревогах на настоящих рядах — по файлам.
-if _cp_ready:
+# Фраза о величине 2σ, о нулевой задержке по величине и о «ложных» тревогах на настоящих
+# рядах — по файлам.
+if _cp_ready and len(_cp_M):
     _cp_m2 = 2.0 if 2.0 in _cp_M.index else _cp_M.index[len(_cp_M) // 2]
     _cp_mr = _cp_M.loc[_cp_m2]
     _cp_t3 = (f"{_CP_DET[_cp_det]} {_CP_ON[_cp_mode]} находит возмущение в {num(_cp_m2, 0)}σ "
               f"с медианной задержкой {_cp_mw(_cp_mr['задержка, медиана'])}, "
               f"в {_cp_pct(_cp_mr['доля с задержкой 0, %'])} случаев — в месяц врезки; всего находит "
-              f"{_cp_pct(_cp_mr['обнаружено, %'])} таких возмущений.")
-    if _cp_dm:
-        _cp_s2 = _cp_stats(_cp_Rs[(_cp_Rs["magnitude"] == _cp_m2) & ~_cp_Rs["position"].isin(_cp_decp)])
-        _cp_t3 += (f" Без врезки в {_cp_ym(_cp_dm, 'пр')} — {_cp_pct(_cp_s2['det'])}, с медианной задержкой "
-                   f"{_cp_mw(_cp_s2['med'])} и {_cp_pct(_cp_s2['zero'])} найденных в месяц врезки.")
+              f"{_cp_pct(_cp_mr['обнаружено, %'])} таких возмущений."
+              if _cp_mr["обнаружено, %"] > 0 else
+              f"{_CP_DET[_cp_det]} {_CP_ON[_cp_mode]} не находит ни одного возмущения в {num(_cp_m2, 0)}σ.")
+    # Доля нулевой задержки по величине: крупный сдвиг в месяц врезки заметнее мелкого. Если
+    # она с величиной не растёт, в месяц врезки срабатывает что-то помимо неё — так и сказать,
+    # и где именно.
+    _cp_z = _cp_M["доля с задержкой 0, %"].dropna()
+    if len(_cp_z) >= 2:
+        _cp_zseq = (" → ".join(_cp_pct(v)[:-1] for v in _cp_z) + "%"
+                    + f" от {num(_cp_z.index[0], 0)}σ к {num(_cp_z.index[-1], 0)}σ")
+        _cp_zr = [round(float(v), 9) for v in _cp_z]
+        if max(_cp_zr) == min(_cp_zr):
+            _cp_t3 += (f" Доля найденных в месяц врезки от величины не зависит: "
+                       f"{_cp_pct(_cp_z.iloc[0])} при каждой.")
+        elif all(a <= b for a, b in zip(_cp_zr, _cp_zr[1:])):
+            _cp_t3 += (f" С величиной растёт и доля найденных в месяц врезки: {_cp_zseq} — "
+                       f"крупный сдвиг чаще виден сразу.")
+        else:
+            _cp_m0 = _cp_z.index[0]
+            _cp_h0 = _cp_ps[_cp_true(_cp_ps["detected"]) & (_cp_ps["magnitude"] == _cp_m0)
+                            & (_cp_ps["delay"] == 0)]
+            _cp_h0p = _cp_h0["position"].value_counts()
+            _cp_t3 += (f" Доля найденных в месяц врезки с величиной не растёт, а "
+                       f"{'падает' if all(a >= b for a, b in zip(_cp_zr, _cp_zr[1:])) else 'меняется немонотонно'}: "
+                       f"{_cp_zseq}. Крупный сдвиг в месяц врезки заметнее мелкого, так что это говорит "
+                       f"не о чувствительности детектора, а о том, что в месяц врезки срабатывает "
+                       f"что-то помимо неё"
+                       + (f": при {num(_cp_m0, 0)}σ из {len(_cp_h0)} таких обнаружений "
+                          f"{int(_cp_h0p.iloc[0])} — при врезке в "
+                          f"{and_join(_cp_ym(_cp_months[int(p)], 'пр') for p in _cp_h0p.index[_cp_h0p == _cp_h0p.iloc[0]])}"
+                          if len(_cp_h0p) else "")
+                       + ".")
     if _cp_pr["доля с задержкой 0, %"] > 0:
         _cp_t3 += (f"\n\nНулевая задержка возможна — {_cp_pct(_cp_pr['доля с задержкой 0, %'])} обнаружений "
-                   f"у {_CP_DET[_cp_det]} {_CP_ON[_cp_mode]}")
-        if _cp_dm and _cp_st_all["n0"] and len(_cp_hits0_dec):
-            _cp_most = len(_cp_hits0_dec) / _cp_st_all["n0"] >= 0.5
-            _cp_t3 += (f", — но {'по большей части' if _cp_most else 'отчасти'} "
-                       f"её даёт врезка в {_cp_ym(_cp_dm, 'пр')}: там {len(_cp_hits0_dec)} из "
-                       f"{_cp_st_all['n0']} таких обнаружений, и в {_cp_twin} из них нетронутый двойник ряда "
-                       f"поднимает тревогу в тот же месяц; без этой врезки нулевая задержка — "
-                       f"{_cp_pct(_cp_st_no['zero'])} обнаружений. Механизм у неё при этом настоящий: ")
-            _cp_mech = str  # текст уже начинается со строчной — продолжение фразы
-        else:
-            _cp_t3 += ". "
-            _cp_mech = _cp_cap
-        _cp_t3 += _cp_mech(f"правило засчитывает любой излом среди {in_words(RECENT_WINDOW, 'род')} "
-                           f"последних точек, а детектор, увидев выброс в конце окна, ставит излом «у конца» "
-                           f"раньше, чем может его точно датировать: отрезок после излома не бывает короче "
-                           f"минимальной длины. Сигнал «здесь что-то изменилось» приходит раньше, чем точная "
-                           f"дата излома.")
+                   f"у {_CP_DET_GEN[_cp_det]} {_CP_ON[_cp_mode]}. Механизм у неё настоящий: правило "
+                   f"засчитывает любой излом среди {in_words(RECENT_WINDOW, 'род')} последних точек, "
+                   f"а детектор, увидев выброс в конце окна, ставит излом «у конца» раньше, чем может "
+                   f"его точно датировать: отрезок после излома не бывает короче минимальной длины. "
+                   f"Сигнал «здесь что-то изменилось» приходит раньше, чем точная дата излома.")
     if _cp_fa_at:
         # На что реагируют тревоги на нетронутых рядах: по месяцам первой тревоги.
         _cp_fa_dec = pd.Series([m for m in _cp_fa_at if m.endswith("-12")], dtype=object)
@@ -3097,58 +3345,420 @@ if _cp_ready:
                          f"месяц с наибольшей долей начал эпизодов, {_cp_pct(_cp_RT[_cp_p_sel].max())} "
                          f"(ниже)" if _cp_RT[_cp_p_sel].idxmax().endswith("-12") else "")
                       + "." if _cp_k / len(_cp_fa_at) >= 0.5 else "."))
-Markdown(_cp_t3) if _cp_ready else _cp_missing
+Markdown(_cp_t3) if _cp_ready and len(_cp_M) else Markdown("") if _cp_ready else _cp_missing
 ```
 
 ```{python}
 #| echo: false
-#| tbl-cap: "PELT на темпах роста при выбранном штрафе — по месяцу врезки возмущения; последняя строка — без врезки в декабре, где обнаружением засчитывается и сам декабрьский скачок. В последней колонке — обнаружение того же PELT на сырых значениях."
-if _cp_ready and _cp_dm:
-    _cp_pos_rows, _cp_pos_idx = [], []
-    for _cp_q in sorted(int(p) for p in _cpb["position"].dropna().unique()):
-        _cp_st, _cp_sw = (_cp_stats(_cp_Rs[_cp_Rs["position"] == _cp_q]),
-                          _cp_stats(_cp_Ws[_cp_Ws["position"] == _cp_q]))
-        _cp_pos_idx.append(_cp_ym(_cp_months[_cp_q]))
-        _cp_pos_rows.append((_cp_st, _cp_sw))
-    _cp_pos_idx.append(f"без {_cp_ym(_cp_dm, 'род')}")
-    _cp_pos_rows.append((_cp_st_no, _cp_st_raw_no))
+#| tbl-cap: "PELT на темпах роста при выбранном штрафе — по месяцу врезки возмущения (`results/cp_summary_by_position.csv`). Задержка — только среди обнаруженных. Снято — сигналы не раньше врезки, которые не засчитаны: позже границы задержки или в месяц тревоги нетронутого близнеца."
+if _cp_ready:
+    _cp_P = (_cpp[(_cpp["detector"] == _cp_det) & (_cpp["mode"] == _cp_mode) & (_cpp["penalty"] == _cp_p_sel)]
+             .set_index("position").sort_index())
     _cp_pos_tab = pd.DataFrame({
-        "обнаружено, %": [num(a["det"], 1) for a, _ in _cp_pos_rows],
-        "задержка, медиана, мес.": [_cp_n01(a["med"]) for a, _ in _cp_pos_rows],
-        "задержка 0, % обнаруженных": [num(a["zero"], 1) for a, _ in _cp_pos_rows],
-        f"{_CP_ON['raw']}: обнаружено, %": [num(w["det"], 1) for _, w in _cp_pos_rows],
-    }, index=pd.Index(_cp_pos_idx, name="врезка"))
-(_cp_pos_tab if (_cp_ready and _cp_dm) else
- Markdown("Врезок в декабре на стенде нет.") if _cp_ready else _cp_missing)
+        "обнаружено, %": _cp_P["обнаружено, %"].map(lambda v: num(v, 1)).to_numpy(),
+        "задержка, медиана, мес.": _cp_P["задержка, медиана"].map(_cp_n01).to_numpy(),
+        "задержка 0, % обнаруженных": _cp_P["доля с задержкой 0, %"].map(lambda v: num(v, 1)).to_numpy(),
+        "снято: позже границы": [str(int(v)) for v in _cp_P["n late"]],
+        "снято: близнец": [str(int(v)) for v in _cp_P["n twin-vetoed"]],
+    }, index=pd.Index([_cp_ym(_cp_months[int(p)]) for p in _cp_P.index], name="врезка"))
+(_cp_pos_tab if _cp_ready and len(_cp_P) else
+ Markdown("В сводке по позициям нет строк PELT на темпах роста при выбранном штрафе.") if _cp_ready
+ else _cp_missing)
 ```
 
 ```{python}
 #| echo: false
-# Врезка в декабре: что засчитывается за сам декабрьский скачок и что остаётся без неё.
-if _cp_ready and _cp_dm:
-    _cp_pd = (f"**Врезка в {_cp_ym(_cp_dm, 'пр')} совпадает с декабрьским скачком.** Там обнаружением "
-              f"засчитывается и сам скачок: {_CP_DET[_cp_det]} {_CP_ON['raw']} при этой врезке находит "
-              f"{_cp_pct(min(_cp_raw_dec))[:-1]}–{_cp_pct(max(_cp_raw_dec))} возмущений при любом их типе "
-              f"и величине, а {_CP_ON[_cp_mode]} на неё приходится большая часть нулевых задержек "
-              f"(выше). Без этой врезки {_CP_DET[_cp_det]} {_CP_ON[_cp_mode]} находит "
-              f"{_cp_pct(_cp_st_no['det'])} возмущений вместо {_cp_pct(_cp_st_all['det'])}, а J Юдена "
-              f"методов со штрафом {_CP_ON[_cp_mode]} — от {num(min(_cp_ratio_J_no), 1, sign=True)} до "
-              f"{num(max(_cp_ratio_J_no), 1, sign=True)} (со всеми врезками — от "
-              f"{num(min(_cp_ratio_J), 1, sign=True)} до {num(max(_cp_ratio_J), 1, sign=True)}).")
-    if len(_cp_late_far):
-        _cp_pd += (f" Верхней границы задержки у протокола нет: {len(_cp_late)} из {len(_cp_st_all['hits'])} "
-                   f"обнаружений приходятся на {_cp_ym(_cp_last_dec)}, {len(_cp_late_far)} из них — "
-                   f"с задержкой {_cp_mw(_cp_pos[_cp_last_dec] - _cp_last_p)} от врезки в "
-                   f"{_cp_ym(_cp_months[_cp_last_p], 'пр')}.")
-    _cp_pd += (f" Тезис о преобразовании от этого не зависит: ложные тревоги считаются по нетронутым "
-               f"рядам, и без декабрьской врезки у каждого метода J {_CP_ON[_cp_mode]} выше, чем "
-               f"{_CP_ON['raw']}, а разброс между методами со штрафом, {num(_cp_spread_no, 1)} пункта, "
-               f"меньше наименьшего выигрыша от смены преобразования, "
-               f"{num(min(_cp_gain_no.values()), 1)}." if _cp_thesis_no else
-               f" Без декабрьской врезки тезис о преобразовании не подтверждается: {_cp_why_no}.")
-    _cp_pd += (" Это ограничение протокола стенда: врезку стоит уводить с декабря, задержку — "
-               "ограничить сверху, а обнаружение — засчитывать в паре с нетронутым двойником.")
-Markdown(_cp_pd) if (_cp_ready and _cp_dm) else Markdown("")
+#| tbl-cap: "PELT на темпах роста при выбранном штрафе: обнаружено, % — по виду возмущения и месяцу врезки (разрез `results/cp_bench.csv`)."
+if _cp_ready:
+    _cp_kp = (_cp_ps.assign(hit=_cp_true(_cp_ps["detected"]))
+              .pivot_table(index="kind", columns="position", values="hit", aggfunc="mean") * 100)
+    _cp_kp = _cp_kp.reindex([k for k in _cp_bc["kinds"] if k in _cp_kp.index])
+    _cp_kp_tab = _cp_kp.map(lambda v: num(v, 1))
+    _cp_kp_tab.index = pd.Index([_CP_KIND[k] for k in _cp_kp.index], name="возмущение")
+    _cp_kp_tab.columns = pd.Index([_cp_ym(_cp_months[int(p)]) for p in _cp_kp.columns], name="врезка")
+_cp_kp_tab if _cp_ready else _cp_missing
+```
+
+```{python}
+#| echo: false
+# Почему обнаружение по позициям несопоставимо — числами стенда и кода: первый проверяемый
+# месяц, тревога до врезки на испорченных рядах, крутизна сдвига наклона у `inject`, декабрь
+# в окне засчитывания. И декабрь в сигналах засчитанных обнаружений — разрез тех же строк
+# `results/cp_bench.csv`, а не новый критерий: число протокола в таблицах остаётся прежним.
+if _cp_ready:
+    _cp_pp = sorted(int(p) for p in _cp_ps["position"].unique())
+    _cp_pm = {p: _cp_ym(_cp_months[p], "пр") for p in _cp_pp}
+    _cp_checks = {p: p - MIN_HISTORY for p in _cp_pp}  # запусков детектора до врезки
+    _cp_never = [p for p in _cp_pp if _cp_checks[p] <= 0]
+
+    def _cp_pre(p_pen):
+        """Доля испорченных рядов с тревогой до врезки — их первый сигнал не обнаружение."""
+        rows = _cp_spoiled(p_pen)
+        return (_cp_true(rows["false_alarm"]).groupby(rows["position"]).mean() * 100).reindex(_cp_pp)
+
+    _cp_pre_sel = _cp_pre(_cp_p_sel)
+    _cp_pre_soft = next((p for p in reversed(_cp_grid) if p < _cp_p_sel and (_cp_pre(p) > 0).any()), None)
+    # Наклон `inject`: к концу ряда сдвиг наклона дорастает до 3σ × величина откуда бы ни начался.
+    _cp_z0 = np.zeros(len(_cp_months))
+    _cp_slope = {p: float(np.diff(inject(_cp_z0, "trend", p, 1.0))[p]) for p in _cp_pp}
+    _cp_end = float(inject(_cp_z0, "trend", _cp_pp[0], 1.0)[-1])
+    _cp_steep = _cp_slope[_cp_pp[-1]] / _cp_slope[_cp_pp[0]]
+    _cp_st = num(_cp_steep, 0 if abs(_cp_steep - round(_cp_steep)) < 0.05 else 1)
+    # Окно засчитывания: месяц врезки и max_delay месяцев после неё, не дальше конца панели.
+    _cp_wlast = {p: min(p + int(_cp_max_delay), len(_cp_months) - 1) if _cp_max_delay is not None
+                 else len(_cp_months) - 1 for p in _cp_pp}
+    _cp_wdec = [p for p in _cp_pp if _cp_months[_cp_wlast[p]].endswith("-12")]
+    _cp_wany = [p for p in _cp_pp if p not in _cp_wdec
+                and any(_cp_months[t].endswith("-12") for t in range(p, _cp_wlast[p] + 1))]
+
+    _cp_why_pos = [
+        (f"{_cp_cap(and_join(_cp_ym(_cp_months[p]) for p in _cp_never))} — "
+         + ("первый проверяемый месяц" if len(_cp_never) == 1 else "первые проверяемые месяцы")
+         + ": при врезке в него детектор до врезки не запускается ни разу, а при врезке в "
+         + and_join(_cp_pm[p] for p in _cp_pp if p not in _cp_never)
+         + f" успевает сделать {and_join(_cp_checks[p] for p in _cp_pp if p not in _cp_never)} "
+         + f"{plural(_cp_checks[_cp_pp[-1]], 'проверку', 'проверки', 'проверок')}. Поэтому на поздних "
+         "позициях часть испорченных рядов может поднять тревогу ещё до врезки, а первый сигнал до "
+         "врезки — не обнаружение"
+         if _cp_never and len(_cp_never) < len(_cp_pp) else
+         "На поздних позициях часть испорченных рядов может поднять тревогу ещё до врезки, а первый "
+         "сигнал до врезки — не обнаружение"),
+    ]
+    _cp_pre_says = lambda s: and_join(f"{_cp_pct(v)} при врезке в {_cp_pm[p]}" for p, v in s.items() if v > 0)
+    _cp_why_pos[0] += (f": при штрафе {_cp_pen(_cp_p_sel)} таких рядов нет ни на одной позиции"
+                       if not (_cp_pre_sel > 0).any() else
+                       f": при штрафе {_cp_pen(_cp_p_sel)} таких рядов {_cp_pre_says(_cp_pre_sel)}")
+    if _cp_pre_soft is not None and not (_cp_pre_sel > 0).any():
+        _cp_why_pos[0] += f", при штрафе {_cp_pen(_cp_pre_soft)} — {_cp_pre_says(_cp_pre(_cp_pre_soft))}"
+    _cp_why_pos[0] += "."
+    if "trend" in _cp_b_kind and len(_cp_pp) > 1 and _cp_steep > 1:
+        _cp_why_pos.append(
+            f"Сдвиг наклона задан так, что к концу ряда дорастает до {num(_cp_end, 0)}σ × величину, "
+            f"откуда бы ни начался, поэтому чем позже врезка, тем он круче: при врезке в "
+            f"{_cp_pm[_cp_pp[-1]]} — в {_cp_st} "
+            f"{plural(round(_cp_steep), 'раз', 'раза', 'раз') if _cp_st.isdigit() else 'раза'} круче, "
+            f"чем в {_cp_pm[_cp_pp[0]]}.")
+    if _cp_wdec:
+        _cp_why_pos.append(
+            f"Окно засчитывания — месяц врезки и "
+            + (f"{in_words(int(_cp_max_delay), 'им_м')} "
+               f"{plural(int(_cp_max_delay), 'месяц', 'месяца', 'месяцев')} после него"
+               if _cp_max_delay is not None else "все месяцы до конца панели")
+            + f" — при врезке в {and_join(_cp_pm[p] for p in _cp_wdec)} кончается декабрём"
+            + (f", при врезке в {and_join(_cp_pm[p] for p in _cp_wany)} захватывает декабрь" if _cp_wany else "")
+            + (f", при врезке в {and_join(_cp_pm[p] for p in _cp_pp if p not in _cp_wdec + _cp_wany)} "
+               f"декабря в нём нет" if len(_cp_wdec + _cp_wany) < len(_cp_pp) else "")
+            + ".")
+    _cp_pd = ("**Обнаружение по позициям несопоставимо**, и дело не в самих месяцах, а в устройстве "
+              "стенда. " + " ".join(_cp_why_pos))
+    # Разрез по видам — те же строки, что в таблице выше. Выделяющуюся позицию сдвига наклона
+    # не приписываем одной крутизне: если его обнаружения там приходят декабрём, названы оба
+    # механизма, и доля между ними не делится.
+    _cp_th = _cp_ps[(_cp_ps["kind"] == "trend") & _cp_true(_cp_ps["detected"])]
+
+    def _cp_trend_dec(q):
+        """Обнаружения сдвига наклона при врезке q: сколько их, сколько с сигналом в декабре и в каком."""
+        mon = _cp_th.loc[_cp_th["position"] == q, "signal"].map(lambda t: _cp_months[int(t)])
+        dec = mon[mon.str.endswith("-12")]
+        return len(mon), len(dec), (dec.iloc[0] if len(dec) else None)
+
+    _cp_kinds_says, _cp_kind_note = [], ""
+    for _cp_kd in _cp_kp.index:
+        _cp_row = _cp_kp.loc[_cp_kd].dropna()
+        if not len(_cp_row):
+            continue
+        _cp_hi = _cp_row.idxmax()
+        _cp_rest_k = _cp_row.drop(index=_cp_hi)
+        if len(_cp_rest_k) and _cp_row[_cp_hi] >= 2 * max(_cp_rest_k.max(), 1):
+            _cp_kind_text = (f"{_CP_KIND[_cp_kd]} при врезке в {_cp_pm[int(_cp_hi)]} находится в "
+                             f"{_cp_pct(_cp_row[_cp_hi])} случаев, при остальных — {_cp_range(_cp_rest_k)}")
+            if _cp_kd == "trend" and int(_cp_hi) == _cp_pp[-1] and _cp_steep > 1:
+                _cp_n, _cp_k, _cp_m = _cp_trend_dec(int(_cp_hi))
+                _cp_kind_note = f" Наклон при врезке в {_cp_pm[int(_cp_hi)]} по построению самый крутой (выше)"
+                if _cp_k:
+                    _cp_n0, _cp_k0, _cp_m0 = _cp_trend_dec(_cp_pp[0])
+                    _cp_kind_note += (
+                        f", но и сигнал у {_cp_k} из {_cp_n} этих обнаружений приходит в {_cp_ym(_cp_m, 'пр')}"
+                        + ((f" (при врезке в {_cp_pm[_cp_pp[0]]} — у всех {_cp_n0} обнаружений наклона, "
+                            f"в {_cp_ym(_cp_m0, 'пр')})" if _cp_k0 == _cp_n0 else
+                            f" (при врезке в {_cp_pm[_cp_pp[0]]} — у {_cp_k0} из {_cp_n0}, в {_cp_ym(_cp_m0, 'пр')})")
+                           if _cp_k0 else "")
+                        + f": крутизна и декабрь здесь действуют вместе, и доля {_cp_pct(_cp_row[_cp_hi])} "
+                        f"между ними не делится.")
+                else:
+                    _cp_kind_note += "."
+            _cp_kinds_says.append(_cp_kind_text)
+        else:
+            _cp_kinds_says.append(f"{_CP_KIND[_cp_kd]} — {_cp_range(_cp_row)} по позициям"
+                                  + (" (в темпах роста это разовый выброс в месяц врезки, а не "
+                                     "новый уровень)" if _cp_kd == "level" and _cp_mode == "ratio" else ""))
+    if _cp_kinds_says:
+        _cp_pd += " По видам (таблица выше): " + "; ".join(_cp_kinds_says) + "." + _cp_kind_note
+
+    _cp_pd = Markdown(_cp_pd)
+_cp_pd if _cp_ready else _cp_missing
+```
+
+[]{#cp-december}
+
+```{python}
+#| echo: false
+# Декабрь в сигналах засчитанных обнаружений — разрез тех же строк `results/cp_bench.csv`,
+# а не новый критерий: число протокола в таблицах остаётся прежним, без декабря — рядом.
+if _cp_ready:
+    _cp_pdd = ""
+    if _cp_dsel["dec"]:
+        _cp_g = _cp_dsel["groups"]
+        _cp_parts = []
+        for _cp_mth in sorted(set(_cp_g.index.get_level_values("month")), key=_cp_pos.get):
+            _cp_gm = _cp_g.xs(_cp_mth, level="month")
+            _cp_parts.append(
+                f"{int(_cp_gm.sum())} — на {_cp_ym(_cp_mth)}, "
+                + and_join(f"{'' if len(_cp_gm) == 1 else f'{int(n)} '}от врезки в "
+                           f"{_cp_ym(_cp_months[int(p)], 'пр')} с задержкой {_cp_mw(d)}"
+                           for (p, d), n in _cp_gm.items()))
+        _cp_pdd += (
+            f"**{_cp_pct(_cp_dsel['share'])} обнаружений {_CP_DET_GEN[_cp_det]} {_CP_ON[_cp_mode]} при штрафе "
+            f"{_cp_pen(_cp_p_sel)} — сигналы в декабре.** Из {_cp_dsel['hit']} засчитанных на декабрь "
+            f"приходятся {_cp_dsel['dec']}: {'; '.join(_cp_parts)}. "
+            f"Без сигналов в декабре {_CP_DET[_cp_det]} находит {_cp_pct(_cp_dsel['det_nodec'])} "
+            f"возмущений, а не {_cp_pct(_cp_dsel['det'])}")
+        if (_cp1_p_sel is not None and _cp1_p_sel in _cp_dc and _cp1_p_sel != _cp_p_sel
+                and _cp_dc[_cp1_p_sel]["hit"]):
+            _cp_d1 = _cp_dc[_cp1_p_sel]
+            _cp_pdd += (f"; при штрафе {_cp_pen(_cp1_p_sel)}, выбранном в первой версии стенда, сигналов "
+                       f"в декабре — {_cp_d1['dec']} из {_cp_d1['hit']} ({_cp_pct(_cp_d1['share'])})")
+        _cp_pdd += ". "
+        # Почему сигнал пришёл в декабре — по позициям и осторожно: механизм называется только там,
+        # где его поддерживают числа разреза, а где причины совпадают — так и сказано.
+        _cp_hp = _cp_ps[_cp_true(_cp_ps["detected"])]
+        _cp_hit_at = _cp_hp.groupby("position").size()
+        _cp_dec_at = _cp_g.groupby(level=["position", "month"]).sum()
+        _cp_nodec_win = [q for q in _cp_pp if q not in _cp_wdec + _cp_wany]
+        _cp_gentle = min(_cp_pp, key=_cp_slope.get)
+        _cp_why_dec = []
+        for (_cp_q, _cp_mth), _cp_n in _cp_dec_at.items():
+            _cp_q = int(_cp_q)
+            _cp_lead = (f"при врезке в {_cp_pm[_cp_q]} на {_cp_ym(_cp_mth)} приходятся {int(_cp_n)} из "
+                        f"{int(_cp_hit_at.get(_cp_q, 0))} засчитанных")
+            _cp_steeper = [q for q in _cp_nodec_win if _cp_slope[q] > _cp_slope[_cp_q]]
+            _cp_most_dec = _cp_n >= _cp_hit_at.get(_cp_q, 0) / 2
+            if ("trend" in _cp_kp.index and _cp_q == _cp_gentle and _cp_steeper and _cp_most_dec
+                    and _cp_kp.loc["trend", _cp_q] > _cp_kp.loc["trend", _cp_steeper].max()):
+                _cp_why_dec.append(
+                    _cp_lead + f"; наклон там самый пологий, а сдвиг наклона находится в "
+                    f"{_cp_pct(_cp_kp.loc['trend', _cp_q])} случаев против "
+                    f"{_cp_range(_cp_kp.loc['trend', _cp_steeper])} при врезке в "
+                    f"{and_join(_cp_pm[q] for q in _cp_steeper)}, где наклон круче, а декабря в окне нет: "
+                    f"по-видимому, декабрьский скачок здесь добавляется к врезке")
+            elif (_cp_mth == _cp_months[-1] and "trend" in _cp_kp.index
+                  and _cp_slope[_cp_q] > _cp_slope[_cp_gentle]):
+                _cp_r5 = _cp_slope[_cp_q] / _cp_slope[_cp_gentle]
+                _cp_r5s = num(_cp_r5, 0 if abs(_cp_r5 - round(_cp_r5)) < 0.05 else 1)
+                _cp_why_dec.append(
+                    _cp_lead + f", но {_cp_ym(_cp_mth)} — ещё и последний месяц панели, а наклон при этой "
+                    f"врезке в {_cp_r5s} "
+                    f"{plural(round(_cp_r5), 'раз', 'раза', 'раз') if _cp_r5s.isdigit() else 'раза'} круче, "
+                    f"чем при врезке в {_cp_pm[_cp_gentle]}, — декабрь ли здесь переводит врезку через порог, "
+                    f"эти числа не отделяют от конца панели и крутизны наклона")
+            elif _cp_mth == _cp_months[-1]:
+                _cp_why_dec.append(_cp_lead + f", но {_cp_ym(_cp_mth)} — ещё и последний месяц панели, и что "
+                                   f"здесь переводит врезку через порог, эти числа не показывают")
+            else:
+                _cp_why_dec.append(_cp_lead + ", и почему сигнал пришёл в декабре, эти числа не показывают")
+        _cp_k_win = len(_cp_wdec + _cp_wany)
+        _cp_removed = ((["врезку в самый декабрь"] if not _cp_b_season else [])
+                       + (["тревоги, общие с нетронутым близнецом"] if _cp_twin_rule else []))
+        _cp_in_win = (f"{in_words(_cp_k_win, 'род')} позиций из {in_words(len(_cp_pp), 'род')}"
+                      if _cp_k_win > 1 else f"одной позиции из {in_words(len(_cp_pp), 'род')}")
+        _cp_pdd += (
+            (f"Протокол {_cp_proto} убрал {and_join(_cp_removed)}{',' if _cp_twin_rule else ''} — то, что в [первой "
+             f"версии](#sec-cp-v1) засчитывало обнаружением саму сезонность, — но декабрь остался "
+             f"в окне засчитывания {_cp_in_win}. " if _cp_removed else
+             f"Декабрь — в окне засчитывания {_cp_in_win}. ")
+            + "Отчего сигнал приходит в декабре, по позициям видно не одинаково. "
+            + " ".join(_cp_cap(x) + "." for x in _cp_why_dec) + " ")
+        _cp_pdd += ("Это описание тех же строк стенда, а не новый критерий: обнаружение в таблицах "
+                   "раздела остаётся числом протокола, а без декабрьских сигналов оно показано рядом "
+                   "(таблица штрафов выше).")
+    else:
+        _cp_pdd += (f"Сигналов в декабре среди {_cp_dsel['hit']} засчитанных обнаружений "
+                   f"{_CP_DET[_cp_det]} {_CP_ON[_cp_mode]} при выбранном штрафе нет.")
+    _cp_pdd = Markdown(_cp_pdd)
+_cp_pdd if _cp_ready else _cp_missing
+```
+
+
+### Первая версия стенда и почему её переделали {#sec-cp-v1}
+
+```{python}
+#| echo: false
+# Первая версия стенда — методический урок, и её числа не прячутся: результаты — в results/cp_v1/,
+# воспроизводятся конфигом configs/changepoints_v1.yaml. Числа — только из исходных колонок v1,
+# своим кодом: сводка стенда v2 требует колонок зачёта, которых у исходных файлов v1 нет.
+_cp1_cfg = yaml.safe_load(Path("../configs/changepoints_v1.yaml").read_text(encoding="utf-8"))
+_cp1_missing = Markdown("Файлов первой версии стенда в `results/cp_v1/` нет: их пишет "
+                        "`scripts/changepoints.py --config configs/changepoints_v1.yaml`.")
+if _cp1_ready:
+    _cp1_months = list(wide.index.strftime("%Y-%m"))
+    _cp1_proto = f"v{_cp1_cfg['protocol_version']}"
+    _cp1_det, _cp1_mode = _cp1_cfg["realtime"]["detector"], _cp1_cfg["realtime"]["mode"]
+    _cp1_pen = sorted(float(p) for p in _cp1_cfg["bench"]["penalties"])
+    _cp1_pos = sorted(int(p) for p in _cp1b["position"].dropna().unique())
+    _cp1_S = _cp1s[(_cp1s["penalty"] == _cp1_p_sel) | _cp1s["penalty"].isna()].set_index(["detector", "mode"])
+    _cp1_pr = _cp1_S.loc[(_cp1_det, _cp1_mode)]
+    _cp1_free = [w for w, off in (("без границы задержки", _cp1_cfg["bench"].get("max_delay") is None),
+                                  ("без нетронутого близнеца", not _cp1_cfg["bench"].get("twin_rule")))
+                 if off]
+    _cp1_intro = (
+        f"В первой версии стенда — протокол {_cp1_proto}, `configs/changepoints_v1.yaml`, результаты — "
+        f"`results/cp_v1/` — врезки стояли в {and_join(_cp_ym(_cp1_months[p], 'пр') for p in _cp1_pos)}, "
+        f"сетка штрафов была {_cp_list(_cp_pen(p) for p in _cp1_pen)}"
+        + (f", а сигнал не раньше врезки засчитывался обнаружением {' и '.join(_cp1_free)}" if _cp1_free else "")
+        + f". Правило выбора было тем же и выбрало штраф {_cp_pen(_cp1_p_sel)}. В таблице — "
+        f"{_CP_DET[_cp1_det]} {_CP_ON[_cp1_mode]} при нём рядом с протоколом {_cp_proto}."
+    )
+Markdown(_cp1_intro) if _cp1_ready else _cp1_missing
+```
+
+```{python}
+#| echo: false
+#| tbl-cap: "PELT на темпах роста: первая версия стенда при выбранном тогда штрафе (`results/cp_v1/cp_summary.csv`) и протокол v2 — при выбранном штрафе и при том же штрафе, что был выбран в v1. Снято — сигналы не раньше врезки, которые v2 не засчитал: позже границы задержки или в месяц тревоги нетронутого близнеца; у v1 этих правил не было."
+if _cp1_ready:
+    _cp1_cols = {f"{_cp1_proto}, штраф {_cp_pen(_cp1_p_sel)} — выбран тогда": (_cp1_pr, None)}
+    if _cp_ready:
+        _cp1_cols[f"{_cp_proto}, штраф {_cp_pen(_cp_p_sel)} — выбран"] = (_cp_rule_rows.loc[_cp_p_sel], _cp_p_sel)
+        if _cp1_p_sel in _cp_rule_rows.index and _cp1_p_sel != _cp_p_sel:
+            _cp1_cols[f"{_cp_proto}, штраф {_cp_pen(_cp1_p_sel)} — как в {_cp1_proto}"] = (_cp_rule_rows.loc[_cp1_p_sel], _cp1_p_sel)
+    _cp1_tab = pd.DataFrame({
+        k: [num(r["обнаружено, %"], 1), _cp_n01(r["задержка, медиана"]), num(r["доля с задержкой 0, %"], 1),
+            num(r["ложных на чистых, %"], 1), num(r["J Юдена"], 1, sign=True),
+            str(int(r["n late"])) if p is not None else "—",
+            str(int(r["n twin-vetoed"])) if p is not None else "—"]
+        for k, (r, p) in _cp1_cols.items()
+    }, index=pd.Index(["обнаружено, %", "задержка, медиана, мес.", "задержка 0, % обнаруженных",
+                       "ложных на чистых, %", "J Юдена", "снято: позже границы", "снято: близнец"],
+                      name=""))
+_cp1_tab if _cp1_ready else Markdown("")
+```
+
+```{python}
+#| echo: false
+# Врезка в декабре v1: что засчитывалось за сам декабрьский скачок, что остаётся без неё,
+# и обнаружения без верхней границы задержки. Тезис без декабрьской врезки — по обоим флагам:
+# «от этого не зависел» — только если он держался и со всеми врезками.
+if _cp1_ready:
+    def _cp1_rows(d, m):
+        q = (_cp1b["detector"] == d) & (_cp1b["mode"] == m)
+        return _cp1b[q & (_cp1b["penalty"].isna() if d in _cp_own1 else _cp1b["penalty"] == _cp1_p_sel)]
+
+    def _cp1_stats(rows):
+        """Обнаружено, %, медиана задержки и доля нулевой среди обнаруженных — по испорченным строкам."""
+        hit = rows[_cp_true(rows["detected"])]
+        n0 = int((hit["delay"] == 0).sum())
+        return {"det": len(hit) / len(rows) * 100 if len(rows) else np.nan,
+                "zero": n0 / len(hit) * 100 if len(hit) else np.nan, "hits": hit, "n0": n0}
+
+    _cp_own1 = set(_cp1s.loc[_cp1s["penalty"].isna(), "detector"])
+    _cp1_dets = [d for d in _cp1_cfg["bench"]["detectors"]
+                 if (d, "raw") in _cp1_S.index and (d, _cp1_mode) in _cp1_S.index]
+    _cp1_pen_dets = [d for d in _cp1_dets if d not in _cp_own1]
+    _cp1_decp = [p for p in _cp1_pos if _cp1_months[p].endswith("-12")]
+    _cp1_R = _cp1_rows(_cp1_det, _cp1_mode)
+    _cp1_Rs = _cp1_R[_cp1_R["kind"] != "none"]
+    _cp1_all = _cp1_stats(_cp1_Rs)
+    _cp1_J1 = {(d, m): _cp1_S.loc[(d, m), "J Юдена"] for d in _cp1_dets for m in ("raw", _cp1_mode)}
+    _cp1_FA = {(d, m): _cp1_S.loc[(d, m), "ложных на чистых, %"] for d in _cp1_dets for m in ("raw", _cp1_mode)}
+
+    def _cp1_thesis_of(Jd):
+        """Условие тезиса на числах v1: у каждого метода J выше и ложных меньше на темпах роста,
+        разброс J методов со штрафом меньше наименьшего выигрыша. Разброс и выигрыши — для текста."""
+        gain = {d: Jd[(d, _cp1_mode)] - Jd[(d, "raw")] for d in _cp1_pen_dets}
+        ratio = [Jd[(d, _cp1_mode)] for d in _cp1_pen_dets]
+        spread = max(ratio) - min(ratio) if ratio else np.nan
+        ok = (all(Jd[(d, _cp1_mode)] > Jd[(d, "raw")] and _cp1_FA[(d, _cp1_mode)] < _cp1_FA[(d, "raw")]
+                  for d in _cp1_dets) and bool(gain) and spread < min(gain.values()))
+        return ok, ratio, spread, gain
+
+    _cp1_ok, _cp1_ratio_J, _cp1_spread, _cp1_gain = _cp1_thesis_of(_cp1_J1)
+    _cp1_t = ""
+    if _cp1_decp:
+        _cp1_dm = _cp1_months[_cp1_decp[0]]
+        _cp1_no = _cp1_stats(_cp1_Rs[~_cp1_Rs["position"].isin(_cp1_decp)])
+        _cp1_W = _cp1_rows(_cp1_det, "raw")
+        _cp1_Ws = _cp1_W[(_cp1_W["kind"] != "none") & _cp1_W["position"].isin(_cp1_decp)]
+        _cp1_raw_dec = [_cp1_stats(g)["det"] for _, g in _cp1_Ws.groupby(["kind", "magnitude"])]
+        # Нулевые задержки при декабрьской врезке и те из них, где нетронутый близнец того же
+        # ряда поднимает тревогу в тот же месяц.
+        _cp1_h0 = _cp1_all["hits"][_cp1_all["hits"]["delay"] == 0]
+        _cp1_h0d = _cp1_h0[_cp1_h0["position"].isin(_cp1_decp)]
+        _cp1_twin_sig = _cp1_R[_cp1_R["kind"] == "none"].set_index("series_id")["signal"]
+        _cp1_twin = sum(_cp1_twin_sig.get(i) == t for i, t in zip(_cp1_h0d["series_id"], _cp1_h0d["signal"]))
+        # J без декабрьской врезки: ложные тревоги от позиции врезки не зависят.
+        _cp1_Jno = {}
+        for _cp_d in _cp1_dets:
+            for _cp_md in ("raw", _cp1_mode):
+                _cp_r = _cp1_rows(_cp_d, _cp_md)
+                _cp1_Jno[(_cp_d, _cp_md)] = (
+                    _cp1_stats(_cp_r[(_cp_r["kind"] != "none") & ~_cp_r["position"].isin(_cp1_decp)])["det"]
+                    - _cp1_FA[(_cp_d, _cp_md)])
+        _cp1_ok_no, _cp1_ratio_no, _cp1_spread_no, _cp1_gain_no = _cp1_thesis_of(_cp1_Jno)
+        _cp1_n0 = _cp1_all["n0"]
+        _cp1_t += (
+            f"**Врезка в {_cp_ym(_cp1_dm, 'пр')} совпала с декабрьским скачком расходов**, и "
+            f"обнаружением засчитывался сам скачок. {_CP_DET[_cp1_det]} {_CP_ON['raw']} при этой врезке "
+            f"находил {_cp_range(_cp1_raw_dec)} возмущений при любом их типе и величине"
+            + (f", а {_CP_ON[_cp1_mode]} на неё "
+               f"{plural(len(_cp1_h0d), 'пришлась', 'пришлись', 'пришлись')} "
+               f"{len(_cp1_h0d)} из {_cp1_n0} нулевых задержек"
+               + ("" if not _cp1_twin else
+                  f", и в {_cp1_twin} из них нетронутый близнец ряда тревожил в тот же месяц")
+               if _cp1_n0 and len(_cp1_h0d) else
+               f", а {_CP_ON[_cp1_mode]} нулевых задержек на ней не было")
+            + f". Без декабрьской врезки у {_CP_DET_GEN[_cp1_det]} {_CP_ON[_cp1_mode]} доля нулевой задержки — "
+            f"{_cp_pct(_cp1_no['zero'])} вместо {_cp_pct(_cp1_all['zero'])}, обнаружение — "
+            f"{_cp_pct(_cp1_no['det'])} вместо {_cp_pct(_cp1_all['det'])}, J Юдена — "
+            f"{num(_cp1_Jno[(_cp1_det, _cp1_mode)], 1, sign=True)} вместо "
+            f"{num(_cp1_J1[(_cp1_det, _cp1_mode)], 1, sign=True)}, а J методов со штрафом "
+            f"{_CP_ON[_cp1_mode]} — {_cp_from_to(_cp1_ratio_no)} (со всеми врезками — "
+            f"{_cp_from_to(_cp1_ratio_J)})."
+        )
+        _cp1_t += (
+            f" Тезис о преобразовании от этого не зависел: без декабрьской врезки у каждого метода J "
+            f"{_CP_ON[_cp1_mode]} выше, чем {_CP_ON['raw']}, а разброс между методами со штрафом, "
+            f"{num(_cp1_spread_no, 1)} пункта, меньше наименьшего выигрыша от смены преобразования, "
+            f"{num(min(_cp1_gain_no.values()), 1)}." if _cp1_ok and _cp1_ok_no else
+            " Тезис о преобразовании держался со всеми врезками, а без декабрьской не подтверждается."
+            if _cp1_ok else
+            " Тезис о преобразовании со всеми врезками не подтверждался, а без декабрьской — подтверждается."
+            if _cp1_ok_no else
+            " Тезис о преобразовании не подтверждался ни со всеми врезками, ни без декабрьской.")
+    else:
+        _cp1_t += "Врезок в декабре у первой версии стенда не было."
+    # Верхней границы задержки у v1 нет: обнаружения в последнем декабре панели от последней врезки.
+    _cp1_last_dec = max((m for m in _cp1_months if m.endswith("-12")), default=None)
+    _cp1_last_p = max(_cp1_pos)
+    if _cp1_last_dec and _cp1_pos:
+        _cp1_late = _cp1_all["hits"][_cp1_all["hits"]["signal"] == _cp1_months.index(_cp1_last_dec)]
+        _cp1_far = _cp1_late[_cp1_late["position"] == _cp1_last_p]
+        _cp1_lag = _cp1_months.index(_cp1_last_dec) - _cp1_last_p
+        if len(_cp1_far) and _cp1_lag > 0:
+            _cp1_t += (f" **Верхней границы задержки не было:** {len(_cp1_late)} из {len(_cp1_all['hits'])} "
+                       f"обнаружений {_CP_DET_GEN[_cp1_det]} {_CP_ON[_cp1_mode]} пришлись на "
+                       f"{_cp_ym(_cp1_last_dec)}, {len(_cp1_far)} из них — с задержкой {_cp_mw(_cp1_lag)} "
+                       f"от врезки в {_cp_ym(_cp1_months[_cp1_last_p], 'пр')}.")
+    _cp1_t += (
+        ("\n\nУрок методический, и мы его не прячем: **синтетические врезки поверх настоящих рядов "
+         "не должны попадать на сезонные развороты** — иначе стенд засчитывает детектору саму "
+         "сезонность. Зачёт нужен парный" if _cp1_decp else "\n\nУрок методический: зачёт нужен парный")
+        + ", с нетронутым близнецом того же ряда (если он тревожит в тот же месяц, тревога была "
+        "бы и без врезки), и с границей задержки. Так устроен "
+        f"протокол {_cp_proto}; он объявлен в конфиге до прогона и после прогона не менялся."
+        + (f" Декабрь при этом из стенда не ушёл: при штрафе {_cp_pen(_cp_p_sel)} на него приходятся "
+           f"{_cp_pct(_cp_dsel['share'])} засчитанных сигналов {_CP_DET_GEN[_cp_det]} {_CP_ON[_cp_mode]} "
+           f"([выше](#cp-december))." if _cp_ready and _cp_dsel["dec"] else "")
+    )
+Markdown(_cp1_t) if _cp1_ready else Markdown("")
 ```
 
 ### Точки структурных изменений на реальных данных {#sec-cp-real}
@@ -3167,12 +3777,16 @@ if _cp_ready:
         f"после {in_words(RECENT_WINDOW, 'род')} месяцев без флага, так что один сдвиг даёт один "
         f"сигнал, сколько бы месяцев излом ни оставался «у конца». Доля месяца — доля "
         f"муниципалитетов, у которых в этом месяце начался эпизод; событие — доля не ниже "
-        f"{num(_cp_thr, 0)}%. Штраф — выбранный по стенду, {_cp_pen(_cp_p_sel)}"
+        f"{num(_cp_thr, 0)}%. Рядом с порогом — ранговый вид: место доли месяца события среди "
+        f"наблюдаемых месяцев, с первого проверяемого, {_cp_ym(_cp_first, 'род')}, и фон — медиана "
+        f"долей месяцев без событий; это описание, а не второй порог. Штраф — выбранный по стенду, "
+        f"{_cp_pen(_cp_p_sel)}"
         + (f"; рядом — та же картина при штрафе {_cp_pen(_cp_p_alt)}, на котором построен прежний "
            f"разбор, и сам прежний разбор: " if _cp_p_alt is not None else
            "; рядом — прежний разбор при том же штрафе: ")
         + "изломы по полному ряду, задним числом. Числа — из "
-        "`results/cp_realtime.csv`, `results/cp_realtime_events.csv` и `results/cp_offline.csv`."
+        "`results/cp_realtime.csv`, `results/cp_realtime_events.csv`, `results/cp_realtime_rank.csv` "
+        "и `results/cp_offline.csv`."
     )
 _cp_intro if _cp_ready else _cp_missing
 ```
@@ -3194,34 +3808,115 @@ if _cp_ready:
 
 ```{python}
 #| echo: false
-#| tbl-cap: "События в реальном времени. Окно события — от его месяца до следующего события, у последнего — до конца панели. Порог перейдён — первый месяц окна с долей не ниже порога; задержка — месяцы от события до него; наибольшая доля — за один месяц окна; в окне — доля муниципалитетов, у которых эпизод тревоги начался где-либо в окне."
+#| tbl-cap: "События в реальном времени: порог и ранговый вид. Окно события — от его месяца до следующего события, у последнего — до конца панели. Перейдён — первый месяц окна с долей не ниже порога, звёздочка — переход в декабре позже месяца события: там порог может переводить сам декабрьский скачок; задержка — месяцы от события до перехода; наибольшая доля — за один месяц окна; в окне — доля муниципалитетов, у которых эпизод тревоги начался где-либо в окне. Ранговый вид — описание, а не второй порог: доля месяца события, её место среди наблюдаемых месяцев того же штрафа (1 — наибольшая доля, при ничьей — средний ранг) и отношение к фону — медиане долей месяцев без событий; при нулевом фоне и фоне в один-два МО отношения нет: оно было бы неустойчивым."
 if _cp_ready:
     _cp_ev_rows, _cp_ev_index = [], []
+    _cp_thr_head = f"порог {num(_cp_thr, 0)}%"
     for _cp_p in [_cp_p_sel] + ([_cp_p_alt] if _cp_p_alt is not None else []):
+        _cp_K = _cp_KV[_cp_p]
         for _cp_e in _cp_events:
             _cp_r = _cp_EV.loc[(_cp_p, _cp_e)]
+            _cp_c = _cp_r["crossed_month"]
             _cp_ev_index.append((f"штраф {_cp_pen(_cp_p)}"
                                  + (", выбран по стенду" if _cp_p == _cp_p_sel else ""), _cp_ym(_cp_e)))
             _cp_ev_rows.append({
-                f"порог {num(_cp_thr, 0)}% перейдён": (_cp_ym(_cp_r["crossed_month"])
-                                                      if isinstance(_cp_r["crossed_month"], str)
-                                                      else "нет"),
-                "задержка, мес.": num(_cp_r["delay"], 0),
-                "наибольшая доля за месяц, %": (f"{num(_cp_r['max_share'], 1)} "
-                                                f"({_cp_ym(_cp_RT.loc[_cp_win[_cp_e], _cp_p].idxmax())})"),
-                "в окне, % МО": num(_cp_r["share_in_window"], 1),
+                (_cp_thr_head, "перейдён"): (_cp_ym(_cp_c) + ("*" if _cp_c.endswith("-12") and _cp_c != _cp_e else "")
+                                             if isinstance(_cp_c, str) else "нет"),
+                (_cp_thr_head, "задержка, мес."): num(_cp_r["delay"], 0),
+                (_cp_thr_head, "наибольшая за месяц, %"): (
+                    f"{num(_cp_r['max_share'], 1)} ({_cp_ym(_cp_RT.loc[_cp_win[_cp_e], _cp_p].idxmax())})"
+                    if _cp_r["max_share"] > 0 else num(_cp_r["max_share"], 1)),
+                (_cp_thr_head, "в окне, % МО"): num(_cp_r["share_in_window"], 1),
+                ("ранговый вид", "в месяц события, %"): num(_cp_K.loc[_cp_e, "share"], 1),
+                ("ранговый вид", f"место из {int(_cp_K['n_months'].iloc[0])}"): _cp_n01(_cp_K.loc[_cp_e, "rank"]),
+                ("ранговый вид", "к фону"): (num(_cp_K.loc[_cp_e, "ratio_to_background"], 1)
+                                            if _cp_n_panel and _cp_K["background_median"].iloc[0] * _cp_n_panel / 100 > 2
+                                            else "—"),
             })
     _cp_ev_tab = pd.DataFrame(_cp_ev_rows,
                               index=pd.MultiIndex.from_tuples(_cp_ev_index, names=["", "событие"]))
+    _cp_ev_tab.columns = pd.MultiIndex.from_tuples(_cp_ev_tab.columns)
 _cp_ev_tab if _cp_ready else _cp_missing
 ```
 
 ```{python}
 #| echo: false
 # Чем различаются картины — по файлам: переходы порога, эффект старта протокола, событие,
-# пришедшее, пока ряд ещё в тревоге, и пара изломов одного отрезка по полному ряду.
+# пришедшее, пока ряд ещё в тревоге, ранговый вид и пара изломов одного отрезка по полному ряду.
 if _cp_ready:
-    _cp_first = _cp_months[MIN_HISTORY]
+    from src.cp_bench import month_offset
+
+    def _cp_bg_says(p):
+        """Фон рангового вида при штрафе p — долей и числом МО. Отношение к фону в один-два МО
+        меняется от одного ряда, и на нём ничего не строится; при нулевом фоне его нет."""
+        K = _cp_KV[p]
+        bg = float(K["background_median"].iloc[0])
+        n_bg = int(K["event"].isna().sum())
+        mo = bg * _cp_n_panel / 100 if _cp_n_panel else np.nan
+        head = (f"Фон — медиана долей {n_bg} {plural(n_bg, 'месяца', 'месяцев', 'месяцев')} без событий, "
+                f"декабри в нём, — ")
+        if bg == 0:
+            return head + "нулевой, и отношения к нему нет."
+        head += _cp_pct_small(bg) + (f", {_cp_mo(mo)}" if np.isfinite(mo) else "")
+        if np.isfinite(mo) and mo <= 2:
+            return head + (": при фоне в один-два ряда отношение к нему меняется от одного ряда, "
+                           "и мы его не толкуем.")
+        return (head + "; отношение доли месяца события к фону — "
+                + ", ".join(f"у {_cp_ym(e, 'род')} {num(K.loc[e, 'ratio_to_background'], 1)}"
+                            for e in _cp_events) + ".")
+
+    def _cp_rank_says(p):
+        """Ранговый вид при штрафе p словами — описание, а не второй порог: место месяца каждого
+        события, его доля и число МО; месяцы выше события, если их немного; первый проверяемый
+        месяц выше события — эффект старта; наибольшие доли окон, стоящие выше самих месяцев
+        событий; фон."""
+        K = _cp_KV[p]
+        n = int(K["n_months"].iloc[0])
+        groups = {}
+        for e in _cp_events:
+            groups.setdefault((float(K.loc[e, "rank"]), float(K.loc[e, "share"])), []).append(e)
+        parts = []
+        for (r, s), es in groups.items():
+            k = int(_cp_NS.loc[es[0], p])
+            tie = int((K["share"] == s).sum()) - len(es)
+            above = sorted(K.index[K["share"] > s], key=lambda m: -K.loc[m, "share"])
+            notes = ([f"{rub(k)} МО из {rub(_cp_n_panel)}"] if k and _cp_n_panel and len(es) == 1 else []) + (
+                [f"такая же доля ещё у {tie} {plural(tie, 'месяца', 'месяцев', 'месяцев')}"] if tie > 0 else []) + (
+                [f"выше — {and_join(_cp_ym(m) for m in above)}"] if 0 < len(above) <= 4 else [])
+            parts.append(f"{and_join(_cp_ym(e) for e in es)} — место {_cp_n01(r)} ({_cp_pct(s)}"
+                         + "".join(f"; {x}" if i else f", {x}" for i, x in enumerate(notes)) + ")")
+        text = (f"**Ранговый вид при штрафе {_cp_pen(p)}.** По доле начал эпизодов среди {n} "
+                f"наблюдаемых месяцев " + "; ".join(parts) + ".")
+        # Первый проверяемый месяц выше месяца события — эффект старта, а не событие.
+        below = [e for e in _cp_events if K.loc[_cp_first, "share"] > K.loc[e, "share"]]
+        if below:
+            n_pts = MIN_HISTORY + 1 - month_offset(_cp_mode)
+            text += (f" {_cp_cap(_cp_ym(_cp_first))} стоит выше "
+                     + ("всех месяцев событий" if len(below) == len(_cp_events) > 1
+                        else and_join(_cp_ym(e, "род") for e in below))
+                     + f" из-за эффекта старта: это первый проверяемый месяц, первая оценка идёт на "
+                     f"{in_words(n_pts, 'род')} {plural(n_pts, 'точке', 'точках', 'точках')}"
+                     + (" темпа роста" if _cp_mode == "ratio" else "")
+                     + ", и эпизод в нём начинают все ряды, чей излом попал в первое окно.")
+        # Наибольшая доля окна события, стоящая выше самого месяца события: при запоздалом
+        # сигнале окно отличается от своего первого месяца, и описываются оба.
+        wins = []
+        for e in _cp_events:
+            w = _cp_RT.loc[_cp_win[e], p].idxmax()
+            if w != e and w in K.index and K.loc[w, "share"] > 0 and K.loc[w, "rank"] < K.loc[e, "rank"]:
+                wins.append((e, w))
+        if wins:
+            n_dec = sum(w.endswith("-12") for _, w in wins)
+            text += (" Наибольшая доля окна стоит выше самого месяца события: "
+                     + "; ".join(f"у {_cp_ym(e, 'род')} — {_cp_pct(K.loc[w, 'share'])} в {_cp_ym(w, 'пр')} "
+                                 f"(место {_cp_n01(K.loc[w, 'rank'])}"
+                                 + (f", {rub(int(_cp_NS.loc[w, p]))} МО" if K.loc[w, "share"] < 1 else "") + ")"
+                                 for e, w in wins)
+                     + (("" if len(wins) == 1 else
+                         f"; из этих месяцев {'все' if n_dec == len(wins) else in_words(n_dec, 'им_м')} — "
+                         f"{'декабрь' if n_dec == 1 else 'декабри'}") if n_dec else "")
+                     + ".")
+        return text + " " + _cp_bg_says(p)
 
     def _cp_picture(p):
         """Абзац о потоковой картине при штрафе p: переходы порога, декабрь, эффект старта,
@@ -3242,7 +3937,7 @@ if _cp_ready:
         # только проверенное: старт плюс наибольшая месячная доля окна — не меньше порога, и в какой
         # месяц пришлась эта доля; перешло бы событие порог без старта — не считается.
         e = _cp_events[0]
-        if (e not in _cp_crossed[p]
+        if (len(_cp_events) > 1 and e not in _cp_crossed[p]
                 and _cp_pos[_cp_first] < _cp_pos[e] <= _cp_pos[_cp_first] + RECENT_WINDOW
                 and _cp_RT.loc[_cp_first, p] > _cp_RT.loc[e, p]
                 and _cp_RT.loc[_cp_first, p] + _cp_EV.loc[(p, e), "max_share"] >= _cp_thr):
@@ -3263,9 +3958,9 @@ if _cp_ready:
                      f"Старт — свойство протокола, а не находка.")
         # Событие, пришедшее, пока ряд ещё в тревоге, нового эпизода не начинает — причина,
         # если вместе с рядами, уже бывшими в тревоге, событие могло бы перейти порог.
-        e = _cp_events[1]
+        e = _cp_events[1] if len(_cp_events) > 1 else _cp_events[0]
         before = _cp_months[_cp_pos[e] - 1]
-        if (e not in _cp_crossed[p] and _cp_RT.loc[before, p] > _cp_RT.loc[e, p]
+        if (len(_cp_events) > 1 and e not in _cp_crossed[p] and _cp_RT.loc[before, p] > _cp_RT.loc[e, p]
                 and _cp_RT.loc[before, p] + _cp_EV.loc[(p, e), "max_share"] >= _cp_thr):
             explained.add(e)
             text += (f" {_cp_cap(_cp_ym(e))} {'тоже ' if _cp_events[0] in explained else ''}не доходит — "
@@ -3280,7 +3975,14 @@ if _cp_ready:
                      + and_join(f"{_cp_pct(_cp_EV.loc[(p, e), 'share_in_window'])} ({_cp_ym(e)})"
                                 for e in rest)
                      + " территорий.")
-        return text
+        # Сколько раз за наблюдаемые месяцы начался эпизод тревоги: при строгом штрафе детектор
+        # на панели может почти молчать, и это надо сказать числом.
+        starts = int(_cp_NS.iloc[MIN_HISTORY:][p].sum())
+        if _cp_n_panel and starts < _cp_n_panel / 100:
+            text += (f" Детектор при этом штрафе на панели почти молчит: за "
+                     f"{len(_cp_months) - MIN_HISTORY} наблюдаемых месяцев эпизод тревоги начинается "
+                     f"{rub(starts)} {plural(starts, 'раз', 'раза', 'раз')} на {rub(_cp_n_panel)} рядов.")
+        return text + "\n\n" + _cp_rank_says(p)
 
     _cp_d = "\n\n".join(_cp_picture(p) for p in [_cp_p_sel] + ([_cp_p_alt] if _cp_p_alt is not None else []))
     # Пара изломов по полному ряду: что между ними — по самой панели.
@@ -4252,7 +4954,9 @@ python -m venv .venv
 .venv/bin/python -u scripts/horizons.py                 # пять горизонтов → results/horizons_*.csv
 .venv/bin/python -u scripts/error_decomposition.py      # → results/error_decomposition.csv
 .venv/bin/python -u scripts/training_length_sweep.py    # → results/training_length_sweep.csv
-.venv/bin/python -u scripts/changepoints.py             # стенд разладок, около двух минут → results/cp_*.csv
+.venv/bin/python -u scripts/changepoints.py             # стенд разладок v2, около 14 минут → results/cp_*.csv
+.venv/bin/python -u scripts/changepoints.py --config configs/changepoints_v1.yaml
+                                                        #   первая версия стенда → results/cp_v1/
 .venv/bin/python -u scripts/build_news_features.py      # словарь тем → results/news_dictionary.csv,
                                                         #   data/news/monthly.parquet и national.parquet
 .venv/bin/python -u scripts/news_national.py            # → results/news_national.csv
@@ -4266,9 +4970,13 @@ python -m venv .venv
 постановки — правка одного файла, а не переписывание. Пять горизонтов заданы так же —
 в `configs/horizons.yaml`; `scripts/horizons.py` считает их и сохраняет ошибку по каждому
 шагу горизонта. Стенд обнаружения структурных изменений — тоже: выборка, врезки, режимы
-подготовки, сетка штрафов, правило выбора штрафа для реальных данных, порог и события
-потокового сигнала заданы в `configs/changepoints.yaml`, а `scripts/changepoints.py` пишет
-по ним `results/cp_*.csv`, из которых раздел об обнаружении берёт все числа. `scripts/build_news_features.py` пересобирает признаки новостей по
+подготовки, сетка штрафов, правила зачёта (граница задержки и нетронутый близнец), правило
+выбора штрафа для реальных данных, порог и события потокового сигнала заданы
+в `configs/changepoints.yaml`, а `scripts/changepoints.py` пишет по ним десять файлов
+`results/cp_*.csv` — первой колонкой в каждом стоит версия протокола, — из которых раздел
+об обнаружении берёт все числа. Первая версия стенда, о которой [отдельный
+подраздел](#sec-cp-v1), воспроизводится тем же скриптом с `configs/changepoints_v1.yaml`
+и пишет в `results/cp_v1/`. `scripts/build_news_features.py` пересобирает признаки новостей по
 текущему словарю тем, и новостные скрипты после него читают уже их. `scripts/backfill_r2.py`
 при прогоне с нуля не нужен: это разовый бэкфилл слагаемых R² пула в результаты,
 посчитанные до 25.09, — нынешние прогоны пишут их сами.
