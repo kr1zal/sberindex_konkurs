@@ -400,8 +400,11 @@ _cp_cfg = yaml.safe_load(open("../configs/changepoints.yaml", encoding="utf-8"))
 _cp_proto = f"v{_cp_cfg['protocol_version']}"
 _cps = pd.read_csv("../results/cp_summary.csv")
 _cpe = pd.read_csv("../results/cp_realtime_events.csv", dtype={"crossed_month": object})
-# Файлы другой версии протокола на слайды молча не встанут: отчёт проверяет то же.
+# Файлы другой версии протокола или другой сетки штрафов на слайды молча не встанут: отчёт
+# вместо чисел пишет сообщение, слайд без чисел хуже громкой ошибки.
 assert set(_cps["protocol"]) == set(_cpe["protocol"]) == {_cp_proto}, "файлы стенда другой версии протокола"
+assert (sorted(set(_cps["penalty"].dropna())) == sorted(set(_cpe["penalty"]))
+        == sorted(float(p) for p in _cp_cfg["bench"]["penalties"])), "файлы стенда другой сетки штрафов"
 _cp_sel = float(_cpe.loc[_cpe["selected"].astype(str).str.lower() == "true", "penalty"].iloc[0])
 _cp_det, _cp_mode = _cp_cfg["realtime"]["detector"], _cp_cfg["realtime"]["mode"]
 _cp_S = _cps[(_cps["penalty"] == _cp_sel) | _cps["penalty"].isna()].set_index(["detector", "mode"])
@@ -468,9 +471,9 @@ _cp_less = ((({2: "вдвое", 3: "втрое", 4: "вчетверо"}.get(roun
               else None) or f"в {_num(_cp_r, 1)} раза") if np.isfinite(_cp_r) else "")
 _cp_ties = [k for k in _cp_best_keys if k != (_cp_det, _cp_mode)]
 if _cp_best_key == (_cp_det, _cp_mode):
-    _cp_best_says = (f"Лучший J — у {_CP_DET_GEN[_cp_det]}"
-                     + (f", столько же у {_and_join(_CP_DET_GEN[d] + _cp_ON.get(m, '') for d, m in _cp_ties)}"
-                        if _cp_ties else "") + ".")
+    # Ничья — одним перечнем: «у PELT и BinSeg».
+    _cp_best_says = (f"Лучший J — у {_and_join([_CP_DET_GEN[_cp_det]] + [_CP_DET_GEN[d] + _cp_ON.get(m, '') for d, m in _cp_ties])}"
+                     + ".")
 elif np.isfinite(_cp_r) and _cp_r >= 1.15:
     _cp_best_says = (f"Лучший J — {_num(_cp_best['J Юдена'], 1, sign=True)} у {_CP_DET_GEN[_cp_best_key[0]]}"
                      f"{_cp_best_on}, но находок {_cp_less} меньше, задержка "
@@ -486,23 +489,36 @@ _cp_grid = sorted(float(p) for p in _cp_cfg["bench"]["penalties"])
 _cp_edge = ("наибольший" if _cp_sel == _cp_grid[-1] else "наименьший" if _cp_sel == _cp_grid[0]
             else None) if len(_cp_grid) > 1 else None
 _cp_md, _cp_tw = _cp_cfg["bench"]["max_delay"], _cp_cfg["bench"]["twin_rule"]
-_cp_rule = " и ".join(([f"не позже {_cp_md} мес. после врезки"] if _cp_md is not None else [])
-                      + (["при молчащем нетронутом близнеце"] if _cp_tw else []))
+_cp_rule = ", ".join(([f"не позже {_cp_md} мес. после врезки"] if _cp_md is not None else [])
+                      + (["при молчащем близнеце"] if _cp_tw else []))
 _cpr = pd.read_csv("../results/cp_realtime.csv")
 _cp_months = list(_cpr.loc[_cpr["penalty"] == _cp_sel, "month"])
 _cpb = pd.read_csv("../results/cp_bench.csv", usecols=["detector", "mode", "penalty", "kind", "detected",
                                                        "signal"])
-_cp_b = _cpb[(_cpb["detector"] == _cp_det) & (_cpb["mode"] == _cp_mode) & (_cpb["penalty"] == _cp_sel)
+def _cp_dec_cut(det):
+    """Испорченные строки детектора на темпах роста при выбранном штрафе: сколько засчитано,
+    сколько из них с сигналом в декабре и обнаружение без них, %."""
+    b = _cpb[(_cpb["detector"] == det) & (_cpb["mode"] == _cp_mode) & (_cpb["penalty"] == _cp_sel)
              & (_cpb["kind"] != "none")]
-_cp_hit = _cp_b[_cp_b["detected"].astype(str).str.lower() == "true"]
-_cp_n_dec = int(_cp_hit["signal"].map(lambda t: _cp_months[int(t)].endswith("-12")).sum())
-_cp_dec_share = _cp_n_dec / len(_cp_hit) * 100 if len(_cp_hit) else np.nan
-_cp_det_nodec = (len(_cp_hit) - _cp_n_dec) / len(_cp_b) * 100 if len(_cp_b) else np.nan
-_cp_dec_says = (f"{_cp_pct(_cp_dec_share)} обнаружений {_CP_DET_GEN[_cp_det]} — сигналы в декабре, "
+    hit = b[b["detected"].astype(str).str.lower() == "true"]
+    n_dec = sum(_cp_months[int(t)].endswith("-12") for t in hit["signal"])
+    return len(hit), n_dec, ((len(hit) - n_dec) / len(b) * 100 if len(b) else np.nan)
+
+_cp_hit_n, _cp_n_dec, _cp_det_nodec = _cp_dec_cut(_cp_det)
+_cp_dec_share = _cp_n_dec / _cp_hit_n * 100 if _cp_hit_n else np.nan
+# При нулевых ложных J методов со штрафом равен их обнаружению — доля декабря нужна у всех.
+_cp_dec_all = [n_dec / n_hit * 100 for n_hit, n_dec, _ in (_cp_dec_cut(d) for d in _cp_dets if d not in _cp_own)
+               if n_hit]
+_cp_dec_rng = (_cp_pct(min(_cp_dec_all)) if round(min(_cp_dec_all), 1) == round(max(_cp_dec_all), 1)
+               else f"{_cp_pct(min(_cp_dec_all))[:-1]}–{_cp_pct(max(_cp_dec_all))}") if _cp_dec_all else ""
+_cp_dec_says = ((f"у методов со штрафом на темпах роста {_cp_dec_rng} засчитанного — сигналы в декабре; "
+                 f"у {_CP_DET_GEN[_cp_det]} без них {_cp_pct(_cp_det_nodec)}")
+                if _cp_n_dec and len(_cp_dec_all) > 1 else
+                f"{_cp_pct(_cp_dec_share)} обнаружений {_CP_DET_GEN[_cp_det]} — сигналы в декабре, "
                 f"без них — {_cp_pct(_cp_det_nodec)}" if _cp_n_dec else "")
 Markdown(
     f"Штраф {_cp_pen(_cp_sel)} — по стенду, до реальных данных"
-    + (f", {_cp_edge} в сетке: лучший мог лежать за её краем" if _cp_edge else "")
+    + (f", край сетки: лучший мог лежать за ним" if _cp_edge else "")
     + ". " + (f"Зачёт — {_cp_rule}. " if _cp_rule else "")
     + ("" if _cp_thesis else "**Заголовок слайда этим прогоном не подтверждается.** ")
     + _cp_best_says
@@ -563,15 +579,25 @@ def _cp_ym(month, names=_CP_NOM):
     return f"{names[int(month[5:]) - 1]} {month[:4]}"
 
 _cp_EV = _cpe.set_index(["penalty", "event"])
-_cpk = pd.read_csv("../results/cp_realtime_rank.csv", dtype={"event": object})
-_cp_KV = {p: g.set_index("month") for p, g in _cpk.groupby("penalty")}
+# Ранговый вид — необязательная часть (`realtime.rank_view`): без его файла — строка вместо таблицы.
+try:
+    _cpk = pd.read_csv("../results/cp_realtime_rank.csv", dtype={"event": object})
+except FileNotFoundError:
+    _cpk = pd.DataFrame()
 _cp_pens = [_cp_sel] + ([_cp_off_p] if _cp_off_p != _cp_sel else [])
-_cp_nm = int(_cp_KV[_cp_sel]["n_months"].iloc[0])
-_cp_rk = pd.DataFrame(
-    {f"штраф {_cp_pen(p)}": [f"{_cp_n01(_cp_KV[p].loc[e, 'rank'])} из {_cp_nm} "
-                             f"({_cp_pct(_cp_KV[p].loc[e, 'share'])})" for e in _cp_events] for p in _cp_pens},
-    index=pd.Index([_cp_ym(e) for e in _cp_events], name="ранговый вид"))
-Markdown(_cp_rk.to_markdown(disable_numparse=True, colalign=("left",) + ("right",) * len(_cp_pens)))
+_cp_KV = ({p: g.set_index("month") for p, g in _cpk.groupby("penalty")}
+          if len(_cpk) and _cp_cfg["realtime"].get("rank_view") and set(_cp_pens) <= set(_cpk["penalty"])
+          and set(_cpk["protocol"]) == {_cp_proto} else {})
+if _cp_KV:
+    _cp_nm = int(_cp_KV[_cp_sel]["n_months"].iloc[0])
+    _cp_rk = pd.DataFrame(
+        {f"штраф {_cp_pen(p)}": [f"{_cp_n01(_cp_KV[p].loc[e, 'rank'])} из {_cp_nm} "
+                                 f"({_cp_pct(_cp_KV[p].loc[e, 'share'])})" for e in _cp_events] for p in _cp_pens},
+        index=pd.Index([_cp_ym(e) for e in _cp_events], name="ранговый вид"))
+    _cp_rk_md = Markdown(_cp_rk.to_markdown(disable_numparse=True, colalign=("left",) + ("right",) * len(_cp_pens)))
+else:
+    _cp_rk_md = Markdown("Рангового вида нет: `results/cp_realtime_rank.csv` не записан.")
+_cp_rk_md
 ```
 :::
 ::: {.column width="48%"}
@@ -608,7 +634,10 @@ _cp_n_panel = int(round(float(_cp_nn.iloc[0]) * 100)) if len(_cp_nn) else None
 
 def _cp_rank_note(p):
     """К ранговому виду при штрафе p: первое место месяца события — числом МО; первый
-    проверяемый месяц выше месяца события — эффект старта; фон — долей и числом МО."""
+    проверяемый месяц выше месяца события — эффект старта; фон — долей и числом МО.
+    Без рангового вида — пусто."""
+    if p not in _cp_KV:
+        return ""
     K = _cp_KV[p]
     first, bg = K.index[0], float(K["background_median"].iloc[0])
     notes = []
@@ -631,10 +660,13 @@ def _cp_rank_note(p):
 
 _cp_off = _cp_OFF[_cp_off_p]
 _cp_top = sorted(_cp_off.nlargest(len(_cp_events)).index, key=_cp_months.index)
+def _cp_bullet(p):
+    note = _cp_rank_note(p)
+    return f"{_cp_line(p).rstrip('.')}" + (f"; {note}" if note else "") + "."
+
 Markdown(
-    f"- **Штраф {_cp_pen(_cp_sel)}, выбран по стенду:** {_cp_line(_cp_sel).rstrip('.')}; "
-    f"{_cp_rank_note(_cp_sel)}.\n"
-    + (f"- **Штраф {_cp_pen(_cp_off_p)}:** {_cp_line(_cp_off_p).rstrip('.')}; {_cp_rank_note(_cp_off_p)}.\n"
+    f"- **Штраф {_cp_pen(_cp_sel)}, выбран по стенду:** {_cp_bullet(_cp_sel)}\n"
+    + (f"- **Штраф {_cp_pen(_cp_off_p)}:** {_cp_bullet(_cp_off_p)}\n"
        if _cp_off_p != _cp_sel else "")
     + f"- **Задним числом, по полному ряду** (штраф {_cp_pen(_cp_off_p)}): "
     + ", ".join(f"{_cp_ym(m)} — {_num(_cp_off[m], 1)}%" for m in _cp_top)
