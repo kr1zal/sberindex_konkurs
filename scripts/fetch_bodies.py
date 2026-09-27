@@ -35,6 +35,9 @@
 символов — для попадания в тему по корням этого с избытком, а файл остаётся
 обозримым.
 
+Источник выборки — `data/news/headlines.parquet`; в репозитории его нет
+(заголовки чужих изданий, права не наши), он выкачивается локально `scripts/crawl_news.py`.
+
     .venv/bin/python -u scripts/fetch_bodies.py --sample 20000 --delay 1.0
 """
 from __future__ import annotations
@@ -205,7 +208,14 @@ def main() -> int:
     args = parser.parse_args()
 
     init_state()
-    headlines = pd.read_parquet(ROOT / "data/news/headlines.parquet")
+    headlines_path = ROOT / "data/news/headlines.parquet"
+    if not headlines_path.exists():
+        raise FileNotFoundError(
+            f"{headlines_path} нет — заголовков в репозитории не бывает (права чужих изданий). "
+            "Собрать: python scripts/crawl_news.py --outlets data/reference/news_outlets.json "
+            "--from 2023-01 --to 2024-12, затем src.news.load_headlines('data/news/raw')."
+        )
+    headlines = pd.read_parquet(headlines_path)
     headlines["month"] = pd.to_datetime(headlines["date"]).dt.to_period("M")
 
     months = sorted(headlines["month"].unique())

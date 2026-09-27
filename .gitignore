@@ -18,6 +18,11 @@ data/news/raw/
 # воспроизводятся scripts/fetch_bodies.py, а выводы лежат в results/
 data/news/bodies_sample.jsonl
 data/news/bodies_state.db*
+# Заголовки чужих изданий — 588 тыс. штук, 37 МБ. Это материалы редакций,
+# прав на них у нас нет. В git остаются только агрегаты (monthly.parquet,
+# national.parquet) — моделям нужны они, а не сами заголовки. Пересборка —
+# выкачкой scripts/crawl_news.py.
+data/news/headlines.parquet
 report/report_files/
 report/.quarto/
 # Логи фоновых прогонов: nohup ... > logs/*.log

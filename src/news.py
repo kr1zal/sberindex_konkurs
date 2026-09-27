@@ -137,7 +137,11 @@ def transliterate(text: str) -> str:
 
 
 def load_headlines(raw_dir: str | Path) -> pd.DataFrame:
-    """Читает все jsonl, приводит заголовки к единому алфавиту."""
+    """Читает все jsonl, приводит заголовки к единому алфавиту.
+
+    Результат — это и есть слой `data/news/headlines.parquet`, которого нет
+    в репозитории (заголовки чужих изданий, права не наши): его собирают локально
+    из архива `scripts/crawl_news.py` и сохраняют `save_datasets`."""
     rows = []
     for path in sorted(Path(raw_dir).glob("*.jsonl")):
         with path.open(encoding="utf-8") as fh:
@@ -199,6 +203,10 @@ def save_datasets(
     весит 56 МБ и GitHub предупреждает о превышении рекомендуемого порога.
     Колонка с адресом оставлена намеренно — она даёт прослеживаемость каждого
     заголовка до первоисточника, а это прямо работает на воспроизводимость.
+
+    `headlines.parquet` в репозиторий не входит — заголовки чужих изданий, права
+    на них не наши; в git идут только `monthly.parquet` и `national.parquet`,
+    а этот слой пересобирается локально из архива `scripts/crawl_news.py`.
 
     `headlines=None` — слой заголовков не переписывается. Так пересобирает признаки
     `scripts/build_news_features.py`: заголовков она не меняет, а их файл записан

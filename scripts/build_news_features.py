@@ -9,7 +9,9 @@
 
 Скрипт — единственный, кто пишет `data/news/monthly.parquet` и `data/news/national.parquet`:
 
-1. читает `data/news/headlines.parquet` — слой заголовков он не меняет;
+1. читает `data/news/headlines.parquet` — слой заголовков он не меняет; в репозитории
+   файла нет (заголовки чужих изданий, права не наши), он выкачивается локально
+   `scripts/crawl_news.py`;
 2. по каждой теме считает заголовки, попавшие по старому словарю и по новому, долю
    снятого и пять самых частых снятых слов; сверяет доли тем по старому словарю
    с файлом до 25.09 и печатает корреляцию старого и нового месячного ряда ДКП.
@@ -189,7 +191,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     news_dir, backup, table_path = ROOT / NEWS, ROOT / BACKUP, ROOT / TABLE
-    headlines = pd.read_parquet(news_dir / "headlines.parquet")
+    headlines_path = news_dir / "headlines.parquet"
+    if not headlines_path.exists():
+        raise FileNotFoundError(
+            f"{headlines_path} нет — заголовков в репозитории не бывает (права чужих изданий). "
+            "Собрать: python scripts/crawl_news.py --outlets data/reference/news_outlets.json "
+            "--from 2023-01 --to 2024-12, затем src.news.load_headlines('data/news/raw')."
+        )
+    headlines = pd.read_parquet(headlines_path)
     old = {name: pd.read_parquet(news_dir / name) for name in FILES}
     frame = prepared(headlines)
     print(f"заголовков {len(frame)}, месяцев {frame['month'].nunique()}, изданий {frame['domain'].nunique()}")
