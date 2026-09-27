@@ -48,19 +48,17 @@ def _and_join(items):
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " и " + items[-1]
 
 # Числа слайдов — из тех же файлов, что отчёт: руками переписанные не обновились бы
-# при перепрогоне.
+# при перепрогоне. read_results — тот же guard, что в отчёте: обычный CSV или, на чистом
+# клоне без прогона, его снимок .csv.gz (per_series.csv коммитится только снимком).
+from src.results_guard import read_results, refused
 _sum = pd.read_csv("../results/summary.csv", index_col=0)
-_ps = pd.read_csv("../results/per_series.csv", usecols=["model", "fold", "mae", "error"])
+_ps = read_results("../results/per_series.csv", usecols=["model", "fold", "mae", "error"])
 _pf = (_ps[_ps["error"].isna() & _ps["mae"].notna()]
        .pivot_table(index="model", columns="fold", values="mae"))
 _ORD = {0: "первом", 1: "втором", 2: "третьем"}
-# Обучение фолда — протокол в configs/full.yaml; неразрывный пробел — чтобы «15 мес» в шапке
-# не рвалось на две строки.
-_FOLD_LEN = {0: "15\u00a0мес", 1: "18\u00a0мес", 2: "21\u00a0мес"}
-# Шапки таблиц ссылались только на длину обучения; текст рядом говорит «первый/третий
-# фолд», и без номера фолда связь между ними терялась. Номер — как в отчёте и на слайде
-# «Перенос с длинных рядов» («в таблицах — фолд 0»): с нуля, из того же индекса, что и _ORD.
-_FOLD_MO = {k: f"фолд {k}: обучение {v}." for k, v in _FOLD_LEN.items()}
+# _FOLD_LEN/_FOLD_MO (длина обучения фолдов) вычисляются ниже, в «Первая находка», сразу
+# после того как там же для другой цели загружается панель (`wide`) — не здесь, чтобы
+# не грузить её дважды: длина обучения — функция панели и split.horizon/n_folds конфига.
 _GEN = ["нуля", "одного", "двух", "трёх", "четырёх", "пяти", "шести", "семи", "восьми", "девяти", "десяти"]
 # Корпус новостей — из помесячных агрегатов: сырых заголовков в репозитории нет, а сумма
 # `n_articles` равна числу заголовков корпуса.
@@ -116,6 +114,18 @@ from src.data import load_panel, build_matrix
 from src.models.prophet_model import ProphetModel
 panel = load_panel("../data/raw/mo_spending_2023-2024.parquet")
 wide, _ = build_matrix(panel, "Все категории", max_gap=2)
+# Длина обучения фолдов — тем же способом, что конвейер (src/split.py::rolling_origin),
+# из панели и протокола configs/full.yaml, а не вписана руками: неразрывный пробел — чтобы
+# «15 мес» в шапке не рвалось на две строки.
+import yaml as _yaml_fl
+from src.split import rolling_origin
+_full_cfg = _yaml_fl.safe_load(open("../configs/full.yaml", encoding="utf-8"))
+_full_folds = rolling_origin(wide.shape[0], _full_cfg["split"]["horizon"], _full_cfg["split"]["n_folds"])
+_FOLD_LEN = {f.index: f"{f.train_end}\u00a0мес" for f in _full_folds}
+# Шапки таблиц ссылались только на длину обучения; текст рядом говорит «первый/третий
+# фолд», и без номера фолда связь между ними терялась. Номер — как в отчёте и на слайде
+# «Перенос с длинных рядов» («в таблицах — фолд 0»): с нуля, из того же индекса, что и _ORD.
+_FOLD_MO = {k: f"фолд {k}: обучение {v}." for k, v in _FOLD_LEN.items()}
 y = wide["городской округ город Орёл"].to_numpy(float)
 rows = {}
 for label, kw in [("Prophet с годовой насильно", dict(yearly_seasonality=True)),
@@ -202,7 +212,7 @@ plt.show()
 ## Метрики рядом: MAE, MASE, R² {.smaller}
 
 ```{python}
-from src.results_guard import refused
+# read_results/refused — импортированы в самом начале файла.
 # Подписи короткие, как на слайде пяти горизонтов: полные подписи из отчёта переносились
 # в две-три строки, и таблица со строкой под ней не помещалась на слайд по высоте.
 _ru = {
@@ -232,7 +242,7 @@ Markdown(_tab.to_markdown(disable_numparse=True, colalign=("left",) + ("right",)
 ```{python}
 # Строка под таблицей — по фактическим средним: вырожденным среднее называется, только
 # если оно ниже нуля у всех, а «наивная лучшая» — только если это так.
-_per = pd.read_csv("../results/per_series.csv", usecols=["model", "mae", "r2", "error"])
+_per = read_results("../results/per_series.csv", usecols=["model", "mae", "r2", "error"])
 _mean = _per[~refused(_per) & _per["model"].isin(_ru)].groupby("model")["r2"].mean()
 _span = f"от {_num(_mean.min(), 1)} до {_num(_mean.max(), 1)}"
 if (_mean < 0).all() and _mean.idxmax() == _sm["MAE"].idxmax() == "naive_last":
@@ -357,8 +367,10 @@ Markdown(
 )
 ```
 
-Сезонно сглаженный агрегат не годится: сезонный размах 1,6 п.п. против 33,7
-у сырого и 44 у панели. Внутренний бэктест выбирает на нём `random_walk`.
+Сезонно сглаженный агрегат не годится: сглаживание вычищает именно ту сезонность,
+которую разнос делит между муниципалитетами, — январь и декабрь у сырого агрегата и у самой
+панели расходятся на десятки процентных пунктов, у сглаженного разница на порядок меньше.
+Внутренний бэктест выбирает на нём `random_walk`.
 
 ## Пять горизонтов: от наукаста до года {.smaller}
 
@@ -393,6 +405,10 @@ Markdown("\n".join(_hlines))
 _hzi = _hz.set_index(["horizon", "model"])
 _known1, _plain1 = _hzi.loc[(1, "two_stage_known"), "MAE"], _hzi.loc[(1, "two_stage"), "MAE"]
 _hs = pd.read_csv("../results/horizons_steps.csv")
+# Читаем здесь же, с остальными horizons_*.csv: нужен «Что не сработало: модели» (ниже)
+# и «Выводам» — порядок кода, а не отдельный повод грузить файл на том слайде, где он впервые
+# использовался раньше.
+_hfs = pd.read_csv("../results/horizons_folds.csv")
 _st = _hs[(_hs["horizon"] == 12) & (_hs["model"] == "naive_last")]
 _st = _st[_st["fold"] == _st["fold"].min()]
 _te = int(_st["train_end"].iloc[0])  # шаг s — месяц te + s, счёт с января 2023
@@ -401,8 +417,17 @@ _month_in = ["январе", "феврале", "марте", "апреле", "м
              "сентябре", "октябре", "ноябре", "декабре"]
 _month_of = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
              "сентября", "октября", "ноября", "декабря"]
+# Лучшая модель основного протокола (`_sum`, configs/full.yaml) не обязана входить
+# в configs/horizons.yaml — списки моделей независимы. Без проверки .loc[(1, top)] падал бы
+# KeyError и весь рендер слайда останавливался; вместо этого — понятная замена абзаца.
+_top = _sum["MAE"].idxmin()
+if (1, _top) in _hzi.index:
+    _ns_headline = f"**Наукаст: {_num(_hzi.loc[(1, _top), 'к Prophet, %'], 1)}% над эталоном.** "
+else:
+    _ns_headline = (f"**Наукаст: лучшая модель основного протокола ({_top}) не входит "
+                     f"в `configs/horizons.yaml` — сравнение на горизонтах недоступно.** ")
 Markdown(
-    f"**Наукаст: {_num(_hzi.loc[(1, _sum['MAE'].idxmin()), 'к Prophet, %'], 1)}% над эталоном.** "
+    _ns_headline +
     f"Известный агрегат за текущий месяц добавляет {_num(_plain1 - _known1, 1)} рубля: движение "
     f"страны на месяц предсказуемо, остаток — разброс.\n\n"
     f"**Год вперёд: у панельных моделей нет обучающих примеров**, двухэтапная обходит эталон "
@@ -426,6 +451,19 @@ from src import charts
 from src.external import load_aggregate
 import matplotlib.pyplot as plt
 _fc_cfg = yaml.safe_load(Path("../configs/forecast_forward.yaml").read_text(encoding="utf-8"))
+def _fc_hz_note():
+    """Оговорка про точность разноса на истории — только если обе пары моделей есть
+    в configs/horizons.yaml на нужных горизонтах: recommended[1] и two_stage_known читаются
+    из конфигов, а не гарантированы в горизонтном протоколе."""
+    keys = [(_fc_hmax, "two_stage_known"), (_fc_hmax, "two_stage"),
+            (1, _fc_cfg["recommended"][1]), (1, "two_stage_known")]
+    if any(k not in _hzi.index for k in keys):
+        return "."
+    if (_hzi.loc[keys[0], "MAE"] < _hzi.loc[keys[1], "MAE"]
+            and _hzi.loc[keys[2], "MAE"] < _hzi.loc[keys[3], "MAE"]):
+        return ("; на истории на год точнее разнос опубликованного агрегата (`two_stage_known`), "
+                "на месяц — панельная модель.")
+    return "."
 _fc_chk = pd.read_csv("../results/" + _fc_cfg["output"]["aggregate_check"], dtype={"month": str})
 _fc_hmax = int(_fc_chk["horizon"].max())
 _fc_year = _fc_chk[_fc_chk["horizon"] == _fc_hmax]
@@ -434,6 +472,11 @@ _fc_below = int((_fc_year.loc[_fc_year["method"] == "two_stage", "error_pct"] < 
 _fc_agg = load_aggregate("../data/reference/sberindex")
 _fig = charts.aggregate_check(_fc_agg, _fc_year)
 _fig.set_size_inches(7.2, 2.2)  # 2,5 с тремя абзацами под ним — 803 px из 760
+# Легенда функции (fontsize=9) при высоте figsize 2,2 отображалась мельче остального
+# текста слайда — данные внизу-слева свободны на всём диапазоне (панель растёт), поле
+# для более крупной подписи есть без наложения на линии.
+_ax = _fig.axes[0]
+_ax.legend(frameon=False, fontsize=11, labelcolor=charts.INK_SOFT, loc="upper left")
 _fig.tight_layout()
 plt.show()
 ```
@@ -458,11 +501,7 @@ Markdown(
     + "**Муниципальный прогноз проверит факт** разреза за 2025 год"
     # Разнос опубликованного агрегата — не на всё: на истории он точнее на год вперёд, а на месяц
     # вперёд точнее панельная модель.
-    + ("; на истории на год точнее разнос опубликованного агрегата (`two_stage_known`), "
-       "на месяц — панельная модель."
-       if _hzi.loc[(_fc_hmax, "two_stage_known"), "MAE"] < _hzi.loc[(_fc_hmax, "two_stage"), "MAE"]
-       and _hzi.loc[(1, _fc_cfg["recommended"][1]), "MAE"] < _hzi.loc[(1, "two_stage_known"), "MAE"]
-       else ".")
+    + _fc_hz_note()
 )
 ```
 
@@ -493,9 +532,21 @@ Markdown(
 )
 ```
 
-**Девять дополнительных месяцев улучшают модель в 10,4 раза** — наивную модель
-тот же срок не улучшает вовсе: её ошибка зависит от того, какие месяцы попали
-в тест, а не от длины истории.
+```{python}
+# «N дополнительных месяцев» и кратность — тем же расчётом, что «закон переноса» в резюме
+# отчёта (_rs["law"]): базовая MAE на короткой длине развёртки / на длинной, из тех же
+# results/training_length_sweep.csv, что таблица выше.
+_NOM = ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять"]
+_sw_lo, _sw_hi = min(_sw_months), max(_sw_months)
+_sw_delta = _sw_hi - _sw_lo
+_sw_law_k = _sw_sel.loc[_sw_lo, "базовая"] / _sw_sel.loc[_sw_hi, "базовая"]
+Markdown(
+    f"**{_NOM[_sw_delta].capitalize()} дополнительных "
+    f"{_plural(_sw_delta, 'месяц', 'месяца', 'месяцев')} улучшают модель в "
+    f"{_num(_sw_law_k, 1)} раза** — наивную модель тот же срок не улучшает вовсе: её ошибка "
+    f"зависит от того, какие месяцы попали в тест, а не от длины истории."
+)
+```
 
 ::: {.callout-warning}
 Прогнозировать предстоит с 24 месяцами обучения — за правым краем развёртки.
@@ -516,6 +567,11 @@ Markdown(
 короткий не может — какова сезонная форма месяца, которого в обучении не было.
 
 ## Обнаружение разладок: решает преобразование {.smaller}
+
+<!-- Запас по низу был 1 px из 760 (759) — здесь же уместны шесть строк таблицы и два абзаца.
+0,92em, как на слайде «Выводы» (::: {style="font-size: 0.9em;"}), даёт запас с двузначным числом
+пикселей, не трогая ни состав, ни числа. -->
+::: {style="font-size: 0.92em;"}
 
 ```{python}
 # Стенд — из файлов scripts/changepoints.py (results/cp_*.csv): штраф выбран правилом
@@ -620,8 +676,15 @@ _cp_rule = ", ".join(([f"не позже {_cp_md} мес. после врезк�
                       + (["при молчащем нетронутом близнеце"] if _cp_tw else []))
 _cpr = pd.read_csv("../results/cp_realtime.csv")
 _cp_months = list(_cpr.loc[_cpr["penalty"] == _cp_sel, "month"])
-_cpb = pd.read_csv("../results/cp_bench.csv", usecols=["detector", "mode", "penalty", "kind", "detected",
-                                                       "signal"])
+# cp_bench.csv — крупный, на чистом клоне без прогона стенда лежит только снимком .csv.gz
+# (read_results/resolve_results это находит сам); если нет и снимка вовсе — не роняем слайд,
+# а пишем это в самой фразе.
+try:
+    _cpb = read_results("../results/cp_bench.csv", usecols=["detector", "mode", "penalty", "kind",
+                                                             "detected", "signal"])
+except FileNotFoundError:
+    _cpb = None
+
 def _cp_dec_cut(det):
     """Испорченные строки детектора на темпах роста при выбранном штрафе: сколько засчитано,
     сколько из них с сигналом в декабре и обнаружение без них, %."""
@@ -631,20 +694,23 @@ def _cp_dec_cut(det):
     n_dec = sum(_cp_months[int(t)].endswith("-12") for t in hit["signal"])
     return len(hit), n_dec, ((len(hit) - n_dec) / len(b) * 100 if len(b) else np.nan)
 
-_cp_hit_n, _cp_n_dec, _cp_det_nodec = _cp_dec_cut(_cp_det)
-_cp_dec_share = _cp_n_dec / _cp_hit_n * 100 if _cp_hit_n else np.nan
-# При нулевых ложных J методов со штрафом равен их обнаружению — доля декабря нужна у всех,
-# а не только у потокового: завышает J любого из них, не только PELT.
-_cp_dec_cuts = {d: _cp_dec_cut(d) for d in _cp_dets if d not in _cp_own}
-_cp_any_dec = any(n_dec for _, n_dec, _ in _cp_dec_cuts.values())
-_cp_dec_all = [n_dec / n_hit * 100 for n_hit, n_dec, _ in _cp_dec_cuts.values() if n_hit]
-_cp_dec_rng = (_cp_pct(min(_cp_dec_all)) if round(min(_cp_dec_all), 1) == round(max(_cp_dec_all), 1)
-               else f"{_cp_pct(min(_cp_dec_all))[:-1]}–{_cp_pct(max(_cp_dec_all))}") if _cp_dec_all else ""
-_cp_dec_says = ((f"у методов со штрафом на темпах роста {_cp_dec_rng} засчитанного — сигналы в декабре; "
-                 f"у {_CP_DET_GEN[_cp_det]} без них {_cp_pct(_cp_det_nodec)}")
-                if _cp_any_dec and len(_cp_dec_all) > 1 else
-                f"{_cp_pct(_cp_dec_share)} обнаружений {_CP_DET_GEN[_cp_det]} — сигналы в декабре, "
-                f"без них — {_cp_pct(_cp_det_nodec)}" if _cp_n_dec else "")
+if _cpb is None:
+    _cp_dec_says = "разрез по сигналам в декабре недоступен: cp_bench.csv нет ни файлом, ни снимком"
+else:
+    _cp_hit_n, _cp_n_dec, _cp_det_nodec = _cp_dec_cut(_cp_det)
+    _cp_dec_share = _cp_n_dec / _cp_hit_n * 100 if _cp_hit_n else np.nan
+    # При нулевых ложных J методов со штрафом равен их обнаружению — доля декабря нужна у всех,
+    # а не только у потокового: завышает J любого из них, не только PELT.
+    _cp_dec_cuts = {d: _cp_dec_cut(d) for d in _cp_dets if d not in _cp_own}
+    _cp_any_dec = any(n_dec for _, n_dec, _ in _cp_dec_cuts.values())
+    _cp_dec_all = [n_dec / n_hit * 100 for n_hit, n_dec, _ in _cp_dec_cuts.values() if n_hit]
+    _cp_dec_rng = (_cp_pct(min(_cp_dec_all)) if round(min(_cp_dec_all), 1) == round(max(_cp_dec_all), 1)
+                   else f"{_cp_pct(min(_cp_dec_all))[:-1]}–{_cp_pct(max(_cp_dec_all))}") if _cp_dec_all else ""
+    _cp_dec_says = ((f"у методов со штрафом на темпах роста {_cp_dec_rng} засчитанного — сигналы в декабре; "
+                     f"у {_CP_DET_GEN[_cp_det]} без них {_cp_pct(_cp_det_nodec)}")
+                    if _cp_any_dec and len(_cp_dec_all) > 1 else
+                    f"{_cp_pct(_cp_dec_share)} обнаружений {_CP_DET_GEN[_cp_det]} — сигналы в декабре, "
+                    f"без них — {_cp_pct(_cp_det_nodec)}" if _cp_n_dec else "")
 Markdown(
     f"Штраф {_cp_pen(_cp_sel)} — по стенду, до реальных данных"
     + (f", край сетки: лучший мог лежать за ним" if _cp_edge else "")
@@ -656,6 +722,8 @@ Markdown(
 ```
 
 **На сырых рядах детекторы ловят сезонность и структуру рядов, а не изломы.**
+
+:::
 
 ## Интерпретация на реальных данных {.smaller}
 
@@ -866,7 +934,6 @@ _ft_line = (
 # Другие горизонты: на наукасте — выигрыш к zero-shot и к наивной; на длинных — пропуск
 # или отказ дообучения (число совпадает с zero-shot или прочерк).
 _hzv = _hz.set_index(["horizon", "model"])["MAE"]
-_hfs = pd.read_csv("../results/horizons_folds.csv")
 _cut1 = (1 - _hzv[(1, "chronos_ft")] / _hzv[(1, "chronos_small")]) * 100
 _vs1 = (_hzv[(1, "chronos_ft")] / _hzv[(1, "naive_last")] - 1) * 100
 _untuned = []
