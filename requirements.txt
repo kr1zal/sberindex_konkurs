@@ -9,6 +9,9 @@ statsmodels>=0.14
 tabulate>=0.9
 matplotlib>=3.8
 
+# Нужен только скриптам выкачки новостей (scripts/crawl_news.py, scripts/fetch_bodies.py)
+requests>=2.31
+
 # Фундаментальные модели. Chronos и TimesFM ставятся обычным образом.
 chronos-forecasting>=2.3
 timesfm[torch]>=3.0
