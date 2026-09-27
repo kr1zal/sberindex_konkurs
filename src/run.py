@@ -248,7 +248,10 @@ def _warn_identical(ok: pd.DataFrame) -> None:
     for i, a in enumerate(models):
         for b in models[i + 1 :]:
             pair = wide[[a, b]].dropna()
-            if len(pair) and np.allclose(pair[a], pair[b], rtol=1e-9, atol=1e-9):
+            # Допуск — копейка на ряд, как при поиске двойников в отчёте: одна и та же модель,
+            # вызванная пакетно и по рядам (chronos_panel/chronos_small), расходится на ~1e-5
+            # относительно из-за порядка операций, и допуск 1e-9 её не ловил.
+            if len(pair) and np.allclose(pair[a], pair[b], rtol=1e-5, atol=0.01):
                 print(
                     f"  ВНИМАНИЕ: {a} и {b} дали идентичные прогнозы на всех {len(pair)} парах "
                     f"ряд-фолд. Скорее всего одна из моделей вырождается в другую."
