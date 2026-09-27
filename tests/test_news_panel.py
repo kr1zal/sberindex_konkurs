@@ -203,7 +203,10 @@ class ModelNewsAlignmentTest(unittest.TestCase):
             future_idx = corrupted.index[future]
             self.assertTrue(len(future_idx) >= 2)  # проверка на валидность самой порчи
             corrupted.loc[future_idx[0], "t_ceny"] = np.nan  # month = train_end — то, что читает t + 1
-            corrupted.loc[future_idx[1:], "t_ceny"] *= 1000.0
+            # Не ×1000: будущие значения и так выше всех порогов деревьев и остались бы в той же
+            # ветви — порча месяцев t + 2 и дальше была бы невидимой. Отрицательное значение
+            # уводит их в другую ветвь, и новости любого месяца после origin меняют прогноз.
+            corrupted.loc[future_idx[1:], "t_ceny"] = -1000.0
             corrupted.to_parquet(path)
 
             dirty = GlobalGBM(news_path=str(path))

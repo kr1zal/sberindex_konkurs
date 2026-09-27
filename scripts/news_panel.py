@@ -175,9 +175,10 @@ MIN_SIZE = 3
 # ряду, а по темпу роста (`configs/changepoints.yaml: realtime.mode`) — тот же режим, что
 # и у потокового сигнала, иначе offline и realtime отвечали бы на разные вопросы. Темп
 # роста короче ряда на одну точку, и `month_offset` (src/cp_bench.py) сдвигает индекс
-# излома b обратно к месяцу исходной панели: month = b + offset. Строка не вписана
-# руками — берётся из того же места, что и offline_breaks, чтобы расхождение режимов
-# не прошло тихо.
+# излома b обратно к месяцу исходной панели: month = b + offset. Режим вписан здесь литералом
+# (offline_breaks берёт его из `realtime.mode` в configs/changepoints.yaml): если конфиг
+# сменят, окно разойдётся с файлом изломов, и это поймают обе проверки при запуске —
+# check_breaks_within_range и check_window_boundaries_reachable.
 OFFLINE_MODE = "ratio"
 
 BREAKS_CORR_COLUMNS = ["design", "feature", "lag", "n", "df", "r", "t", "p", "alpha", "t_threshold", "r_critical", "passed"]
