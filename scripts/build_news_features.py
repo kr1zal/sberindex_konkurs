@@ -196,7 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         raise FileNotFoundError(
             f"{headlines_path} нет — заголовков в репозитории не бывает (права чужих изданий). "
             "Собрать: python scripts/crawl_news.py --outlets data/reference/news_outlets.json "
-            "--from 2023-01 --to 2024-12, затем src.news.load_headlines('data/news/raw')."
+            "--from 2023-01 --to 2024-12, затем src.news.load_headlines('data/news/raw')"
+            ".to_parquet('data/news/headlines.parquet', compression='zstd', index=False)."
         )
     headlines = pd.read_parquet(headlines_path)
     old = {name: pd.read_parquet(news_dir / name) for name in FILES}

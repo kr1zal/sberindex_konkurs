@@ -141,7 +141,10 @@ def load_headlines(raw_dir: str | Path) -> pd.DataFrame:
 
     Результат — это и есть слой `data/news/headlines.parquet`, которого нет
     в репозитории (заголовки чужих изданий, права не наши): его собирают локально
-    из архива `scripts/crawl_news.py` и сохраняют `save_datasets`."""
+    из архива `scripts/crawl_news.py` и сохраняют сами — `.to_parquet('data/news/headlines.parquet',
+    compression='zstd', index=False)`, той же парой параметров сжатия, что и в `save_datasets`,
+    но не им: он требует `features` и перепишет `monthly.parquet`, а файлы признаков
+    пересобирает только `scripts/build_news_features.py`."""
     rows = []
     for path in sorted(Path(raw_dir).glob("*.jsonl")):
         with path.open(encoding="utf-8") as fh:

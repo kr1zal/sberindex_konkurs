@@ -19,9 +19,11 @@ import sys
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -102,6 +104,26 @@ def corrupt_after_origin(aggregate: pd.Series, origin: pd.Period, horizon_reach:
     return out
 
 
+def make_long_series_with_future_garbage(
+    origin: pd.Period, n_pre: int = 40, n_post: int = 6,
+) -> pd.Series:
+    """Длинный ряд, заходящий за origin, с мусором на этих месяцах.
+
+    Для проверки обрезки контекста (см. `ContextTruncationTest`): если бы скрипт
+    не обрезал `long_series` по origin перед тем, как отдать его прогнозным
+    моделям, этот мусор («не тот» порядок величины) дошёл бы до них, и его
+    легко отличить от настоящих значений.
+    """
+    rng = np.random.default_rng(7)
+    n = n_pre + n_post
+    pre = pd.period_range(end=origin, periods=n_pre, freq="M")
+    post = pd.period_range(start=origin + 1, periods=n_post, freq="M")
+    values = 500_000 + 1_000 * np.arange(n) + rng.normal(0, 100, n)
+    series = pd.Series(values, index=pre.append(post))
+    series.loc[series.index > origin] *= 1000.0  # мусор — обрезанный контекст не должен его увидеть
+    return series
+
+
 def make_context(aggregate: pd.Series, wide: pd.DataFrame) -> PanelContext:
     index = pd.to_datetime(wide.index).to_period("M")
     return PanelContext(
@@ -120,9 +142,15 @@ def make_regions(columns: pd.Index) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["series_id", "region", "oktmo"])
 
 
-def run(aggregate: pd.Series, wide: pd.DataFrame, cfg: dict = CFG):
-    """forecast_forward на синтетике, вывод и предупреждения подавлены."""
-    context = make_context(aggregate, wide)
+def run(aggregate: pd.Series, wide: pd.DataFrame, cfg: dict = CFG, context: PanelContext | None = None):
+    """forecast_forward на синтетике, вывод и предупреждения подавлены.
+
+    `context` — готовый контекст вместо построенного из `aggregate`/`wide`: нужен
+    тестам, которым требуется положить что-то своё в контекст (например, длинный
+    ряд с мусором после origin), не переопределяя `make_context`.
+    """
+    if context is None:
+        context = make_context(aggregate, wide)
     regions = make_regions(wide.columns)
     with contextlib.redirect_stdout(io.StringIO()), warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -182,6 +210,34 @@ class ShapeAndKeysTest(unittest.TestCase):
             expected_months = [str(ORIGIN + k) for k in range(1, horizon + 1)]
             with self.subTest(model=model, horizon=horizon):
                 self.assertEqual(sorted(rows["month"].unique()), expected_months)
+
+    def test_two_stage_known_ratio_to_month_aggregate_is_constant_per_series_and_horizon(self):
+        """`forecast / aggregate[месяц строки]` обязано быть одним числом на пару
+        (ряд, горизонт) — это и есть доля ряда, на которую `two_stage_known`
+        домножает ОПУБЛИКОВАННЫЙ агрегат месяца из колонки `month`.
+
+        В отличие от `test_months_are_first_h_months_after_origin` (который сверяет
+        подписи месяцев с тем, что сама же `_long_rows` в них и кладёт — тавтология),
+        здесь подпись месяца сверяется с фактическим значением агрегата на этот месяц
+        и с тем, что реально попало в `forecast`. Если бы индекс дополнения
+        (`_future_index`) был сдвинут на месяц, `two_stage_known` умножала бы долю
+        не на тот агрегат, а подпись всё равно осталась бы «правильной» (её ставит
+        `_long_rows` независимо от того, что почитала модель) — отношение
+        перестало бы быть постоянным по шагам горизонта, потому что синтетический
+        агрегат — тренд и сезонность с шумом, а не чистая экспонента, и отношение
+        соседних месяцев у него само не постоянно.
+        """
+        known = self.forecast.loc[self.forecast["model"] == "two_stage_known"].copy()
+        months = pd.PeriodIndex(known["month"], freq="M")
+        known["aggregate_at_month"] = self.aggregate.reindex(months).to_numpy()
+        known["ratio"] = known["forecast"] / known["aggregate_at_month"]
+        for (series, horizon), group in known.groupby(["series_id", "horizon"]):
+            with self.subTest(series=series, horizon=horizon):
+                ratios = group["ratio"].to_numpy()
+                self.assertTrue(
+                    np.allclose(ratios, ratios[0], rtol=1e-9, atol=0),
+                    f"отношение forecast/aggregate[month] непостоянно по горизонту: {ratios}",
+                )
 
     def test_key_is_unique(self):
         key = list(zip(
@@ -321,6 +377,116 @@ class NoLeakageTest(unittest.TestCase):
         clean = sort_check(self.clean_check)
         garbage = sort_check(self.garbage_check)
         self.assertFalse(clean["actual"].reset_index(drop=True).equals(garbage["actual"].reset_index(drop=True)))
+
+
+class _ContextSpy:
+    """Оборачивает настоящую модель: `fit`/`predict` идут в неё без изменений,
+    а `set_context` попутно складывает полученный контекст в `sink`.
+
+    Не подменяет логику скрипта ради теста — прогноз считает настоящая модель,
+    спай только подсматривает, что ей передали, чтобы проверить, что скрипт
+    обрезает контекст по origin для прогнозных моделей и не обрезает для
+    `two_stage_known`, без пересборки этой проверки из значений самого прогноза.
+    """
+
+    def __init__(self, inner, sink: list) -> None:
+        self._inner = inner
+        self._sink = sink
+
+    def set_context(self, context) -> None:
+        self._sink.append(context)
+        self._inner.set_context(context)
+
+    def fit(self, wide, train_end, horizon):
+        self._inner.fit(wide, train_end, horizon)
+        return self
+
+    def predict(self, wide, train_end, horizon):
+        return self._inner.predict(wide, train_end, horizon)
+
+    @property
+    def notes(self):
+        return self._inner.notes
+
+
+def _spy_factory(real_factory, sink: list):
+    return lambda: _ContextSpy(real_factory(), sink)
+
+
+class ContextTruncationTest(unittest.TestCase):
+    """Контекст, который получают прогнозные модели, обрезан по origin;
+    `two_stage_known` — нет. Тестовый контекст раньше нёс `long_series={}`
+    и `external=None` без единого длинного ряда — обрезать было попросту нечего,
+    и этот путь скрипта тестами не проверялся."""
+
+    def test_forecast_models_get_context_cut_at_origin_known_model_gets_full_one(self):
+        wide = make_wide()
+        aggregate = make_aggregate()
+        long_series = make_long_series_with_future_garbage(ORIGIN)
+        context = dataclasses.replace(
+            make_context(aggregate, wide), long_series={"industry_x": long_series},
+        )
+        cfg = {**CFG, "horizons": [1]}  # одного горизонта достаточно: обрезка — не свойство горизонта
+
+        cut_contexts: list[PanelContext] = []
+        full_contexts: list[PanelContext] = []
+        with mock.patch.dict(
+            forecast_forward_module.GLOBAL_MODELS,
+            {"global_gbm_cat": _spy_factory(
+                forecast_forward_module.GLOBAL_MODELS["global_gbm_cat"], cut_contexts,
+            )},
+        ), mock.patch.dict(
+            forecast_forward_module.EXTRA_GLOBAL,
+            {"two_stage_known": _spy_factory(
+                forecast_forward_module.EXTRA_GLOBAL["two_stage_known"], full_contexts,
+            )},
+        ):
+            run(aggregate, wide, cfg=cfg, context=context)
+
+        self.assertEqual(len(cut_contexts), 1)
+        self.assertEqual(len(full_contexts), 1)
+
+        cut = cut_contexts[0]
+        pd.testing.assert_series_equal(cut.long_series["industry_x"], long_series.loc[:ORIGIN])
+        pd.testing.assert_series_equal(cut.aggregate, aggregate.loc[:ORIGIN])
+        self.assertIsNone(cut.external)
+
+        known = full_contexts[0]
+        pd.testing.assert_series_equal(known.aggregate, aggregate)
+        pd.testing.assert_series_equal(known.long_series["industry_x"], long_series)
+
+
+class RealConfigConsistencyTest(unittest.TestCase):
+    """`configs/forecast_forward.yaml` согласован с тем, что скрипт от него ожидает.
+
+    `CFG` во всех тестах выше вписан руками и с настоящим конфигом никак не
+    сверяется — расхождение (модель без регистрации, горизонт без правила,
+    неразбираемый origin) иначе осталось бы незамеченным до самого прогона.
+    """
+
+    def test_real_config_matches_registries_and_horizons(self):
+        cfg = yaml.safe_load((ROOT / "configs" / "forecast_forward.yaml").read_text(encoding="utf-8"))
+        prognostic = forecast_forward_module.GLOBAL_MODELS
+        known_available = forecast_forward_module.GLOBAL_MODELS | forecast_forward_module.EXTRA_GLOBAL
+
+        for horizon, name in cfg["recommended"].items():
+            with self.subTest(role="recommended", horizon=horizon, model=name):
+                self.assertIn(name, prognostic)
+        with self.subTest(role="comparison", model=cfg["comparison"]):
+            self.assertIn(cfg["comparison"], prognostic)
+        with self.subTest(role="known_aggregate", model=cfg["known_aggregate"]):
+            self.assertIn(cfg["known_aggregate"], known_available)
+
+        with self.subTest(check="recommended_keys_match_horizons"):
+            self.assertEqual(sorted(cfg["recommended"]), sorted(cfg["horizons"]))
+
+        with self.subTest(check="origin_parses_as_month"):
+            origin = pd.Period(cfg["origin"], freq="M")  # бросит, если не месяц — и есть проверка
+            self.assertEqual(str(origin), cfg["origin"])
+
+        with self.subTest(check="output_has_both_filenames"):
+            self.assertIn("forecast", cfg["output"])
+            self.assertIn("aggregate_check", cfg["output"])
 
 
 if __name__ == "__main__":
