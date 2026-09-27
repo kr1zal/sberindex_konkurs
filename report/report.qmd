@@ -226,11 +226,12 @@ if "model" in _per:
                 _twins.append((_wcols[_i], _wcols[_j], _dmax))
 _n_models = (_ok["model"].nunique() - len({b for _, b, _ in _twins})) if "model" in _per else 0
 
-# Корпус новостей — из файла заголовков (он в репозитории).
+# Корпус новостей — из помесячных агрегатов по регионам: сырых заголовков в репозитории нет
+# (права на них у изданий), а сумма `n_articles` по агрегату равна числу заголовков корпуса.
 try:
-    _headlines = pd.read_parquet("../data/news/headlines.parquet", columns=["region_name"])
+    _news_monthly = pd.read_parquet("../data/news/monthly.parquet", columns=["region_name", "n_articles"])
 except FileNotFoundError:
-    _headlines = pd.DataFrame(columns=["region_name"])
+    _news_monthly = pd.DataFrame(columns=["region_name", "n_articles"])
 ```
 
 ```{python}
@@ -527,9 +528,9 @@ if _rs_ready and {"naive_last", "two_stage"} <= set(_sum.index):
                              f"из {rub(_sum.loc['naive_last', 'MAE'])}")
 if _rs_ready and "sMAPE" in _sum:
     _rs["smape"] = Markdown(num(_sum.loc[_top, "sMAPE"], 1))
-if len(_headlines):
-    _rs["headlines"] = Markdown(rub(len(_headlines)))
-    _rs["regions"] = Markdown(str(_headlines["region_name"].nunique()))
+if len(_news_monthly):
+    _rs["headlines"] = Markdown(rub(_news_monthly["n_articles"].sum()))
+    _rs["regions"] = Markdown(str(_news_monthly["region_name"].nunique()))
 ```
 
 ```{python}
@@ -1907,8 +1908,11 @@ if {"к Prophet, %", "к наивной, %"} <= set(_sum.columns):
 [Перенос с длинных рядов].
 
 **Чем платим.** Prophet интерпретируем — видно отдельно тренд, отдельно сезонность,
-и он сам даёт доверительные интервалы. Наша модель этого не умеет. И ей нужна
-панель: на одном ряду без соседей подход неприменим вообще.
+и он сам даёт доверительные интервалы. Нашей модели интервалы построить можно —
+конформно, по остаткам на обучающих фолдах, а у Chronos и TimesFM их дают квантили, —
+но мы их не приводим: на горизонтах 6 и 12 месяцев фолдов один-два, и покрытие
+интервала на них не проверить. И нашей модели нужна панель: на одном ряду без соседей
+подход неприменим вообще.
 
 #### Модель против эталона: по фолдам и с интервалами
 
@@ -2144,6 +2148,175 @@ Markdown(f"{_cp['warning'].data}\n\n{_cp['fold_link'].data}")
 территории без панели. И не заменяет длинный ряд: при истории в пять лет вместо
 двух точность вырастет сильнее, чем от любой смены модели.
 
+### Прогноз на 2025 год {#sec-forecast-2025}
+
+```{python}
+#| echo: false
+# Прогноз вперёд от конца панели — scripts/forecast_forward.py по configs/forecast_forward.yaml.
+# Модели по горизонтам — из конфига (правило раздела о практике), числа — из двух файлов прогона;
+# факт агрегата для рисунка — тот же ряд, что читает скрипт, целиком: после origin это проверка.
+import yaml
+from src.data import build_matrix, load_panel
+from src.external import load_aggregate
+
+_fc_cfg = yaml.safe_load(Path("../configs/forecast_forward.yaml").read_text(encoding="utf-8"))
+# Матрица панели — по данным конфига прогноза: раздел «Данные» с общей матрицей идёт ниже.
+_fc_wide, _ = build_matrix(load_panel(Path("..") / _fc_cfg["data"]["path"]),
+                           _fc_cfg["data"]["category"], max_gap=_fc_cfg["data"]["max_gap"])
+_fc_chk = table("../results/forecast_2025_aggregate_check.csv")
+_fc_ready = "method" in _fc_chk
+_fc_ru = {"global_gbm_cat": "простая панельная модель с долями категорий",
+          "two_stage": "двухэтапная"}
+# Кандидаты первого этапа (src/external.py::CANDIDATES) — словами.
+_fc_agg_ru = {"seasonal_median": "медианный по годам прирост того же месяца",
+              "seasonal_naive": "прошлогодний прирост того же месяца",
+              "ets": "экспоненциальное сглаживание с затухающим трендом",
+              "sarima": "SARIMA", "random_walk": "последнее значение"}
+_fc_origin = pd.Period(_fc_cfg["origin"], "M")
+_fc_h = sorted(int(h) for h in _fc_cfg["recommended"])
+
+
+def _fc_and(items):
+    items = [str(i) for i in items]
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} и {items[-1]}"
+
+
+_fc_by_model = defaultdict(list)
+for _h in _fc_h:
+    _fc_by_model[_fc_cfg["recommended"][_h]].append(_h)
+_fc_rule = "; ".join(
+    f"на {_fc_and(hs)} {plural(hs[-1], 'месяц', 'месяца', 'месяцев')} вперёд — {_fc_ru.get(m, m)}"
+    for m, hs in _fc_by_model.items())
+if _fc_ready:
+    _fc_chk["month"] = _fc_chk["month"].astype(str)
+    _fc_hmax = int(_fc_chk["horizon"].max())
+    _fc_year = _fc_chk.loc[_fc_chk["horizon"] == _fc_hmax]
+    _fc_mape = (_fc_chk.assign(abs_err=_fc_chk["error_pct"].abs())
+                .groupby(["horizon", "method"])["abs_err"].mean().unstack())
+    _fc_model = _fc_year.loc[_fc_year["method"] == "two_stage", "aggregate_model"].iloc[0]
+    _fc_agg = load_aggregate("../data/reference/sberindex")
+Markdown(
+    "Всё сравнение моделей выше — бэктест внутри панели, а последний месяц панели — "
+    f"{_cp_ym(str(_fc_origin))} года. Прогноз вперёд сделан от него, "
+    f"с обучением на всех {len(_fc_wide)} месяцах, по правилу из [раздела о практике](#sec-practice): "
+    f"{_fc_rule}. Двухэтапная для сравнения посчитана на всех горизонтах — {_fc_and(_fc_h)} "
+    f"{plural(_fc_h[-1], 'месяц', 'месяца', 'месяцев')}. Файл `results/{_fc_cfg['output']['forecast']}` — "
+    f"{rub(_fc_wide.shape[1])} рядов с регионом и ОКТМО там, где они определены, прогноз по месяцам "
+    f"{_fc_origin.year + 1} года на каждом горизонте."
+)
+```
+
+**Первый этап двухэтапной модели проверяется уже сейчас.** Федеральный агрегат
+СберИндекс публикует раньше муниципального разреза, и 2025 год в нём уже есть целиком.
+Прогноз агрегата от декабря 2024 — первый этап двухэтапной модели: модель агрегата
+выбрана бэктестом на его собственной истории до origin, а месяцев после origin она
+не видела. Это единственная проверка в работе вне протокола скользящего origin.
+
+```{python}
+#| echo: false
+#| fig-cap: "Совокупные потребительские расходы России по данным СберИндекса: факт (точки после пунктира — месяцы, которых модель не видела), прогноз первого этапа двухэтапной модели на год вперёд от конца панели и два ориентира — «как в декабре» (последнее значение на все месяцы) и «как год назад» (тот же месяц прошлого года). В легенде — средняя абсолютная ошибка за двенадцать месяцев."
+from src import charts
+import matplotlib.pyplot as plt
+if _fc_ready:
+    _fig = charts.aggregate_check(_fc_agg, _fc_year)
+    plt.show()
+```
+
+```{python}
+#| echo: false
+#| tbl-cap: "Прогноз федерального агрегата от декабря 2024 против факта, млрд руб. в месяц. Ошибка — (прогноз − факт) / факт, в процентах: минус — прогноз ниже факта."
+if _fc_ready:
+    _fc_piv = _fc_year.pivot(index="month", columns="method", values=["forecast", "error_pct"])
+    _fc_pct = lambda column: _fc_piv[("error_pct", column)].map(lambda v: num(v, 1, sign=True))
+    _fc_tab = pd.DataFrame({
+        "факт": _fc_year.groupby("month")["actual"].first().map(rub),
+        "прогноз первого этапа": _fc_piv[("forecast", "two_stage")].map(rub),
+        "его ошибка, %": _fc_pct("two_stage"),
+        "ошибка «как в декабре», %": _fc_pct("naive"),
+        "ошибка «как год назад», %": _fc_pct("seasonal_naive"),
+    })
+    _fc_tab.index = [_cp_ym(m) for m in _fc_tab.index]
+    _fc_tab.loc["средняя абсолютная ошибка, %"] = [
+        "", "", *(num(_fc_mape.loc[_fc_hmax, m], 1) for m in ("two_stage", "naive", "seasonal_naive"))]
+_fc_tab.rename_axis("месяц") if _fc_ready else _fc_chk
+```
+
+```{python}
+#| echo: false
+# Абзац под таблицей — по её же числам: ошибки по горизонтам, знак ошибки по месяцам и рост
+# последнего месяца к тому же месяцу прошлого года — в факте и в прогнозе.
+_fc_text = None
+if _fc_ready:
+    _fc_other = [h for h in sorted(_fc_mape.index) if h != _fc_hmax]
+    _fc_ts = _fc_year.loc[_fc_year["method"] == "two_stage"].sort_values("month")
+    _fc_below = int((_fc_ts["error_pct"] < 0).sum())
+    _fc_last = _fc_ts.iloc[-1]
+    _fc_prev = pd.Period(_fc_last["month"], "M") - 12
+    _fc_same = float(_fc_agg.loc[_fc_prev])
+    _fc_slash = lambda m: " / ".join(num(_fc_mape.loc[h, m], 1) for h in _fc_other)
+    _fc_text = (
+        f"Первый этап — бэктест выбрал для агрегата {_fc_agg_ru.get(_fc_model, _fc_model)} — ошибся "
+        f"за год в среднем на {num(_fc_mape.loc[_fc_hmax, 'two_stage'], 1)}%, прогноз «как в декабре» — "
+        f"на {num(_fc_mape.loc[_fc_hmax, 'naive'], 1)}%, «как год назад» — на "
+        f"{num(_fc_mape.loc[_fc_hmax, 'seasonal_naive'], 1)}%. "
+        + (f"На горизонтах {_fc_and(_fc_other)} {plural(_fc_other[-1], 'месяц', 'месяца', 'месяцев')} — "
+           f"{_fc_slash('two_stage')}% против {_fc_slash('naive')}% и {_fc_slash('seasonal_naive')}%. "
+           if _fc_other else "")
+        + (f"Прогноз ниже факта во всех {_fc_below} месяцах: " if _fc_below == len(_fc_ts)
+           else f"Прогноз ниже факта в {_fc_below} {plural(_fc_below, 'месяце', 'месяцах', 'месяцах')} "
+                f"из {len(_fc_ts)}: ")
+        + f"в {_cp_ym(_fc_last['month'], 'пр')} агрегат оказался выше, чем в {_cp_ym(str(_fc_prev), 'пр')}, "
+        f"на {num(100 * (_fc_last['actual'] / _fc_same - 1), 1)}%, а прогноз закладывал "
+        f"{num(100 * (_fc_last['forecast'] / _fc_same - 1), 1)}% — год рос быстрее, чем в среднем "
+        "прошлые годы. Это одна проверка на одном году: она показывает, что первый этап работает "
+        "и вне бэктеста, но интервала не даёт."
+    )
+Markdown(_fc_text) if _fc_text else None
+```
+
+```{python}
+#| echo: false
+# Прогноз по муниципалитетам: рост к тому же периоду прошлого года — по фактической панели. У каждого
+# ряда — сумма прогноза за месяцы горизонта к сумме факта тех же месяцев годом раньше.
+_fc_mo_text = None
+_fc_path = Path("../results") / _fc_cfg["output"]["forecast"]
+if _fc_ready and _fc_path.exists():
+    _fc = pd.read_csv(_fc_path, usecols=["series_id", "model", "horizon", "month", "forecast"])
+    _fc_past = _fc_wide.copy()
+    _fc_past.index = pd.to_datetime(_fc_past.index).to_period("M")
+
+    def _fc_growth(model, horizon):
+        part = (_fc.loc[(_fc["model"] == model) & (_fc["horizon"] == horizon)]
+                .pivot(index="series_id", columns="month", values="forecast"))
+        past = _fc_past.loc[[pd.Period(m, "M") - 12 for m in part.columns], part.index].T
+        ratio = 100 * (part.sum(axis=1) / past.sum(axis=1).to_numpy() - 1)
+        return ratio.median(), ratio.quantile(0.1), ratio.quantile(0.9)
+
+    _fc_span = lambda g: f"{num(g[0], 1)}% (у 80% рядов — от {num(g[1], 1)} до {num(g[2], 1)}%)"
+    _fc_rec1 = _fc_cfg["recommended"][_fc_h[0]]
+    _fc_known = _fc_cfg["known_aggregate"]
+    _hz_k = (_hzr.set_index(["horizon", "model"])["MAE"]
+             if {"horizon", "model", "MAE"} <= set(_hzr.columns) else pd.Series(dtype=float))
+    _fc_mo_text = (
+        f"**По муниципалитетам.** {_fc_ru.get(_fc_rec1, _fc_rec1).capitalize()} на "
+        f"{_cp_ym(str(_fc_origin + 1))} даёт медианный рост к тому же месяцу прошлого года на "
+        f"{_fc_span(_fc_growth(_fc_rec1, _fc_h[0]))}; двухэтапная на год — рост суммы за "
+        f"{_fc_origin.year + 1} год к сумме за {_fc_origin.year}-й на "
+        f"{_fc_span(_fc_growth(_fc_cfg['recommended'][_fc_h[-1]], _fc_h[-1]))}. "
+        "Лаборатории применим и третий режим: федеральный индекс за 2025 год уже опубликован, "
+        "а муниципального разреза нет, и прогнозировать нужно только разнос. Его делает "
+        f"`{_fc_known}` — доли муниципалитетов по прошлым месяцам, умноженные на опубликованный "
+        "агрегат; в файле её строки помечены `uses_published_aggregate`. Годовой рост по ней — "
+        f"{_fc_span(_fc_growth(_fc_known, _fc_h[-1]))}"
+        + (f"; на истории такой разнос на месяц вперёд давал MAE {rub(_hz_k[(1, _fc_known)])} "
+           f"против {rub(_hz_k[(1, 'two_stage')])} у полной двухэтапной "
+           "([Пять горизонтов](#sec-horizons))"
+           if {(1, _fc_known), (1, "two_stage")} <= set(_hz_k.index) else "")
+        + ". Муниципальный прогноз относится к уже прошедшему году и будет проверен фактом, "
+        "когда СберИндекс опубликует муниципальный разрез за 2025 год."
+    )
+Markdown(_fc_mo_text) if _fc_mo_text else None
+```
 
 ::: {.callout-note collapse="true"}
 ## Словарь терминов
@@ -2320,6 +2493,66 @@ wide, report = build_matrix(panel, "Все категории", max_gap=2)
 print(report.as_text())
 ```
 
+```{python}
+#| echo: false
+# Ряды, не вошедшие в матрицу, и ряды без региона — из той же выгрузки и того же правила
+# пропусков, что напечатано выше: числа абзацев ниже не вписываются руками. Причина выпадения
+# читается по краям ряда: нет последнего месяца — обрыв покрытия, нет первого — ряд появляется
+# позже, оба края на месте — выбросил внутренний разрыв длиннее `max_gap`.
+from src.regions import attach_regions, load_dictionary
+from src.split import rolling_origin
+
+_d_full = (panel.loc[panel["category_15"] == "Все категории"]
+           .pivot(index="period", columns="series_id", values="value").sort_index())
+_d_reg, _ = attach_regions(
+    pd.DataFrame({"series_id": _d_full.columns,
+                  "mo": [str(c).split(" #")[0] for c in _d_full.columns]}),
+    load_dictionary("../data/reference/t_dict_municipal_districts.xlsx"))
+_d_reg = _d_reg.set_index("series_id")
+_d_homonym = _d_reg["n_candidates"] > 1
+_d_unmatched = ~_d_reg["region_resolved"] & ~_d_homonym
+_d_kept = _d_reg.index.isin(wide.columns)
+
+
+def _d_kind(series):
+    """Характер выпавшего ряда и месяц, который его описывает: последний наблюдённый у обрыва,
+    первый — у появившегося позже."""
+    seen = series.dropna().index
+    head, tail = pd.isna(series.iloc[0]), pd.isna(series.iloc[-1])
+    if tail and not head:
+        return "обрыв покрытия", seen.max()
+    if head and not tail:
+        return "появляются позже", seen.min()
+    if head and tail:
+        return "есть только середина периода", None
+    return "внутренний разрыв длиннее двух месяцев", None
+
+
+_d_drop = pd.DataFrame(
+    [(c, *_d_kind(_d_full[c])) for c in _d_full.columns if c not in wide.columns],
+    columns=["series_id", "kind", "month"],
+).set_index("series_id").join(_d_reg["region_name"])
+
+# Пропуски, восстановленные интерполяцией, и тестовые окна основного протокола: интерполяция
+# идёт по всему ряду, и восстановленная точка может оказаться в тесте фолда.
+_d_filled = [c for c in wide.columns if _d_full[c].isna().any()]
+_d_folds = rolling_origin(len(wide), _mp_split["horizon"], _mp_split["n_folds"])
+_d_in_test = {
+    c: [f.index for f in _d_folds
+        if _d_full[c].iloc[f.test_start:f.test_end].isna().any()]
+    for c in _d_filled
+}
+_d_test_hit = {c: v for c, v in _d_in_test.items() if v}
+
+_d_txt = {
+    "all": Markdown(rub(len(_d_reg))),
+    "resolved": Markdown(rub(_d_reg["region_resolved"].sum())),
+    "homonyms": Markdown(rub(_d_homonym.sum())),
+    "filled": Markdown(rub(len(_d_filled))),
+    "kept": Markdown(rub(wide.shape[1])),
+}
+```
+
 ### Ловушка: `mo` — это название, а не идентификатор
 
 Наивный подсчёт уникальных значений колонки `mo` даёт 2118 и это неверная цифра.
@@ -2344,20 +2577,112 @@ print(report.as_text())
 ряд исключается из оценки. Молчаливого `dropna` нет намеренно: судьба каждого ряда
 попадает в отчёт прогона, который напечатан выше.
 
+```{python}
+#| echo: false
+# Оговорка о заглядывании вперёд — по тем же рядам и тем же тестовым окнам основного протокола.
+_d_hit_folds = sorted({f for v in _d_test_hit.values() for f in v})
+Markdown(
+    f"Интерполяцией восстановлено {_d_txt['filled'].data} "
+    f"{plural(len(_d_filled), 'ряд', 'ряда', 'рядов')} из {_d_txt['kept'].data}. Восстанавливается "
+    f"пропуск по всему ряду, а не по обучающей части фолда, то есть в строгом смысле с "
+    f"заглядыванием вперёд: соседний месяц, по которому достраивается точка, может лежать "
+    + (f"после origin, а у {len(_d_test_hit)} {plural(len(_d_test_hit), 'ряда', 'рядов', 'рядов')} "
+       f"восстановлены и сами тестовые месяцы "
+       f"{plural(len(_d_hit_folds), 'фолда', 'фолдов', 'фолдов')} "
+       f"{', '.join(str(f) for f in _d_hit_folds)}. "
+       if _d_test_hit else "после origin. ")
+    + "Правило одно для всех моделей, и сравнение моделей это не искажает; строже было бы "
+    "восстанавливать пропуски на каждом фолде по его обучающей части — так не делалось."
+)
+```
+
 ### Привязка к регионам
 
 Регион и код ОКТМО восстановлены по
 [справочнику муниципальных образований СберИндекса](https://sberindex.ru/ru/research/dataset-borders-and-changes-of-municipalities)
-(лицензия CC BY-SA 4.0) для 2042 рядов из 2190.
+(лицензия CC BY-SA 4.0) для `{python} _d_txt["resolved"]` рядов из `{python} _d_txt["all"]`.
 
 Справочник версионный, и сопоставлять надо с записями, действовавшими в 2023–2024,
 а не с сегодняшними: фильтр по действующим выбрасывает городские округа Павловский Посад,
 Электрогорск и город Сасово, объединённые в 2024 году, — в нашем периоде они существовали.
 
-**147 рядов с омонимичными названиями оставлены без региона намеренно.** В выгрузке нет
+**`{python} _d_txt["homonyms"]` рядов с омонимичными названиями оставлены без региона намеренно.** В выгрузке нет
 ни ОКТМО, ни кода региона, различить их нечем, и приписать регион наугад означало бы
 поставить неверную подпись. Они участвуют в моделировании, поскольку для прогноза регион
 не нужен, но исключены из региональных разрезов.
+
+```{python}
+#| echo: false
+# Арифметика рядов без региона — на всей выгрузке и на матрице моделирования, одним правилом.
+def _d_split(mask):
+    part = _d_reg.loc[mask]
+    return (int(part["region_resolved"].sum()), int((part["n_candidates"] > 1).sum()),
+            int((~part["region_resolved"] & (part["n_candidates"] <= 1)).sum()), len(part))
+
+
+_d_a, _d_b = _d_split(np.ones(len(_d_reg), dtype=bool)), _d_split(_d_kept)
+_d_lost = [" ".join(str(c).split()) for c in _d_reg.index[_d_unmatched]]
+_d_lost_n = ("один ряд" if len(_d_lost) == 1
+             else f"{len(_d_lost)} {plural(len(_d_lost), 'ряд', 'ряда', 'рядов')}")
+Markdown(
+    (f"Ещё {_d_lost_n} в справочнике не {'найден' if len(_d_lost) == 1 else 'найдены'} вовсе — "
+     f"«{'», «'.join(_d_lost)}»: в выгрузке тип территории стоит после имени, в справочнике — "
+     f"перед ним. " if _d_lost else "")
+    + f"Итого {rub(_d_a[0])} + {rub(_d_a[1])} + {rub(_d_a[2])} = {rub(_d_a[3])} рядов выгрузки; "
+    f"на матрице моделирования — {rub(_d_b[0])} + {rub(_d_b[1])} + {rub(_d_b[2])} = {rub(_d_b[3])}."
+)
+```
+
+### Что выпало из оценки
+
+```{python}
+#| echo: false
+#| tbl-cap: "Регионы, где из оценки выпало больше 30% рядов. Обрыв покрытия — ряд кончается раньше декабря 2024 (указан последний месяц с данными), «появляются позже» — начинается позже января 2023 (указан первый); оба края на месте — ряд выбросил внутренний разрыв длиннее двух месяцев."
+def _d_months(months):
+    """Месяц или диапазон месяцев — именительным падежом, без склонения в тексте ячейки."""
+    months = sorted(pd.Series(months).dropna().unique())
+    first, last = (_cp_ym(f"{m:%Y-%m}") for m in (months[0], months[-1]))
+    return first if first == last else f"{first} … {last}"
+
+
+def _d_what(rows):
+    parts = []
+    for kind, part in rows.groupby("kind", sort=False):
+        label = {"обрыв покрытия": "последний месяц", "появляются позже": "первый месяц"}.get(kind)
+        parts.append(f"{kind} — {len(part)}" + (f" ({label}: {_d_months(part['month'])})" if label else ""))
+    return "; ".join(parts)
+
+
+_d_by_region = (pd.DataFrame({"region": _d_reg["region_name"], "out": ~_d_kept})
+                .dropna(subset=["region"]).groupby("region")["out"].agg(["size", "sum"]))
+_d_share = _d_by_region["sum"] / _d_by_region["size"]
+_d_top = (_d_by_region.assign(share=_d_share).loc[_d_share > 0.3]
+          .sort_values(["share", "size"], ascending=False))
+pd.DataFrame({
+    "рядов в выгрузке": _d_top["size"].map(rub),
+    "выпало": _d_top["sum"].map(rub),
+    "что с выпавшими рядами": [_d_what(_d_drop.loc[_d_drop["region_name"] == r]) for r in _d_top.index],
+}).rename_axis("регион")
+```
+
+```{python}
+#| echo: false
+# Три предложения к таблице — по её же числам: состав выпавших по характеру, регионы, выпавшие
+# целиком, и почему на сравнение моделей это не влияет.
+_d_counts = _d_drop["kind"].value_counts()
+_d_whole = sorted(_d_top.index[_d_top["share"] == 1])
+_d_kinds_text = ", ".join(f"{k} — {rub(n)}" for k, n in _d_counts.items())
+Markdown(
+    f"Из {_d_txt['all'].data} рядов выгрузки в оценку не вошли {rub(len(_d_drop))}: {_d_kinds_text}. "
+    + (f"Целиком выпали {len(_d_whole)} {plural(len(_d_whole), 'регион', 'региона', 'регионов')}: "
+       f"{', '.join(_d_whole)} — по ним в оценке нет ни одного ряда. " if _d_whole else "")
+    + "Это границы выгрузки, а не поведение потребителей: ряд, которого нет в данных часть "
+    "периода, нельзя ни обучить, ни проверить на всех фолдах. Все модели, общий фактор, "
+    f"разложение ошибки и детекторы считаются на одних и тех же {_d_txt['kept'].data} рядах, "
+    "поэтому сравнение от этих дыр не зависит, но на территории без рядов выводы работы "
+    "не распространяются."
+)
+```
 
 ## Протокол оценки
 
@@ -2392,6 +2717,39 @@ Markdown(
 MASE добавлена потому, что уровни расходов по муниципалитетам различаются на порядок —
 от примерно десяти тысяч рублей на человека до семидесяти четырёх, — и средний по панели
 MAE без неё перекошен в сторону крупных территорий.
+
+```{python}
+#| echo: false
+# Формула сведения MAE — и проверка, что два других способа, которые встречаются в таблицах
+# отчёта (среднее пофолдовых средних и среднее на общих парах двух моделей), дают на основном
+# протоколе то же число: иначе абзац обещал бы одно, а таблицы считали другое.
+_mae_note = None
+if "model" in _per and len(_ok):
+    _mae_pairs = _ok.groupby("model")["mae"].mean()
+    _mae_folds = _ok.groupby(["model", "fold"])["mae"].mean().groupby("model").mean()
+    _mae_gap = float((_mae_pairs - _mae_folds).abs().max())
+    _pair_sets = {frozenset(zip(g["mo"], g["fold"])) for _, g in _ok.groupby("model")}
+    _same = int(refused(_per).sum()) == 0 and len(_pair_sets) == 1
+    _mae_note = Markdown(
+        "**Как сводится MAE.** MAE ряда на фолде — средняя абсолютная ошибка по месяцам горизонта. "
+        "Сводная MAE модели — простое среднее по всем парам ряд × фолд с весом один: усредняются "
+        "территории, а не обороты, и крупный город весит столько же, сколько малый район. Но в рублях "
+        "на человека ошибка больше там, где выше уровень расходов, и такие МО тянут среднее на себя, "
+        "поэтому рядом стоит MASE: ошибка каждого ряда в ней поделена на среднюю ошибку прогноза "
+        "«как в прошлом месяце» на его же обучающей части. R² сводится по объединённому пулу тестовых "
+        "точек, а не как среднее R² рядов. В таблицах ниже MAE встречается ещё как среднее пофолдовых "
+        "средних и как среднее на общих парах двух моделей; "
+        + (f"на основном протоколе все три способа дают одно число — отказов нет, и у каждой модели "
+           f"одни и те же {rub(_ok['mo'].nunique())} рядов на каждом фолде (наибольшее расхождение — "
+           f"{num(_mae_gap, 2)} ₽). " if _same else
+           f"на основном протоколе они расходятся не больше чем на {num(_mae_gap, 2)} ₽ — у части "
+           f"моделей есть отказы. ")
+        + "На горизонтах 6 и 12 модель может отказать на целом фолде: тогда её MAE по горизонту — "
+        "по зачтённым фолдам, таблица пяти горизонтов это помечает, а прогон печатает предупреждение, "
+        "если модели одного горизонта посчитаны на разных парах."
+    )
+_mae_note
+```
 
 ```{python}
 #| echo: false
@@ -5141,6 +5499,51 @@ Markdown("\n\n".join(_ft_paras)) if _ft_paras else None
 исключены сознательно: одно отдавало отказ нашему агенту, одно прямо запрещало
 массовый сбор в `robots.txt`, два не позволяли подтвердить дату публикации.
 
+```{python}
+#| echo: false
+# Покрытие панели корпусом — по регионам матрицы моделирования, с той же привязкой, что
+# в разделе «Данные»: региональные конструкции видят только ряды этих регионов. Регион корпуса
+# без рядов в матрице объясняется по справочнику — сколько его муниципалитетов вообще
+# встречается в выгрузке и сколько из них омонимы, которым регион не приписывается.
+from src.regions import _normalise
+
+_nw_note = None
+if len(_news_monthly):
+    _nw_counts = _d_reg.loc[_d_kept & _d_reg["region_resolved"]].groupby("region_name").size()
+    _nw_in = {r: int(_nw_counts.get(r, 0)) for r in sorted(_news_monthly["region_name"].unique())}
+    _nw_hit = dict(sorted(((r, n) for r, n in _nw_in.items() if n), key=lambda kv: -kv[1]))
+    _nw_miss = [r for r, n in _nw_in.items() if not n]
+    _nw_series = sum(_nw_hit.values())
+    _nw_dict = load_dictionary("../data/reference/t_dict_municipal_districts.xlsx")
+    _nw_panel_keys = set(_d_reg["mo"].map(_normalise))
+    _nw_homonym_keys = set(_d_reg.loc[_d_homonym, "mo"].map(_normalise))
+    _nw_why = []
+    for _r in _nw_miss:
+        _keys = set(_nw_dict.loc[_nw_dict["region_name"] == _r, "_key"])
+        _nw_why.append((len(_keys), len(_keys & _nw_panel_keys), len(_keys & _nw_panel_keys & _nw_homonym_keys)))
+    _span = lambda values: (f"{min(values)}" if min(values) == max(values)
+                            else f"{min(values)}–{max(values)}")
+    _nw_note = Markdown(
+        f"Из {len(_nw_in)} регионов корпуса в матрице моделирования представлены {len(_nw_hit)}: "
+        f"{rub(_nw_series)} {plural(_nw_series, 'ряд', 'ряда', 'рядов')} из {rub(_ok['mo'].nunique())} "
+        f"({num(100 * _nw_series / _ok['mo'].nunique(), 1)}%), это "
+        f"{rub(_nw_series * _mp_split['n_folds'])} пар ряд × фолд основного протокола. По регионам: "
+        + ", ".join(f"{r} — {n}" for r, n in _nw_hit.items()) + ". "
+        + (f"Ещё {len(_nw_miss)} {plural(len(_nw_miss), 'регион', 'региона', 'регионов')} корпуса — "
+           f"{', '.join(_nw_miss)} — в выгрузке почти не представлены: из "
+           f"{_span([w[0] for w in _nw_why])} муниципалитетов каждого по справочнику в панели "
+           f"встречаются {_span([w[1] for w in _nw_why])} названий, и "
+           + ("все они — омонимы, которым регион не приписывается. "
+              if all(w[1] == w[2] for w in _nw_why)
+              else f"омонимов среди них {_span([w[2] for w in _nw_why])}. ")
+           if _nw_miss else "")
+        + f"Региональные конструкции видят только эти {rub(_nw_series)} "
+        f"{plural(_nw_series, 'ряд', 'ряда', 'рядов')}; национальная работает с федеральным "
+        "агрегатом целиком."
+    )
+_nw_note
+```
+
 ### Признаки
 
 Интенсивность считается как отклонение от собственного среднего издания, а не как число
@@ -5550,8 +5953,11 @@ python -m venv .venv
 .venv/bin/python -u scripts/changepoints.py             # стенд разладок v2, около 7 минут → results/cp_*.csv
 .venv/bin/python -u scripts/changepoints.py --config configs/changepoints_v1.yaml
                                                         #   первая версия стенда → results/cp_v1/
+.venv/bin/python -u scripts/forecast_forward.py        # прогноз на 2025 год, около 3 минут →
+                                                        #   results/forecast_2025.csv, forecast_2025_aggregate_check.csv
 .venv/bin/python -u scripts/build_news_features.py      # словарь тем → results/news_dictionary.csv,
-                                                        #   data/news/monthly.parquet и national.parquet
+                                                        #   data/news/monthly.parquet и national.parquet;
+                                                        #   нужен локальный data/news/headlines.parquet (ниже)
 .venv/bin/python -u scripts/news_national.py            # → results/news_national.csv
 .venv/bin/python -u scripts/news_event_study.py         # → results/news_event_study.csv
 .venv/bin/python -u scripts/fetch_bodies.py             # выборка тел статей (обход сайтов, в git не входит)
@@ -5562,7 +5968,11 @@ python -m venv .venv
 `configs/baseline.yaml`): ни горизонта, ни правил разбиения в коде моделей нет. Смена
 постановки — правка одного файла, а не переписывание. Пять горизонтов заданы так же —
 в `configs/horizons.yaml`; `scripts/horizons.py` считает их и сохраняет ошибку по каждому
-шагу горизонта. Стенд обнаружения структурных изменений — тоже: выборка, врезки, режимы
+шагу горизонта. Прогноз вперёд от конца панели — тоже: origin, горизонты и модель на каждом
+горизонте заданы в `configs/forecast_forward.yaml`, а `scripts/forecast_forward.py` пишет
+прогноз по муниципалитетам и проверку федерального агрегата по факту; прогнозным моделям
+агрегат передаётся обрезанным по origin, целиком — только разносу опубликованного
+агрегата. Стенд обнаружения структурных изменений — тоже: выборка, врезки, режимы
 подготовки, сетка штрафов, правила зачёта (граница задержки и нетронутый близнец), правило
 выбора штрафа для реальных данных, порог и события потокового сигнала заданы
 в `configs/changepoints.yaml`, а `scripts/changepoints.py` пишет по ним десять файлов
@@ -5575,8 +5985,13 @@ python -m venv .venv
 посчитанные до 25.09, — нынешние прогоны пишут их сами.
 
 Данные лежат в репозитории: панель СберИндекса, справочник муниципальных образований,
-длинные ряды СберИндекса и собранный новостной датасет. Повторение не требует
-ни обращения к сайтам, кроме выборки тел статей, ни развёртывания базы данных.
+длинные ряды СберИндекса и агрегаты новостного корпуса — число публикаций и доли тем
+по регионам и по стране (`data/news/monthly.parquet`, `national.parquet`); новостные
+проверки читают их. Сырые заголовки в репозиторий не входят: это материалы изданий.
+Пересборка признаков по другому словарю тем требует их выкачки — `scripts/crawl_news.py`
+обходит архивы изданий, `src.news.load_headlines` и `save_datasets` собирают из архива
+слой `data/news/headlines.parquet`. Остальное повторяется без обращения к сайтам, кроме
+выборки тел статей, и без развёртывания базы данных.
 
 Результаты прогонов (`results/`) в репозиторий не входят, и с ними — снимки
 `results/realizations/`: прогон модели заменяет её строки, а прежние сохраняет снимком.

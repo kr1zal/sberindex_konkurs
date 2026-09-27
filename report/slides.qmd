@@ -62,7 +62,9 @@ _FOLD_LEN = {0: "15\u00a0мес", 1: "18\u00a0мес", 2: "21\u00a0мес"}
 # «Перенос с длинных рядов» («в таблицах — фолд 0»): с нуля, из того же индекса, что и _ORD.
 _FOLD_MO = {k: f"фолд {k}: обучение {v}." for k, v in _FOLD_LEN.items()}
 _GEN = ["нуля", "одного", "двух", "трёх", "четырёх", "пяти", "шести", "семи", "восьми", "девяти", "десяти"]
-_headlines = pd.read_parquet("../data/news/headlines.parquet", columns=["region_name"])
+# Корпус новостей — из помесячных агрегатов: сырых заголовков в репозитории нет, а сумма
+# `n_articles` равна числу заголовков корпуса.
+_news_monthly = pd.read_parquet("../data/news/monthly.parquet", columns=["region_name", "n_articles"])
 ```
 
 ## Задача
@@ -414,6 +416,45 @@ Markdown(
     f"**Ошибка растёт не с расстоянием, а с календарём.** От {_month_of[(_te - 1) % 12]} наивная "
     f"ошибается на {_num(_st.max(), 0)} в {_month_in[(_te + _st.idxmax() - 1) % 12]} и на "
     f"{_num(_st.min(), 0)} в {_month_in[(_te + _st.idxmin() - 1) % 12]}."
+)
+```
+
+## Прогноз на 2025 год: первый этап сверен с фактом {.smaller}
+
+```{python}
+# Прогноз вперёд от конца панели — scripts/forecast_forward.py по configs/forecast_forward.yaml.
+# Рисунок — та же функция, что в отчёте; числа — из файла проверки агрегата, модели по горизонтам —
+# из конфига.
+import yaml
+from pathlib import Path
+from src import charts
+from src.external import load_aggregate
+import matplotlib.pyplot as plt
+_fc_cfg = yaml.safe_load(Path("../configs/forecast_forward.yaml").read_text(encoding="utf-8"))
+_fc_chk = pd.read_csv("../results/" + _fc_cfg["output"]["aggregate_check"], dtype={"month": str})
+_fc_hmax = int(_fc_chk["horizon"].max())
+_fc_year = _fc_chk[_fc_chk["horizon"] == _fc_hmax]
+_fc_mape = _fc_year.assign(e=_fc_year["error_pct"].abs()).groupby("method")["e"].mean()
+_fc_below = int((_fc_year.loc[_fc_year["method"] == "two_stage", "error_pct"] < 0).sum())
+_fig = charts.aggregate_check(load_aggregate("../data/reference/sberindex"), _fc_year)
+_fig.set_size_inches(7.2, 2.5)
+_fig.tight_layout()
+plt.show()
+```
+
+```{python}
+_fc_panel = [h for h, m in sorted(_fc_cfg["recommended"].items()) if m != "two_stage"]
+Markdown(
+    f"**Прогноз от последнего месяца панели, декабря 2024:** на {_and_join(_fc_panel)} мес. — "
+    f"панельная модель с долями категорий, на {_fc_hmax} — двухэтапная; {_num(len(wide.columns), 0)} "
+    f"рядов в `results/{_fc_cfg['output']['forecast']}`.\n\n"
+    f"**Федеральный агрегат за 2025 год уже опубликован:** первый этап двухэтапной модели ошибся "
+    f"в среднем на {_num(_fc_mape['two_stage'], 1)}%, «как в декабре» — на "
+    f"{_num(_fc_mape['naive'], 1)}%, «как год назад» — на {_num(_fc_mape['seasonal_naive'], 1)}%"
+    + (f"; прогноз ниже факта во всех {_fc_below} месяцах — год рос быстрее прошлых.\n\n"
+       if _fc_below == (_fc_year["method"] == "two_stage").sum() else ".\n\n")
+    + "**Муниципальный прогноз проверит факт**, когда выйдет разрез 2025 года; до тех пор "
+    "применим разнос опубликованного агрегата — `two_stage_known`."
 )
 ```
 
@@ -871,8 +912,8 @@ Markdown(_ft_line)
 _ev = pd.read_csv("../results/news_event_study.csv")
 _nt = pd.read_csv("../results/news_national.csv")
 Markdown(
-    f"**Новости, четыре независимые конструкции.** {_num(len(_headlines) / 1000, 0)} тыс. "
-    f"заголовков, {_headlines['region_name'].nunique()} регионов. Признаки в модели: +4,7 руб., "
+    f"**Новости, четыре независимые конструкции.** {_num(_news_monthly['n_articles'].sum() / 1000, 0)} тыс. "
+    f"заголовков, {_news_monthly['region_name'].nunique()} регионов. Признаки в модели: +4,7 руб., "
     f"корреляция с изломами не прошла Бонферрони (обе — на словаре до чистки). Событийный "
     f"анализ, {2 * len(_ev)} {_plural(2 * len(_ev), 'проверка', 'проверки', 'проверок')}: "
     f"ни одного значимого. **Национальный уровень против федерального агрегата — {len(_nt)} "

@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import matplotlib as mpl
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -108,6 +109,60 @@ def model_comparison(summary: pd.DataFrame, baseline: str = "prophet") -> plt.Fi
     ax.set_xlim(0, max(s["MAE"]) * 1.12)
     _style(ax, "Средняя абсолютная ошибка прогноза, полная панель", "")
     ax.set_xlabel("MAE, руб.", color=INK_SOFT, fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
+def aggregate_check(actual: pd.Series, check: pd.DataFrame, start: str = "2022-01") -> plt.Figure:
+    """Федеральный агрегат: факт, прогноз первого этапа двухэтапной модели от конца панели
+    и два ориентира — на все месяцы проверки.
+
+    `actual` — ряд с месячным PeriodIndex, целиком, без обрезки: факт после origin здесь —
+    проверка, а не обучение, модель его не видела. `check` — строки одного горизонта из
+    `forecast_2025_aggregate_check.csv`. Прогноз сплошной, как факт: сравнивается он с фактом,
+    а ориентиры — фон, поэтому штриховые. В подписях легенды — средняя абсолютная ошибка
+    по месяцам, те же числа, что в таблице под картинкой.
+    """
+    months = pd.PeriodIndex(sorted(check["month"].unique()), freq="M")
+    origin = months[0] - 1
+    shown = actual.loc[pd.Period(start, "M"): months[-1]]
+    fig, ax = plt.subplots(figsize=(8, 3.9), facecolor=SURFACE)
+
+    ax.plot(shown.index.to_timestamp(), shown.to_numpy(float), color=INK_SOFT, linewidth=2,
+            label="факт", zorder=2)
+    # Факт после origin — точками поверх той же линии: видно, где кончается то, на чём
+    # учились, и начинается то, чем проверяют.
+    checked = shown.loc[months[0]:]
+    ax.plot(checked.index.to_timestamp(), checked.to_numpy(float), linestyle="none", marker="o",
+            markersize=5, color=INK_SOFT, zorder=3)
+
+    # Точки — только у факта после origin: маркеры с кольцом на линии прогноза рвали её
+    # в пунктир, и сплошной прогноз читался как ещё один штриховой ориентир.
+    styles = {
+        "two_stage": (SERIES[0], "-", "двухэтапная, первый этап"),
+        "naive": (SERIES[1], "--", "как в декабре"),
+        "seasonal_naive": (SERIES[2], "--", "как год назад"),
+    }
+    for method, (color, line, label) in styles.items():
+        part = check.loc[check["method"] == method].sort_values("month")
+        if part.empty:
+            continue
+        x = [origin.to_timestamp()] + list(pd.PeriodIndex(part["month"], freq="M").to_timestamp())
+        y = [float(actual.loc[origin])] + list(part["forecast"].astype(float))
+        mean_error = f"{part['error_pct'].abs().mean():.1f}".replace(".", ",")
+        ax.plot(x, y, color=color, linestyle=line, linewidth=2,
+                label=f"{label}: средняя ошибка {mean_error}%",
+                zorder=4 if method == "two_stage" else 3)
+
+    ax.axvline(origin.to_timestamp(), color=INK_SOFT, linewidth=1, linestyle=":", zorder=1)
+    ax.annotate("конец панели", xy=(origin.to_timestamp(), 1.0), xycoords=("data", "axes fraction"),
+                xytext=(-4, -2), textcoords="offset points", ha="right", va="top",
+                color=INK_SOFT, fontsize=8)
+    _style(ax, "", "млрд руб. в месяц")
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=(4, 7, 10)))
+    ax.legend(frameon=False, fontsize=9, labelcolor=INK_SOFT, loc="upper left")
     fig.tight_layout()
     return fig
 

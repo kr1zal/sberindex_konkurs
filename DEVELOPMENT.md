@@ -11,6 +11,7 @@ configs/baseline.yaml   тот же протокол на выборке из 30
 configs/horizons.yaml   тот же протокол на пяти горизонтах: наукаст и 1, 3, 6, 12 месяцев
 configs/changepoints.yaml  стенд разладок v2: выборка, врезки, правила зачёта, режимы, штрафы, правило выбора штрафа, события
 configs/changepoints_v1.yaml  первая версия стенда (v1, врезка в декабре 2023) — пишет в results/cp_v1/
+configs/forecast_forward.yaml  прогноз вперёд от конца панели (2024-12) на 2025 год: модели по горизонтам по правилу отчёта
 src/data.py             загрузка панели, восстановление сущностей МО, обработка пропусков
 src/regions.py          привязка к регионам и ОКТМО по справочнику СберИндекса
 src/split.py            скользящий origin с расширяющимся окном
@@ -33,7 +34,10 @@ scripts/news_national.py          новости на национальном �
 scripts/fetch_bodies.py           выборочная выкачка тел статей
 scripts/compare_headline_body.py  что теряется на заголовках
 scripts/build_news_features.py    пересборка data/news/monthly и national.parquet — единственный, кто их пишет
+scripts/crawl_news.py             выкачка заголовков региональных изданий; сырые заголовки в git не входят
+scripts/forecast_forward.py       прогноз на 2025 год по 2 028 МО и проверка федерального агрегата по факту → results/forecast_2025*.csv
 data/raw/               панель СберИндекса (parquet)
+data/news/              агрегаты новостного корпуса (monthly.parquet, national.parquet); headlines.parquet — только локально
 data/reference/         справочник МО, ключевая ставка
 data/reference/sberindex/  длинные федеральные и отраслевые ряды
 results/                выход прогонов, в git не попадает
@@ -50,7 +54,9 @@ tests/                  тесты на синтетических кадрах,
   стенд разладок — `changepoints.yaml` (v2; первая версия — `changepoints_v1.yaml`).
 - **Единственная модель, читающая данные после origin, — `two_stage_known`**:
   разнос известного агрегата, наукаст в узком смысле на горизонте 1 и оракул
-  общего движения дальше. В `GLOBAL_MODELS` не входит и в `run.py` не гоняется.
+  общего движения дальше. В `GLOBAL_MODELS` не входит и в `run.py` не гоняется;
+  живёт в `scripts/horizons.py` и `scripts/forecast_forward.py`, и в прогнозе вперёд
+  полный агрегат передаётся ей одной — прогнозные модели получают контекст, обрезанный по origin.
 - **Новая модель** реализует `fit(y) -> self` и `predict(horizon) -> np.ndarray`
   и регистрируется в `src/run.py::REGISTRY`. Больше ничего менять не нужно.
 - **Панельная модель** живёт в `GLOBAL_MODELS`, работает с матрицей целиком
