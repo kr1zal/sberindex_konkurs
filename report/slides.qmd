@@ -929,16 +929,19 @@ _nbn = pd.read_csv("../results/news_breaks_corr.csv")
 _nbn = _nbn[_nbn["design"] == "within_month"]
 _c1n, _a1n = _npn.loc[(1, "covered")], _npn.loc[(1, "all")]
 Markdown(
-    f"**Новости, четыре независимые конструкции.** {_num(_news_monthly['n_articles'].sum() / 1000, 0)} тыс. "
-    f"заголовков, {_news_monthly['region_name'].nunique()} регионов. Признаки в модели на наукасте: "
-    f"{_num(_c1n['diff_mean'], 1, sign=True)} ₽ на {_num(_c1n['n_series'], 0)} покрытых рядах, но интервал "
-    f"по фолдам [{_num(_c1n['fold_ci_low'], 0, sign=True)}; {_num(_c1n['fold_ci_high'], 0, sign=True)}] "
+    f"**Новости, три независимые конструкции.** {_num(_news_monthly['n_articles'].sum() / 1000, 0)} тыс. "
+    f"заголовков, {_news_monthly['region_name'].nunique()} регионов. Признаки в модели на наукасте: ошибка "
+    + (f"ниже на {_num(-_c1n['diff_mean'], 1)} ₽" if _c1n["diff_mean"] < 0 else f"выше на {_num(_c1n['diff_mean'], 1)} ₽")
+    + f" на {_num(_c1n['n_series'], 0)} покрытых рядах, но интервал по фолдам "
+    f"[{_num(_c1n['fold_ci_low'], 0, sign=True)}; {_num(_c1n['fold_ci_high'], 0, sign=True)}] "
     + ("накрывает ноль" if _c1n["fold_ci_low"] < 0 < _c1n["fold_ci_high"] else "ноль не накрывает")
     + (", на всех рядах не лучше базовой. " if _a1n["diff_mean"] >= 0 else ". ")
-    + f"Корреляция с изломами внутри месяца: {int((_nbn['p'] < _nbn['alpha']).sum())} из {len(_nbn)} "
-    f"прошли порог. Событийный "
-    f"анализ, {2 * len(_ev)} {_plural(2 * len(_ev), 'проверка', 'проверки', 'проверок')}: "
-    f"ни одного значимого. **Национальный уровень против федерального агрегата — {len(_nt)} "
+    + f"Событийный "
+    f"анализ на изломах, {2 * len(_ev)} {_plural(2 * len(_ev), 'проверка', 'проверки', 'проверок')}, "
+    f"и та же региональная проверка корреляцией, {len(_nbn)}: "
+    + ("ни одной значимой. " if (_nbn["p"] < _nbn["alpha"]).sum() == 0 and not _ev["прошёл"].any()
+       else "есть значимые. ")
+    + f"**Национальный уровень против федерального агрегата — {len(_nt)} "
     f"{_plural(len(_nt), 'гипотеза', 'гипотезы', 'гипотез')}, порог объявлен заранее, "
     + ("не прошла ни одна.**" if not _nt["прошёл"].any() else
        f"прошли {int(_nt['прошёл'].sum())}.**")
