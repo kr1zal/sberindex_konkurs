@@ -6228,6 +6228,8 @@ python -m venv .venv
                                                         #   нужен локальный data/news/headlines.parquet (ниже)
 .venv/bin/python -u scripts/news_national.py            # → results/news_national.csv
 .venv/bin/python -u scripts/news_event_study.py         # → results/news_event_study.csv
+.venv/bin/python -u scripts/news_panel.py               # новости в модели и изломы → results/news_panel.csv,
+                                                        #   news_breaks_corr.csv (после run.py и horizons.py)
 .venv/bin/python -u scripts/fetch_bodies.py             # выборка тел статей (обход сайтов, в git не входит)
 .venv/bin/python -u scripts/compare_headline_body.py    # → results/headline_vs_body.csv, headline_vs_body_corr.csv
 ```
