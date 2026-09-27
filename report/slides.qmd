@@ -920,14 +920,23 @@ Markdown(_ft_line)
 ## Что не сработало: новости и длинные ряды {.smaller}
 
 ```{python}
-# Корпус и счёт проверок — из файлов; первые две конструкции считались на словаре до чистки,
-# их числа — прежние.
+# Корпус и счёт проверок — из файлов; две первые конструкции — из scripts/news_panel.py:
+# признаки в модели на наукасте (самая мощная проверка) и корреляция с изломами внутри месяца.
 _ev = pd.read_csv("../results/news_event_study.csv")
 _nt = pd.read_csv("../results/news_national.csv")
+_npn = pd.read_csv("../results/news_panel.csv").set_index(["horizon", "subset"])
+_nbn = pd.read_csv("../results/news_breaks_corr.csv")
+_nbn = _nbn[_nbn["design"] == "within_month"]
+_c1n, _a1n = _npn.loc[(1, "covered")], _npn.loc[(1, "all")]
 Markdown(
     f"**Новости, четыре независимые конструкции.** {_num(_news_monthly['n_articles'].sum() / 1000, 0)} тыс. "
-    f"заголовков, {_news_monthly['region_name'].nunique()} регионов. Признаки в модели: +4,7 руб., "
-    f"корреляция с изломами не прошла Бонферрони (обе — на словаре до чистки). Событийный "
+    f"заголовков, {_news_monthly['region_name'].nunique()} регионов. Признаки в модели на наукасте: "
+    f"{_num(_c1n['diff_mean'], 1, sign=True)} ₽ на {_num(_c1n['n_series'], 0)} покрытых рядах, но интервал "
+    f"по фолдам [{_num(_c1n['fold_ci_low'], 0, sign=True)}; {_num(_c1n['fold_ci_high'], 0, sign=True)}] "
+    + ("накрывает ноль" if _c1n["fold_ci_low"] < 0 < _c1n["fold_ci_high"] else "ноль не накрывает")
+    + (", на всех рядах не лучше базовой. " if _a1n["diff_mean"] >= 0 else ". ")
+    + f"Корреляция с изломами внутри месяца: {int((_nbn['p'] < _nbn['alpha']).sum())} из {len(_nbn)} "
+    f"прошли порог. Событийный "
     f"анализ, {2 * len(_ev)} {_plural(2 * len(_ev), 'проверка', 'проверки', 'проверок')}: "
     f"ни одного значимого. **Национальный уровень против федерального агрегата — {len(_nt)} "
     f"{_plural(len(_nt), 'гипотеза', 'гипотезы', 'гипотез')}, порог объявлен заранее, "
