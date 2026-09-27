@@ -5,11 +5,36 @@ venv/
 .env
 .DS_Store
 .ipynb_checkpoints/
+# Конвейер (src/run.py, scripts/horizons.py, scripts/forecast_forward.py,
+# scripts/changepoints.py) пишет results/ заново на каждом прогоне — поэтому CSV там
+# по умолчанию не в git. Исключение — сводки, из которых собран отчёт: CSV верхнего
+# уровня results/ и results/cp_v1/ (все до 2 МБ) коммитятся как есть.
 results/**/*.csv
+!results/*.csv
+!results/cp_v1/*.csv
+# Три крупных (44 / 88 / 19 МБ) как есть всё равно не идут — обычный CSV снова не
+# в git, снимок для них отдельный: <файл>.csv.gz рядом (scripts/export_results.py),
+# под правило *.csv не подпадает и остаётся отслеживаемым без отдельной строки.
+results/per_series.csv
+results/horizons_per_series.csv
+results/forecast_2025.csv
+# Стенд разладок воспроизводится scripts/changepoints.py за ~7 минут (обе версии
+# протокола) — хранить его 28 МБ / 6,7 МБ числом дороже, чем пересчитать.
+results/cp_bench.csv
+results/cp_v1/cp_bench.csv
 results/**/*.json
 # Копии прежних файлов признаков, которые пересборка новостей кладёт в results/backup_*
 results/**/*.parquet
 !results/.gitkeep
+# Копии results/*.csv, которые backfill_r2.py и changepoints.py делают перед
+# перезаписью, — рабочая история прогона, а не источник чисел отчёта.
+results/backup_*/
+# Снимки строк, заменённых повторным прогоном модели (save_realization) — диагностика
+# случайности моделей с обучением, в числа отчёта не входят.
+results/realizations/
+# Пилот на выборке из 300 рядов (configs/baseline.yaml) — другой протокол, не тот,
+# что в отчёте.
+results/baseline/
 # SQLite в режиме WAL создаёт рядом -wal и -shm: правило на голое имя
 # их не ловит, и они уезжают в коммит
 data/news/state.db*

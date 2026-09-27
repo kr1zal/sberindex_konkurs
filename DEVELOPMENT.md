@@ -37,11 +37,12 @@ scripts/compare_headline_body.py  что теряется на заголовк�
 scripts/build_news_features.py    пересборка data/news/monthly и national.parquet — единственный, кто их пишет
 scripts/crawl_news.py             выкачка заголовков региональных изданий; сырые заголовки в git не входят
 scripts/forecast_forward.py       прогноз на 2025 год по 2 028 МО и проверка федерального агрегата по факту → results/forecast_2025*.csv
+scripts/export_results.py         снимок .csv.gz трёх крупных results/ для публикации (per_series, horizons_per_series, forecast_2025); --check сверяет снимки с текущими CSV
 data/raw/               панель СберИндекса (parquet)
 data/news/              агрегаты новостного корпуса (monthly.parquet, national.parquet); headlines.parquet — только локально
 data/reference/         справочник МО, ключевая ставка
 data/reference/sberindex/  длинные федеральные и отраслевые ряды
-results/                выход прогонов, в git не попадает
+results/                выход прогонов: сводки отчёта — в git (как есть или снимком .csv.gz), рабочая история прогонов — нет (см. правило об экспорте ниже)
 results/realizations/   снимки строк, заменённых повторным прогоном модели
 results/cp_v1/          стенд разладок v1: .venv/bin/python -u scripts/changepoints.py --config configs/changepoints_v1.yaml
 tests/                  тесты на синтетических кадрах, модели не гоняют
@@ -94,6 +95,17 @@ tests/                  тесты на синтетических кадрах,
   писать в другой `output.dir`. Разное число рядов у моделей, оставшееся от
   старых прогонов, `run.py` печатает строкой `ВНИМАНИЕ:`; колонка `серий`
   в сводке для этого не годится — она считается без отказов.
+- **Только сводки отчёта идут в git, не любой файл `results/`.** CSV верхнего уровня
+  `results/` и `results/cp_v1/` до 2 МБ коммитятся как есть — это числа, из которых
+  собран отчёт. Три крупных (`per_series.csv`, `horizons_per_series.csv`,
+  `forecast_2025.csv`) — сжатым снимком `<файл>.csv.gz` рядом, через
+  `scripts/export_results.py`; чтение (`read_results`, `table()` отчёта) само находит
+  обычный файл или, если его нет, снимок (`src/results_guard.py::resolve_results`).
+  `cp_bench.csv` (обе версии стенда) в git не идёт — воспроизводится
+  `scripts/changepoints.py` за ~7 минут; `backup_*/`, `realizations/`, `baseline/` —
+  рабочая история прогонов, а не числа отчёта. После прогона, изменившего один
+  из трёх крупных файлов, экспорт нужно повторить — иначе в git останется старый
+  снимок; `scripts/export_results.py --check` это ловит.
 - **Не подгонять базовую модель под себя, но и не навязывать ей своё.** Обёртка
   эталона не задаёт ни одного аргумента сверх дефолтов библиотеки: `prophet` —
   это Prophet как есть. Однажды обёртка прописала `yearly_seasonality=True`
