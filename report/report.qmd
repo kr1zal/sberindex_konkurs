@@ -2658,11 +2658,16 @@ _d_by_region = (pd.DataFrame({"region": _d_reg["region_name"], "out": ~_d_kept})
 _d_share = _d_by_region["sum"] / _d_by_region["size"]
 _d_top = (_d_by_region.assign(share=_d_share).loc[_d_share > 0.3]
           .sort_values(["share", "size"], ascending=False))
-pd.DataFrame({
+_d_tab = pd.DataFrame({
     "рядов в выгрузке": _d_top["size"].map(rub),
     "выпало": _d_top["sum"].map(rub),
     "что с выпавшими рядами": [_d_what(_d_drop.loc[_d_drop["region_name"] == r]) for r in _d_top.index],
 }).rename_axis("регион")
+# Описание выпавших рядов длиннее пятидесяти символов, и по умолчанию pandas обрезал бы его
+# многоточием — у Дагестана, Кабардино-Балкарии и Чукотки вместе со второй причиной.
+from IPython.display import display
+with pd.option_context("display.max_colwidth", None):
+    display(_d_tab)
 ```
 
 ```{python}
