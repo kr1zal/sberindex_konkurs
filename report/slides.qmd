@@ -54,7 +54,11 @@ _ps = pd.read_csv("../results/per_series.csv", usecols=["model", "fold", "mae", 
 _pf = (_ps[_ps["error"].isna() & _ps["mae"].notna()]
        .pivot_table(index="model", columns="fold", values="mae"))
 _ORD = {0: "первом", 1: "втором", 2: "третьем"}
-_FOLD_MO = {0: "15 мес", 1: "18 мес", 2: "21 мес"}  # обучение фолда — протокол в configs/full.yaml
+_FOLD_LEN = {0: "15 мес", 1: "18 мес", 2: "21 мес"}  # обучение фолда — протокол в configs/full.yaml
+# Шапки таблиц ссылались только на длину обучения; текст рядом говорит «первый/третий
+# фолд», и без номера фолда связь между ними терялась. Номер — из того же индекса,
+# что и _ORD (0 → фолд 1), не переписан руками отдельной строкой.
+_FOLD_MO = {k: f"фолд {k + 1}: обучение {v}." for k, v in _FOLD_LEN.items()}
 _GEN = ["нуля", "одного", "двух", "трёх", "четырёх", "пяти", "шести", "семи", "восьми", "девяти", "десяти"]
 _headlines = pd.read_parquet("../data/news/headlines.parquet", columns=["region_name"])
 ```
@@ -116,6 +120,18 @@ for label, kw in [("Prophet с годовой насильно", dict(yearly_sea
 rows["факт"] = np.round(y[15:18])
 from src import charts
 _fig = charts.prophet_failure(wide, "городской округ город Орёл", rows["Prophet с годовой насильно"], rows["Prophet по умолчанию"])
+_ax = _fig.axes[0]
+# В отчёте та же функция рисуется на высоте 3.9in, и легенда в один столбец у верхнего
+# края там не мешает. Здесь высота вчетверо меньше (2.05in под {.smaller}): та же легенда
+# перекрывала линию истории обучения, а собственный маркер «факт» — подпись «факт»
+# в легенде. Переносим в пустой нижний левый угол (данные туда не заходят) двумя
+# столбцами и даём запас по осям, чтобы подпись «−9 772 ₽» не упиралась в край.
+_ax.legend(frameon=False, fontsize=8, labelcolor=charts.INK_SOFT, loc="lower left",
+           ncol=2, columnspacing=1.2, handlelength=1.6, handletextpad=0.5)
+_ylo, _yhi = _ax.get_ylim()
+_ax.set_ylim(_ylo - 0.12 * (_yhi - _ylo), _yhi)
+_xlo, _xhi = _ax.get_xlim()
+_ax.set_xlim(_xlo, _xhi + 0.07 * (_xhi - _xlo))
 import matplotlib.pyplot as plt
 _fig.set_size_inches(7.2, 2.05)  # тот же слайд с {.smaller}: полноразмерный график с текстом не помещался
 _fig.tight_layout()
@@ -156,9 +172,9 @@ flowchart LR
     F -->|разнос долями| T["Двухэтапная модель:<br/>top-down по историческим долям"]
     P --> T
     B["Стенд: врезки известной величины,<br/>штраф выбран до реальных данных"] --> D
-    P --> D["Шесть детекторов<br/>в расширяющемся окне<br/>на темпах роста"]
+    P --> D["Детекторы<br/>в расширяющемся окне<br/>на темпах роста"]
     D --> S["Доля территорий<br/>с сигналом"]
-    G --> E["Скользящий origin:<br/>наукаст и 1, 3, 6, 12 мес."]
+    G --> E["Скользящий origin:<br/>наукаст и горизонты до года"]
     T --> E
     R["Эталон Prophet, наивная,<br/>фундаментальные модели"] --> E
     E --> M["MAE · R² по пулу<br/>MASE · sMAPE"]
@@ -427,7 +443,8 @@ Markdown(
 ```
 
 **Девять дополнительных месяцев улучшают модель в 10,4 раза** — наивную модель
-тот же срок не улучшает вовсе.
+тот же срок не улучшает вовсе: её ошибка зависит от того, какие месяцы попали
+в тест, а не от длины истории.
 
 ::: {.callout-warning}
 Прогнозировать предстоит с 24 месяцами обучения — за правым краем развёртки.
@@ -844,7 +861,7 @@ Markdown(_ft_line)
 покажет улучшение, если подбирать параметры по тем же данным, на которых меряешь.
 :::
 
-## Что не сработало: новости {.smaller}
+## Что не сработало: новости и длинные ряды {.smaller}
 
 ```{python}
 # Корпус и счёт проверок — из файлов; первые две конструкции считались на словаре до чистки,
@@ -899,11 +916,23 @@ _ccl_pb, _ccl_pp = _pf.loc[_ccl_best], _pf.loc["prophet"]
 _ccl_folds = sorted(_ccl_pb.index)
 _ccl_wins = [f for f in _ccl_folds if _ccl_pb[f] < _ccl_pp[f]]
 _ccl_lose = [f for f in _ccl_folds if f not in _ccl_wins]
-_ccl_lf = _ccl_lose[0] if _ccl_lose else None
+# Ровно один проигранный фолд — раньше единственный ожидаемый случай, отсюда
+# `_ccl_lose[0]`: при перепрогоне, где лучшая выигрывает все три (пусто) или
+# проигрывает больше одного (несколько), `_ORD[None]`/`_ccl_pp[None]` роняли рендер.
+_ccl_lf = _ccl_lose[0] if len(_ccl_lose) == 1 else None
 _ccl_ratio = _ccl_pb[_ccl_lf] / _ccl_pp[_ccl_lf] if _ccl_lf is not None else None
 _ccl_rw = (({2: "вдвое", 3: "втрое", 4: "вчетверо"}.get(round(_ccl_ratio))
             if _ccl_ratio is not None and abs(_ccl_ratio - round(_ccl_ratio)) < 0.15 else None)
            or (f"в {_num(_ccl_ratio, 1)} раза" if _ccl_ratio is not None else ""))
+if not _ccl_lose:
+    _ccl_lose_txt = f"на всех {_GEN[len(_ccl_folds)]} тестовых окнах"
+elif _ccl_lf is not None:
+    _ccl_lose_txt = (f"{len(_ccl_wins)} из {len(_ccl_folds)} тестовых окон; на {_ORD[_ccl_lf]} эталон точнее "
+                      f"({_num(_ccl_pp[_ccl_lf], 0)} против {_num(_ccl_pb[_ccl_lf], 0)}"
+                      + (f" — ошибка лучшей {_ccl_rw} больше" if _ccl_rw else "") + ")")
+else:  # проиграно несколько фолдов — числа одной парой не выразить, перечисляем фолды
+    _ccl_lose_txt = (f"{len(_ccl_wins)} из {len(_ccl_folds)} тестовых окон; на "
+                      f"{_and_join(_ORD[f] for f in _ccl_lose)} эталон точнее")
 
 # Счёт фолдовых побед по горизонтам — только пары модель/эталон с обеими числами:
 # на h=12 у панельных моделей нет обучающих примеров, строк с числом не будет вовсе.
@@ -920,15 +949,20 @@ _ccl_hz_w, _ccl_hz_n = sum(w for _, w, _ in _ccl_hz), sum(n for _, _, n in _ccl_
 
 _ccl_h12 = _hz[(_hz["horizon"] == 12) & (_hz["model"] != "two_stage_known")]
 _ccl_h12b = _ccl_h12.loc[_ccl_h12["MAE"].idxmin()]
+# Шире `_hz_rows` таблицы «Пять горизонтов» (там только сюжетные четыре модели):
+# лучшей на h=12 может оказаться любая из configs/horizons.yaml — там их двенадцать
+# без оракула, и без подписи текст печатал бы сырой код модели.
+_ccl_h12_ru = {**_hz_rows, "seasonal_naive": "сезонно-наивная",
+               "two_stage_news": "двухэтапная с новостями", "global_gbm": "базовая панельная",
+               "global_gbm_cat": "панельная + доли категорий", "chronos_ft": "дообученный Chronos",
+               "chronos_small": "Chronos-Bolt small", "timesfm": "TimesFM 2.5", "moirai": "Moirai"}
 
 Markdown(
     f"**Прогноз.** Лучшая модель обходит эталон на **{_num(_ccl_win, 1)}%** (MAE, 3 мес.) "
-    f"— {len(_ccl_wins)} из {len(_ccl_folds)} тестовых окон; на {_ORD[_ccl_lf]} эталон точнее "
-    f"({_num(_ccl_pp[_ccl_lf], 0)} против {_num(_ccl_pb[_ccl_lf], 0)}"
-    + (f", {_ccl_rw}" if _ccl_rw else "") + f"). По фолдам горизонтов — {_ccl_hz_str}, итого "
+    f"— {_ccl_lose_txt}. По фолдам горизонтов — {_ccl_hz_str}, итого "
     f"**{_ccl_hz_w} из {_ccl_hz_n}** (h=12 — без обучающих примеров у панели). Год вперёд "
-    f"без оракула: {_hz_rows.get(_ccl_h12b['model'], _ccl_h12b['model'])}, "
-    f"+{_num(_ccl_h12b['к Prophet, %'], 0)}% к эталону."
+    f"без оракула: {_ccl_h12_ru.get(_ccl_h12b['model'], 'другая модель')}, "
+    f"{_num(_ccl_h12b['к Prophet, %'], 0, sign=True)}% к эталону."
 )
 ```
 
@@ -964,8 +998,9 @@ Markdown(_cp_concl if _cp_concl.endswith(".") else _cp_concl + ".")
 # Оба абзаца переиспользуют переменные слайдов «Что не сработало»: _loss/_zsn/_ftm/_vp
 # (модели) и _nt (новости) — там же они и посчитаны, здесь только собраны в текст.
 Markdown(
-    f"**Фундаментальные модели:** zero-shot хуже наивной у всех трёх семейств "
-    f"(от {_num(_loss.min(), 0)}% до {_num(_loss.max(), 0)}%), дообученный Chronos доходит "
+    f"**Фундаментальные модели:** без дообучения на основном горизонте (3 мес.) в среднем "
+    f"хуже наивной у всех трёх семейств (от {_num(_loss.min(), 0)}% до {_num(_loss.max(), 0)}%), "
+    f"дообученный Chronos доходит "
     f"лишь до её уровня ({_num(_ftm, 0)} против {_num(_sum.loc['naive_last', 'MAE'], 0)}), "
     f"эталону уступает {_num(-_vp, 1)}%. "
     f"**Новости:** {len(_nt)} {_plural(len(_nt), 'гипотеза', 'гипотезы', 'гипотез')} "
