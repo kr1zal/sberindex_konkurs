@@ -436,7 +436,8 @@ _fc_hmax = int(_fc_chk["horizon"].max())
 _fc_year = _fc_chk[_fc_chk["horizon"] == _fc_hmax]
 _fc_mape = _fc_year.assign(e=_fc_year["error_pct"].abs()).groupby("method")["e"].mean()
 _fc_below = int((_fc_year.loc[_fc_year["method"] == "two_stage", "error_pct"] < 0).sum())
-_fig = charts.aggregate_check(load_aggregate("../data/reference/sberindex"), _fc_year)
+_fc_agg = load_aggregate("../data/reference/sberindex")
+_fig = charts.aggregate_check(_fc_agg, _fc_year)
 _fig.set_size_inches(7.2, 2.5)
 _fig.tight_layout()
 plt.show()
@@ -444,6 +445,7 @@ plt.show()
 
 ```{python}
 _fc_panel = [h for h, m in sorted(_fc_cfg["recommended"].items()) if m != "two_stage"]
+_fc_origin = pd.Period(_fc_cfg["origin"], "M")
 Markdown(
     f"**Прогноз от последнего месяца панели, декабря 2024:** на {_and_join(_fc_panel)} мес. — "
     f"панельная модель с долями категорий, на {_fc_hmax} — двухэтапная; {_num(len(wide.columns), 0)} "
@@ -451,10 +453,20 @@ Markdown(
     f"**Федеральный агрегат за 2025 год уже опубликован:** первый этап двухэтапной модели ошибся "
     f"в среднем на {_num(_fc_mape['two_stage'], 1)}%, «как в декабре» — на "
     f"{_num(_fc_mape['naive'], 1)}%, «как год назад» — на {_num(_fc_mape['seasonal_naive'], 1)}%"
-    + (f"; прогноз ниже факта во всех {_fc_below} месяцах — год рос быстрее прошлых.\n\n"
+    # Почему ниже факта — по числам: первый этап складывает медианные приросты месяцев за годы
+    # истории, а год прогноза рос быстрее этой медианы (но не быстрее двух предыдущих лет).
+    + (f"; прогноз ниже факта во всех {_fc_below} месяцах: первый этап закладывает медианный "
+       f"прирост {(_fc_agg.index[0] + 1).year}–{_fc_origin.year} годов, а {_fc_origin.year + 1}-й "
+       "рос быстрее.\n\n"
        if _fc_below == (_fc_year["method"] == "two_stage").sum() else ".\n\n")
-    + "**Муниципальный прогноз проверит факт**, когда выйдет разрез 2025 года; до тех пор "
-    "применим разнос опубликованного агрегата — `two_stage_known`."
+    + "**Муниципальный прогноз проверит факт**, когда выйдет разрез 2025 года"
+    # Разнос опубликованного агрегата — не на всё: на истории он точнее на год вперёд, а на месяц
+    # вперёд точнее панельная модель.
+    + ("; на год вперёд на истории точнее разнос опубликованного агрегата (`two_stage_known`), "
+       "на месяц — панельная модель."
+       if _hzi.loc[(_fc_hmax, "two_stage_known"), "MAE"] < _hzi.loc[(_fc_hmax, "two_stage"), "MAE"]
+       and _hzi.loc[(1, _fc_cfg["recommended"][1]), "MAE"] < _hzi.loc[(1, "two_stage_known"), "MAE"]
+       else ".")
 )
 ```
 
