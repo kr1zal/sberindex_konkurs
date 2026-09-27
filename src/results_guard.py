@@ -121,7 +121,7 @@ def uneven_series(per_series: pd.DataFrame) -> pd.Series | None:
     return counts if counts.nunique() > 1 else None
 
 
-def resolve_results(path: Path) -> Path:
+def resolve_results(path: Path | str) -> Path:
     """Путь, который действительно читать: обычный файл результатов, если он есть,
     иначе его сжатый снимок `path` + `.gz` (`per_series.csv` → `per_series.csv.gz`).
 
@@ -132,9 +132,13 @@ def resolve_results(path: Path) -> Path:
     когда он есть, новее и точнее снимка, поэтому проверяется первым. `.gz` находится
     только на чистом клоне или когда конвейер после клонирования ещё не запускался.
 
+    `path` — `Path` или строка: отчёт зовёт `table("../results/per_series.csv")` строками,
+    а `.exists()` есть только у `Path`, поэтому вход приводится к `Path` сразу.
+
     Падает `FileNotFoundError`, называющим оба пути, если нет ни одного, — это исключение
     ловит `table()` отчёта, чтобы явно сказать, каких данных не хватает, а не упасть
     на разборе несуществующего файла где-то внутри pandas."""
+    path = Path(path)
     if path.exists():
         return path
     gz = Path(f"{path}.gz")
@@ -143,7 +147,7 @@ def resolve_results(path: Path) -> Path:
     raise FileNotFoundError(f"нет ни обычного файла результатов, ни его снимка: {path}, {gz}")
 
 
-def read_results(path: Path, **kwargs) -> pd.DataFrame:
+def read_results(path: Path | str, **kwargs) -> pd.DataFrame:
     """Файл результатов — числами ровно такими, какими они записаны. Прочие аргументы —
     как у `pd.read_csv`.
 

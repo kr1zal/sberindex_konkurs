@@ -301,9 +301,28 @@ class ResolveResultsTest(unittest.TestCase):
         self.assertIn(str(self.path), message)
         self.assertIn(str(self.gz), message)
 
+    def test_string_path_is_accepted(self):
+        # report.qmd::table зовёт read_results строкой ("../results/per_series.csv"),
+        # не Path: `.exists()` есть только у Path, вход должен приводиться сам.
+        self.path.write_text("mo,mae\nмо_0,1.0\n", encoding="utf-8")
+        self.assertEqual(results_guard.resolve_results(str(self.path)), self.path)
+
+    def test_string_path_finds_gz_snapshot_too(self):
+        with gzip.open(self.gz, "wt", encoding="utf-8") as f:
+            f.write("mo,mae\nмо_0,1.0\n")
+        self.assertEqual(results_guard.resolve_results(str(self.path)), self.gz)
+
 
 class ReadResultsTest(unittest.TestCase):
     """Файлы результатов читаются числами ровно такими, какими они записаны."""
+
+    def test_accepts_string_path_like_report_qmd(self):
+        # Тот же вызов, что в report.qmd: table("../results/per_series.csv") — строкой.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "per_series.csv"
+            pd.DataFrame({"mae": [1.0, 2.0]}).to_csv(path, index=False)
+            back = results_guard.read_results(str(path))
+        self.assertEqual(back["mae"].tolist(), [1.0, 2.0])
 
     def test_numbers_come_back_exactly_as_written(self):
         # Разбор pandas по умолчанию читает примерно каждое восьмое такое число
