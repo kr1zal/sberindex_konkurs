@@ -1416,7 +1416,7 @@ if _cp_ready:
 %%| echo: false
 %%{init: {"flowchart": {"nodeSpacing": 12, "rankSpacing": 20}, "themeVariables": {"fontSize": "12px"}}}%%
 flowchart LR
-    P["Панель<br/>СберИндекса:<br/>расходы МО<br/>по месяцам"] --> G["Панельный бустинг:<br/>во сколько раз<br/>изменится"]
+    P["Панель<br/>СберИндекса<br/>расходы МО<br/>по месяцам"] --> G["Панельный бустинг:<br/>во сколько раз<br/>изменится"]
     K["Категории трат"] -->|обучающие ряды| G
     L["Длинные<br/>федеральные ряды<br/>обрезаны по origin"] --> F["Прогноз<br/>федерального ряда<br/>по его длинной<br/>истории"]
     F -->|общий фактор| G
@@ -3408,11 +3408,15 @@ _bf if "model" in _per else _per
 _sg_says = None
 if "model" in _per:
     _sg_f = sorted(_ok["fold"].unique())
-    _sg = {}
+    _sg, _sg_noise = {}, {}
     for _m in _by_fold:
         _pp = (_ok[_ok["model"].isin([_m, "global_gbm"])]
                .pivot_table(index=["mo", "fold"], columns="model", values="mae").dropna())
-        _sg[_m] = (_pp[_m] - _pp["global_gbm"]).groupby(level="fold").mean()
+        _dd = (_pp[_m] - _pp["global_gbm"]).groupby(level="fold")
+        _sg[_m] = _dd.mean()
+        # Фолды, где парный интервал разницы накрывает ноль, — «в пределах шума», как в таблице.
+        _sg_noise[_m] = [f for f in _sg_f
+                         if abs(_sg[_m][f]) < 1.96 * _dd.std(ddof=1)[f] / np.sqrt(_dd.size()[f])]
     _sg_late = [m for m in _by_fold if all(_sg[m][f] < 0 for f in _sg_f[:-1]) and _sg[m][_sg_f[-1]] > 0]
     _sg_all = [m for m in _by_fold if all(_sg[m][f] < 0 for f in _sg_f)]
     _sg_odd = [m for m in _by_fold if m not in _sg_late and m not in _sg_all]
@@ -3427,8 +3431,12 @@ if "model" in _per:
         _sg_says += (f" {_cp_cap(and_join(_names[m] for m in _sg_all))} "
                      # Подписи вида «доли…», «категории…» — множественное число, «общий фактор…» — нет.
                      f"{'помогает' if len(_sg_all) == 1 and not _names[_sg_all[0]].startswith(('доли', 'категории', 'длинные')) else 'помогают'} "
-                     f"на всех {in_words(len(_sg_f), 'род')} фолдах, на {_sg_last} — лишь на "
-                     f"{and_join(rub(-_sg[m][_sg_f[-1]]) for m in _sg_all)} ₽.")
+                     f"по знаку на всех {in_words(len(_sg_f), 'род')} фолдах"
+                     + "".join(f", на {_ORDINAL.get(f, str(f))} — в пределах шума"
+                               for f in sorted({f for m in _sg_all for f in _sg_noise[m]}) if f != _sg_f[-1])
+                     + f", на {_sg_last} — лишь на {and_join(rub(-_sg[m][_sg_f[-1]]) for m in _sg_all)} ₽"
+                     + (" и в пределах шума" if any(_sg_f[-1] in _sg_noise[m] for m in _sg_all) else "")
+                     + ".")
     if _sg_odd:
         _sg_first = {m: next((f for f in _sg_f if _sg[m][f] > 0), None) for m in _sg_odd}
         _sg_says += (" Знака не держат "
