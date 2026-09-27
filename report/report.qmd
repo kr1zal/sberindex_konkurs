@@ -2284,7 +2284,7 @@ if _fc_ready:
             (f"Первый этап закладывает медианный за {_fc_first}–{_fc_origin.year} годы прирост "
              f"каждого месяца — в прогнозе это {num(_fc_g_fc, 1)}% "
              if _fc_model == "seasonal_median" else f"Первый этап закладывал {num(_fc_g_fc, 1)}% ")
-            + f"декабрь к декабрю, а в {and_join(_fc_recent)} годах агрегат вырос декабрь к декабрю "
+            + f"декабрь к декабрю, а в {and_join(_fc_recent)} годах агрегат вырос "
             f"на {' / '.join(num(g, 1) for g in _fc_recent.values())}%. "
         )
     _fc_text = (
@@ -2361,12 +2361,14 @@ if _fc_ready and _fc_path.exists():
         _long = _hf_k.loc[1].reset_index()
         _long = _long.loc[_long["train_end"] >= 20].pivot(index="fold", columns="model", values="MAE")
         _wins = int((_long[_fc_rec1] < _long[_fc_known]).sum()) if {_fc_rec1, _fc_known} <= set(_long) else 0
-        _jan_tested = any(int(te) % 12 == 0 for te in _hf_k.loc[1, "train_end"])
+        # Тестовый месяц наукаста — позиция train_end в матрице панели: январь ли он, видно по дате.
+        _jan_tested = any(pd.Timestamp(_fc_wide.index[int(te)]).month == 1
+                          for te in _hf_k.loc[1, "train_end"] if int(te) < len(_fc_wide))
         _known_text += (
             f" На истории этот режим выигрывает там, где панельной модели не хватает примеров: на год "
             f"вперёд — {rub(_hz_k[(_fc_h[-1], _fc_known)])} ₽ против "
-            f"{rub(_hz_k[(_fc_h[-1], _fc_year_model)])} у двухэтапной. На коротких горизонтах точнее "
-            f"простая панельная модель: на месяц вперёд — {rub(_hz_k[(1, _fc_rec1)])} ₽ против "
+            f"{rub(_hz_k[(_fc_h[-1], _fc_year_model)])} у двухэтапной. На месяц вперёд точнее "
+            f"простая панельная модель: {rub(_hz_k[(1, _fc_rec1)])} ₽ против "
             f"{rub(_hz_k[(1, _fc_known)])}, а при обучении от двадцати месяцев она точнее разноса "
             f"{on_folds(_wins, len(_long))}. На {_cp_ym(str(_fc_origin + 1))} режимы расходятся "
             f"заметно: медианный рост к тому же месяцу прошлого года — {num(_g_known_first[0], 1)}% "
@@ -6083,8 +6085,9 @@ python -m venv .venv
 по регионам и по стране (`data/news/monthly.parquet`, `national.parquet`); новостные
 проверки читают их. Сырые заголовки в репозиторий не входят: это материалы изданий.
 Пересборка признаков по другому словарю тем требует их выкачки: `scripts/crawl_news.py`
-обходит архивы изданий, `src.news.load_headlines("data/news/raw")` собирает из архива слой
-заголовков, и он сохраняется в `data/news/headlines.parquet`. Остальное повторяется без
+обходит архивы изданий, `src.news.load_headlines("data/news/raw")` собирает из архива
+заголовки, и их пять исходных колонок (`url`, `title`, `date`, `region_name`, `domain`)
+сохраняются в `data/news/headlines.parquet`. Остальное повторяется без
 обращения к сайтам, кроме выборки тел статей, и без развёртывания базы данных.
 
 Результаты прогонов (`results/`) в репозиторий не входят, и с ними — снимки

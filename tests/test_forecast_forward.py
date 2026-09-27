@@ -127,7 +127,9 @@ def make_long_series_with_future_garbage(
 def make_context(aggregate: pd.Series, wide: pd.DataFrame) -> PanelContext:
     index = pd.to_datetime(wide.index).to_period("M")
     return PanelContext(
-        index=index, categories=make_categories(wide), external=None,
+        # Не None: иначе проверка «прогнозным моделям внешние признаки не передаются»
+        # проходила бы и без external=None в скрипте.
+        index=index, categories=make_categories(wide), external=object(),
         aggregate=aggregate, long_series={}, regions={},
     )
 

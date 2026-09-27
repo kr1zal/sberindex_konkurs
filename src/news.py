@@ -141,8 +141,11 @@ def load_headlines(raw_dir: str | Path) -> pd.DataFrame:
 
     Результат — это и есть слой `data/news/headlines.parquet`, которого нет
     в репозитории (заголовки чужих изданий, права не наши): его собирают локально
-    из архива `scripts/crawl_news.py` и сохраняют сами — `.to_parquet('data/news/headlines.parquet',
-    compression='zstd', index=False)`, той же парой параметров сжатия, что и в `save_datasets`,
+    из архива `scripts/crawl_news.py` и сохраняют сами пять исходных колонок —
+    `[["url", "title", "date", "region_name", "domain"]].to_parquet('data/news/headlines.parquet',
+    compression='zstd', index=False)`. Служебные `month` и `norm` в слой не пишутся:
+    `scripts/build_news_features.py` строит их сам, а готовый `month` (дата, не месяц-период)
+    ломает его сверку типов с прежним `national.parquet`. Сжатие — то же, что в `save_datasets`,
     но не им: он требует `features` и перепишет `monthly.parquet`, а файлы признаков
     пересобирает только `scripts/build_news_features.py`."""
     rows = []

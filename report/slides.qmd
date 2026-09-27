@@ -457,7 +457,9 @@ Markdown(
     # истории, а год прогноза рос быстрее этой медианы (но не быстрее двух предыдущих лет).
     + (f". Прогноз ниже факта все {_fc_below} месяцев: первый этап берёт медианный прирост "
        f"{(_fc_agg.index[0] + 1).year}–{_fc_origin.year}, а {_fc_origin.year + 1}-й рос быстрее.\n\n"
-       if _fc_below == (_fc_year["method"] == "two_stage").sum() else ".\n\n")
+       if _fc_below == (_fc_year["method"] == "two_stage").sum()
+       and (_fc_year.loc[_fc_year["method"] == "two_stage", "aggregate_model"] == "seasonal_median").all()
+       else ".\n\n")
     + "**Муниципальный прогноз проверит факт** разреза за 2025 год"
     # Разнос опубликованного агрегата — не на всё: на истории он точнее на год вперёд, а на месяц
     # вперёд точнее панельная модель.
