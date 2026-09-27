@@ -59,6 +59,7 @@ from scipy import stats
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src.cp_bench import month_offset  # noqa: E402
 from src.data import build_matrix, load_panel  # noqa: E402
 from src.results_guard import read_results, refused  # noqa: E402
 from src.run import _series_regions  # noqa: E402
@@ -165,36 +166,73 @@ BREAKS_PROTOCOL = "v2"
 
 # `min_size` детекторов офлайновой картины (Pelt/Binseg/BottomUp/KernelCPD) — константа
 # вызова ruptures в src/changepoints.py, а не протокола: configs/changepoints.yaml её не
-# хранит. Точка излома k делит ряд на сегмент [0, k) и сегмент [k, n): чтобы оба были не
-# короче min_size, k должно лежать в [min_size, n − min_size] включительно —
-# короче с обоих краёв не бывает сегмента. `check_breaks_within_range` проверяет при
-# запуске, что все изломы файла при штрафе 1,0 действительно туда попадают, чтобы
-# расхождение этой константы с src/changepoints.py не прошло тихо.
+# хранит. Точка излома b делит ряд на сегмент [0, b) и сегмент [b, L): чтобы оба были не
+# короче min_size, b должно лежать в [min_size, L − min_size] включительно —
+# короче с обоих краёв не бывает сегмента.
 MIN_SIZE = 3
+
+# Офлайновая картина (scripts/changepoints.py::offline_breaks) детектирует не по самому
+# ряду, а по темпу роста (`configs/changepoints.yaml: realtime.mode`) — тот же режим, что
+# и у потокового сигнала, иначе offline и realtime отвечали бы на разные вопросы. Темп
+# роста короче ряда на одну точку, и `month_offset` (src/cp_bench.py) сдвигает индекс
+# излома b обратно к месяцу исходной панели: month = b + offset. Строка не вписана
+# руками — берётся из того же места, что и offline_breaks, чтобы расхождение режимов
+# не прошло тихо.
+OFFLINE_MODE = "ratio"
 
 BREAKS_CORR_COLUMNS = ["design", "feature", "lag", "n", "df", "r", "t", "p", "alpha", "t_threshold", "r_critical", "passed"]
 
 
 def allowed_break_months(index: pd.PeriodIndex, min_size: int = MIN_SIZE) -> pd.PeriodIndex:
-    """Месяцы панели, где офлайновый детектор способен поставить излом при данном `min_size`:
-    позиции [min_size, len(index) − min_size] включительно (19 месяцев из 24 при min_size=3)."""
-    return index[min_size : len(index) - min_size + 1]
+    """Месяцы панели, где офлайновый детектор способен поставить излом.
+
+    Детектор видит темп роста — ряд длиной `L = len(index) − offset` (`offset =
+    month_offset(OFFLINE_MODE)`), и на нём излом b возможен только при b in
+    [min_size, L − min_size]. Перевод в месяц исходной панели — month = b + offset.
+    Нижняя граница (b = min_size) даёт month = min_size + offset — offset добавляется
+    без сокращения. Верхняя (b = L − min_size) даёт month = (len(index) − offset)
+    − min_size + offset = len(index) − min_size — offset входит и вычитается, поэтому
+    верхняя граница от режима подготовки не зависит, а нижняя зависит. При min_size=3
+    на 24 месяцах и offset=1 (темп роста) — позиции 4…21, 2023-05…2024-10, 18 месяцев;
+    на самом ряду (offset=0) было бы 19, начиная с 2023-04.
+    """
+    offset = month_offset(OFFLINE_MODE)
+    return index[min_size + offset : len(index) - min_size + 1]
 
 
 def check_breaks_within_range(
     cp_series: pd.DataFrame, allowed: pd.PeriodIndex,
     penalty: float = BREAKS_PENALTY, protocol: str = BREAKS_PROTOCOL,
 ) -> None:
-    """Падает, если в файле есть излом при `penalty` вне `allowed` — сигнал, что `MIN_SIZE`
-    здесь разошёлся с `min_size` в `src/changepoints.py`."""
+    """Падает, если в файле есть излом при `penalty` вне `allowed` — сигнал, что окно
+    здесь разошлось с детектором в src/changepoints.py."""
     subset = cp_series.loc[(cp_series["penalty"] == penalty) & (cp_series["protocol"] == protocol)]
     months = pd.PeriodIndex(subset["month"], freq="M")
     outside = sorted(set(months[~months.isin(allowed)].astype(str)))
     if outside:
         raise ValueError(
-            f"изломы {protocol}/{penalty} вне диапазона MIN_SIZE={MIN_SIZE} "
-            f"({allowed.min()}..{allowed.max()}): {outside}. "
-            "Похоже, MIN_SIZE в scripts/news_panel.py разошёлся с src/changepoints.py."
+            f"изломы {protocol}/{penalty} вне диапазона [{allowed.min()}, {allowed.max()}]: "
+            f"{outside}. Похоже, окно в scripts/news_panel.py разошлось с src/changepoints.py."
+        )
+
+
+def check_window_boundaries_reachable(cp_series: pd.DataFrame, allowed: pd.PeriodIndex) -> None:
+    """Падает, если у краёв `allowed` нет ни одного реального излома ни при одном штрафе файла.
+
+    `check_breaks_within_range` ловит только окно, которое УЖЕ слишком узкое (реальный
+    излом вне вычисленной границы). Слишком широкое — где граница на самом деле
+    недостижима детектором — эта проверка не поймала бы: ни одного излома вне узкого
+    окна там и не бывает. Смотрим по всем штрафам файла, а не только `BREAKS_PENALTY`:
+    достижимость границы — свойство детектора и `min_size`, а не конкретного штрафа,
+    и при штрафе 1,0 крайний месяц мог не встретиться просто по недостатку изломов.
+    """
+    months = pd.PeriodIndex(cp_series["month"], freq="M")
+    missing = [str(m) for m in (allowed.min(), allowed.max()) if not (months == m).any()]
+    if missing:
+        raise ValueError(
+            f"на краю окна [{allowed.min()}, {allowed.max()}] нет ни одного излома ни при "
+            f"одном штрафе файла: {missing}. Похоже, окно шире того, что детектор способен "
+            "поставить — MIN_SIZE/OFFLINE_MODE в scripts/news_panel.py стоит перепроверить."
         )
 
 
@@ -325,6 +363,7 @@ def build_news_breaks_corr(
     """Полный конвейер конструкции 2: от офлайновых изломов и новостей до `corr_rows`."""
     allowed = allowed_break_months(index)
     check_breaks_within_range(cp_series, allowed)
+    check_window_boundaries_reachable(cp_series, allowed)
     corpus_regions = set(monthly["region_name"].unique()) & set(regions.values())
     breaks = break_share_table(cp_series, regions, corpus_regions, allowed)
     news = news_lagged_table(monthly, sorted(corpus_regions), allowed)

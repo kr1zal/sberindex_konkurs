@@ -1,9 +1,11 @@
 """Новостные признаки в `GlobalGBM` (`global_gbm_news`) и `scripts/news_panel.py`.
 
-Синтетика, без файлов реального размера. Четыре группы:
+Синтетика, без файлов реального размера. Пять групп:
 
 - причинность и состав новостных признаков (`_load_news` в `src/models/global_model.py`);
 - ленивость загрузки — файл читает только модель с `news_path`, и только раз на контекст;
+- причинность внутри самой модели — `fit`/`predict` берут месяц origin, а не соседний
+  и не месяц цели (то, что `_load_news` в изоляции не поймала бы);
 - форма и арифметика `results/news_panel.csv` (парное сравнение моделей по MAE);
 - форма `results/news_breaks_corr.csv` и дизайн `within_month` против `pooled`
   на подсаженном сигнале — ключевая проверка конструкции 2.
@@ -24,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.models.global_model import (  # noqa: E402
-    GlobalGBM, NEWS_TOPICS as MODEL_NEWS_TOPICS, PanelContext, _load_news, _news_row,
+    LAGS, GlobalGBM, NEWS_TOPICS as MODEL_NEWS_TOPICS, PanelContext, _load_news, _news_row,
 )
 
 # scripts/ — не пакет: скрипт грузится по пути, как в tests/test_news.py.
@@ -139,6 +141,96 @@ class LazyLoadingTest(unittest.TestCase):
         expected = {f"news_{t}": 0.0 for t in MODEL_NEWS_TOPICS} | {"news_t_ceny": 0.7}
         self.assertEqual(with_region, expected)
         self.assertEqual(without_region, {})
+
+
+class ModelNewsAlignmentTest(unittest.TestCase):
+    """Причинность внутри самой модели, не только в загрузчике `_load_news`.
+
+    Прежние тесты причинности мутациями не ловились: они проверяли, что словарь `news`
+    не меняется от порчи будущих строк файла, но не то, что `GlobalGBM` берёт из этого
+    словаря значение ПРАВИЛЬНОГО месяца. Смещение на единицу в `_extra_row` (используется
+    и обучением, и прогнозом) или подмена только в `predict`, или подмена только в
+    `_training_set` на месяц цели вместо месяца origin — все три прошли бы прежний набор.
+    """
+
+    def _monthly_encoded(self, path: Path, n_months: int, region: str = "Регион") -> None:
+        """`t_ceny` = номер месяца (0-индекс) — значение признака называет момент,
+        которому оно принадлежит, и подмену видно по самому числу."""
+        months = pd.period_range("2023-01", periods=n_months, freq="M").to_timestamp()
+        rows = [{"region_name": region, "month": m, "t_ceny": float(i)} for i, m in enumerate(months)]
+        _monthly_frame(rows).to_parquet(path)
+
+    def _wide_needing_news(self, n_months: int, n_series: int, seed: int = 0) -> pd.DataFrame:
+        """Ряды, где темп роста месяца t определяется собственным случайным слагаемым месяца
+        (общим у всех рядов), а не сглаженным трендом: шести лагов истории для его предсказания
+        мало, а тридцати с лишним месяцев — достаточно, чтобы месяц перестал совпадать со своим
+        остатком по модулю 12. GBM без промаха может выучить это слагаемое только через признак,
+        который прямо называет месяц, — то есть через новости, а не через лаги или уровень.
+        Без такой зависимости порча новостей могла бы не изменить прогноз просто потому,
+        что модель их и не использует, и тест ничего не проверял бы.
+        """
+        rng = np.random.default_rng(seed)
+        index = pd.period_range("2023-01", periods=n_months, freq="M").to_timestamp()
+        log_growth = rng.normal(scale=0.15, size=n_months)
+        level = 1000 * np.exp(np.cumsum(log_growth))
+        return pd.DataFrame(
+            {f"s{i}": level * (1 + rng.normal(scale=0.0005, size=n_months)) for i in range(n_series)},
+            index=index,
+        )
+
+    def test_predict_is_unaffected_by_corrupting_news_after_the_origin_month(self):
+        """(а) Два прогона на одном контексте: во втором новости всех месяцев после
+        origin (train_end − 1) испорчены — первый будущий месяц (тот, что читает мутация
+        со сдвигом на единицу) заменён на NaN, остальные — ×1000. `predict` смотрит только
+        на origin, поэтому прогнозы обязаны совпасть побитно."""
+        n_months, n_series, train_end, horizon = 36, 10, 30, 3
+        wide = self._wide_needing_news(n_months, n_series)
+        regions = {c: "Регион" for c in wide.columns}
+        context = PanelContext(index=pd.to_datetime(wide.index).to_period("M"), regions=regions)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "monthly.parquet"
+            self._monthly_encoded(path, n_months=n_months)
+
+            clean = GlobalGBM(news_path=str(path))
+            clean.set_context(context)
+            clean.fit(wide, train_end, horizon)
+            pred_clean = clean.predict(wide, train_end, horizon)
+
+            origin_month = wide.index[train_end - 1]
+            corrupted = pd.read_parquet(path)
+            future = pd.to_datetime(corrupted["month"]) > origin_month
+            future_idx = corrupted.index[future]
+            self.assertTrue(len(future_idx) >= 2)  # проверка на валидность самой порчи
+            corrupted.loc[future_idx[0], "t_ceny"] = np.nan  # month = train_end — то, что читает t + 1
+            corrupted.loc[future_idx[1:], "t_ceny"] *= 1000.0
+            corrupted.to_parquet(path)
+
+            dirty = GlobalGBM(news_path=str(path))
+            dirty.set_context(context)
+            dirty.fit(wide, train_end, horizon)
+            pred_dirty = dirty.predict(wide, train_end, horizon)
+
+        np.testing.assert_array_equal(pred_clean, pred_dirty)
+
+    def test_training_pairs_carry_news_of_the_origin_month_not_the_target(self):
+        """(б) Признак `news_t_ceny` в обучающей строке пары (t, t + step) обязан
+        называть t (месяц origin), а не t + step (месяц цели)."""
+        n_months, train_end, step = 14, 12, 3
+        wide = self._wide_needing_news(n_months, n_series=1, seed=1)
+        regions = {c: "Регион" for c in wide.columns}
+        context = PanelContext(index=pd.to_datetime(wide.index).to_period("M"), regions=regions)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "monthly.parquet"
+            self._monthly_encoded(path, n_months=n_months)
+            model = GlobalGBM(news_path=str(path))
+            model.set_context(context)
+            features, _targets = model._training_set(wide, train_end, step)
+
+        expected_t = list(range(max(LAGS) - 1, train_end - step))
+        self.assertEqual(len(features), len(expected_t))  # проверка на валидность примера
+        self.assertEqual(features["news_t_ceny"].tolist(), [float(t) for t in expected_t])
 
 
 # ---------------------------------------------------------------------------
@@ -262,17 +354,59 @@ class BuildNewsPanelTest(unittest.TestCase):
 
 
 class AllowedBreakMonthsTest(unittest.TestCase):
+    """Офлайновая картина детектирует темп роста (`OFFLINE_MODE = "ratio"`), а не сам ряд:
+    ряд короче на одну точку, и месяц излома сдвинут на `month_offset`. Нижняя граница
+    окна от этого зависит от режима, верхняя — нет (см. докстринг `allowed_break_months`)."""
+
     def test_matches_worked_example_min_size_3_on_24_months(self):
         index = pd.period_range("2023-01", periods=24, freq="M")
         allowed = news_panel.allowed_break_months(index, min_size=3)
-        self.assertEqual(len(allowed), 19)
-        self.assertEqual(allowed.min(), pd.Period("2023-04", "M"))
+        self.assertEqual(len(allowed), 18)
+        self.assertEqual(allowed.min(), pd.Period("2023-05", "M"))
         self.assertEqual(allowed.max(), pd.Period("2024-10", "M"))
 
     def test_smaller_min_size_widens_the_range(self):
         index = pd.period_range("2023-01", periods=24, freq="M")
         allowed = news_panel.allowed_break_months(index, min_size=1)
-        self.assertEqual(len(allowed), 23)  # [1, 24-1] включительно
+        self.assertEqual(len(allowed), 22)
+        self.assertEqual(allowed.min(), pd.Period("2023-03", "M"))
+        self.assertEqual(allowed.max(), pd.Period("2024-12", "M"))
+
+    def test_formula_matches_direct_derivation_from_month_offset(self):
+        """Прямая проверка формулы: b в ряду темпов роста допустим в [min_size, L − min_size]
+        (L короче исходного индекса на offset), а месяц излома — b + offset."""
+        from src.cp_bench import month_offset
+
+        index = pd.period_range("2023-01", periods=24, freq="M")
+        min_size = 3
+        offset = month_offset("ratio")
+        length = len(index) - offset
+        expected_b = range(min_size, length - min_size + 1)
+        expected_months = pd.PeriodIndex([index[b + offset] for b in expected_b])
+        pd.testing.assert_index_equal(
+            pd.PeriodIndex(news_panel.allowed_break_months(index, min_size=min_size)), expected_months
+        )
+
+    def test_pelt_on_the_ratio_series_never_places_a_break_closer_than_min_size_to_an_edge(self):
+        """Эмпирическая проверка того же самого: сам детектор (`src.changepoints.detect_pelt`
+        на ряде, прошедшем `preprocess(..., "ratio")`, как в offline_breaks) не ставит излом
+        ближе `min_size` к любому краю преобразованного ряда — независимо от штрафа и данных,
+        это гарантия самого `ruptures` при `min_size=3`."""
+        from src.changepoints import detect_pelt
+        from src.cp_bench import preprocess
+
+        rng = np.random.default_rng(20260927)
+        length = len(pd.period_range("2023-01", periods=24, freq="M")) - 1  # длина ряда темпов роста
+        violations = []
+        for _ in range(50):
+            y = np.abs(100 + rng.normal(scale=5, size=24).cumsum()) + 1
+            ratio = preprocess(y, "ratio")
+            self.assertEqual(len(ratio), length)
+            for penalty in (0.01, 0.1, 1.0):
+                for b in detect_pelt(ratio, penalty=penalty).breakpoints:
+                    if b < news_panel.MIN_SIZE or b > length - news_panel.MIN_SIZE:
+                        violations.append(b)
+        self.assertEqual(violations, [])
 
 
 class CheckBreaksWithinRangeTest(unittest.TestCase):
@@ -283,19 +417,42 @@ class CheckBreaksWithinRangeTest(unittest.TestCase):
         })
 
     def test_passes_when_all_breaks_inside(self):
-        allowed = pd.period_range("2023-04", "2024-10", freq="M")
+        allowed = pd.period_range("2023-05", "2024-10", freq="M")
         news_panel.check_breaks_within_range(self._cp_series(["2023-05", "2024-10"]), allowed)  # не падает
 
     def test_raises_when_a_break_is_outside(self):
-        allowed = pd.period_range("2023-04", "2024-10", freq="M")
+        allowed = pd.period_range("2023-05", "2024-10", freq="M")
         with self.assertRaises(ValueError):
             news_panel.check_breaks_within_range(self._cp_series(["2023-05", "2023-01"]), allowed)
 
     def test_ignores_other_penalties(self):
-        allowed = pd.period_range("2023-04", "2024-10", freq="M")
+        allowed = pd.period_range("2023-05", "2024-10", freq="M")
         cp_series = self._cp_series(["2023-05"])
         extra = pd.DataFrame({"protocol": ["v2"], "penalty": [3.0], "series_id": ["sx"], "month": ["2023-01"]})
         news_panel.check_breaks_within_range(pd.concat([cp_series, extra]), allowed)  # штраф 3.0 не проверяется
+
+
+class WindowBoundariesReachableTest(unittest.TestCase):
+    """Дополняет `CheckBreaksWithinRangeTest`: то ловит окно ýже возможного, это — шире:
+    если у края `allowed` нет ни одного реального излома ни при одном штрафе, окно
+    не соответствует тому, что детектор в принципе может поставить."""
+
+    def _cp_series(self, rows: list[tuple[float, str]]) -> pd.DataFrame:
+        return pd.DataFrame({
+            "protocol": ["v2"] * len(rows), "penalty": [p for p, _ in rows],
+            "series_id": [f"s{i}" for i in range(len(rows))], "month": [m for _, m in rows],
+        })
+
+    def test_passes_when_both_edges_have_a_break_at_some_penalty(self):
+        allowed = pd.period_range("2023-05", "2024-10", freq="M")
+        cp_series = self._cp_series([(0.5, "2023-05"), (3.0, "2024-10")])
+        news_panel.check_window_boundaries_reachable(cp_series, allowed)  # не падает
+
+    def test_raises_when_an_edge_is_never_hit_at_any_penalty(self):
+        allowed = pd.period_range("2023-05", "2024-10", freq="M")
+        cp_series = self._cp_series([(0.5, "2023-06"), (3.0, "2024-10")])  # нижний край не достигнут
+        with self.assertRaises(ValueError):
+            news_panel.check_window_boundaries_reachable(cp_series, allowed)
 
 
 class CorrRowsShapeTest(unittest.TestCase):
