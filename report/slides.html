@@ -4139,7 +4139,7 @@ z-index: 1000;
 </div>
 </div>
 </div>
-<div id="d48af12c" class="cell" data-execution_count="2">
+<div id="49161edf" class="cell" data-execution_count="2">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="2">
 <p><strong>Измерение.</strong> Ошибка делится на промах мимо общего движения страны и разброс между муниципалитетами. Разброс укладывается в <strong>695–849 ₽ по всем 18 сочетаниям модели и фолда</strong> при стандартном отклонении 47. MAE при этом гуляет от 781 до 3 535. Остальное не сдвинула ни одна из шести моделей разложения.</p>
 </div>
@@ -4148,7 +4148,7 @@ z-index: 1000;
 </section>
 <section id="первая-находка-ловушка-годовой-сезонности" class="slide level2 smaller">
 <h2>Первая находка: ловушка годовой сезонности</h2>
-<div id="21ebb0fb" class="cell" data-execution_count="3">
+<div id="df09d8e9" class="cell" data-execution_count="3">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -4158,7 +4158,7 @@ z-index: 1000;
 </div>
 </div>
 <p>Годовая сезонность на 15 точках не идентифицируется — <strong>прогноз уходит в отрицательные значения</strong>. Prophet предупреждает об этом сам.</p>
-<div id="84b75b67" class="cell" data-execution_count="4">
+<div id="b81ace41" class="cell" data-execution_count="4">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="4">
 <p>Один флаг: на полной панели MAE <strong>22 527 ₽</strong> против 1 581 у эталона — в <strong>14 раз</strong> больше, R² пул −9,19; подгонка дороже.</p>
 </div>
@@ -4187,7 +4187,7 @@ z-index: 1000;
 <pre class="mermaid mermaid-js">%%{init: {&quot;flowchart&quot;: {&quot;nodeSpacing&quot;: 12, &quot;rankSpacing&quot;: 20}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;12px&quot;}}}%%
 flowchart LR
     P[&quot;Панель СберИндекса&lt;br/&gt;расходы МО по месяцам&quot;] --&gt; G[&quot;Панельный бустинг:&lt;br/&gt;во сколько раз изменится&quot;]
-    K[&quot;Шесть категорий трат&quot;] --&gt;|обучающие ряды| G
+    K[&quot;Категории трат&quot;] --&gt;|обучающие ряды| G
     L[&quot;Длинные федеральные ряды&lt;br/&gt;обрезаны по origin&quot;] --&gt; F[&quot;Прогноз федерального ряда&lt;br/&gt;по его длинной истории&quot;]
     F --&gt;|общий фактор| G
     F --&gt;|разнос долями| T[&quot;Двухэтапная модель:&lt;br/&gt;top-down по историческим долям&quot;]
@@ -4209,7 +4209,7 @@ flowchart LR
 </section>
 <section id="сравнение-моделей-прогнозирования" class="slide level2 smaller">
 <h2>Сравнение моделей прогнозирования</h2>
-<div id="6bad5735" class="cell" data-execution_count="5">
+<div id="aaf13479" class="cell" data-execution_count="5">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -4222,7 +4222,7 @@ flowchart LR
 </section>
 <section id="метрики-рядом-mae-mase-r²" class="slide level2 smaller">
 <h2>Метрики рядом: MAE, MASE, R²</h2>
-<div id="939009fb" class="cell" data-execution_count="6">
+<div id="68f773b2" class="cell" data-execution_count="6">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="6">
 <table class="caption-top" style="width:100%;">
 <colgroup>
@@ -4296,7 +4296,7 @@ flowchart LR
 </table>
 </div>
 </div>
-<div id="16395f1e" class="cell" data-execution_count="7">
+<div id="239fd007" class="cell" data-execution_count="7">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="7">
 <p>Среднее R² по парам ряд × фолд в таблицы не идёт: на трёх тестовых точках оно вырождено — от −39,0 до −7,3, и лучшей по нему выходит наивная модель, худшая по MAE.</p>
 </div>
@@ -4321,7 +4321,7 @@ flowchart LR
 </section>
 <section id="переносится-не-всё-и-не-как-угодно" class="slide level2">
 <h2>Переносится не всё и не как угодно</h2>
-<div id="cc9eb384" class="cell" data-execution_count="8">
+<div id="ec639642" class="cell" data-execution_count="8">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="8">
 <table class="caption-top">
 <thead>
@@ -4375,7 +4375,7 @@ flowchart LR
 </section>
 <section id="среднее-скрывает-перемену-мест" class="slide level2 smaller">
 <h2>Среднее скрывает перемену мест</h2>
-<div id="42c45ca3" class="cell" data-execution_count="9">
+<div id="8eebfaa0" class="cell" data-execution_count="9">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="9">
 <table class="caption-top">
 <thead>
@@ -4414,7 +4414,7 @@ flowchart LR
 </section>
 <section id="двухэтапная-модель-как-конструкция" class="slide level2 smaller">
 <h2>Двухэтапная модель как конструкция</h2>
-<div id="694ebe0c" class="cell" data-execution_count="10">
+<div id="5c5deb52" class="cell" data-execution_count="10">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="10">
 <table class="caption-top">
 <colgroup>
@@ -4459,7 +4459,7 @@ flowchart LR
 </table>
 </div>
 </div>
-<div id="bc954b16" class="cell" data-execution_count="11">
+<div id="ab9bf6eb" class="cell" data-execution_count="11">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="11">
 <p>Разброс двухэтапной модели <strong>совпадает с наивной до рубля</strong> — 695, 774 и 824: тождество по построению, обе дают «последнее значение × общий множитель». Разница между ними — ровно общий фактор, и он стоит <strong>460 ₽ из 1 852</strong>.</p>
 </div>
@@ -4468,7 +4468,7 @@ flowchart LR
 </section>
 <section id="пять-горизонтов-от-наукаста-до-года" class="slide level2 smaller">
 <h2>Пять горизонтов: от наукаста до года</h2>
-<div id="8af94794" class="cell" data-execution_count="12">
+<div id="12322aab" class="cell" data-execution_count="12">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="12">
 <table class="caption-top">
 <colgroup>
@@ -4520,7 +4520,7 @@ flowchart LR
 </table>
 </div>
 </div>
-<div id="9c008651" class="cell" data-execution_count="13">
+<div id="16686259" class="cell" data-execution_count="13">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="13">
 <p><strong>Наукаст: 45,9% над эталоном.</strong> Известный агрегат за текущий месяц добавляет 21,4 рубля: движение страны на месяц предсказуемо, остаток — разброс.</p>
 <p><strong>Год вперёд: у панельных моделей нет обучающих примеров</strong>, двухэтапная обходит эталон на 40%. Даже оракул общего движения не разносит точнее 1 356.</p>
@@ -4531,7 +4531,7 @@ flowchart LR
 <section id="короче-история-ценнее-перенос" class="slide level2 smaller">
 <h2>Короче история — ценнее перенос</h2>
 <p>Выигрыш переноса к базовой модели, ₽ (минус = помогает):</p>
-<div id="ebefe055" class="cell" data-execution_count="14">
+<div id="2def0828" class="cell" data-execution_count="14">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="14">
 <table class="caption-top">
 <colgroup>
@@ -4597,7 +4597,7 @@ flowchart LR
 </section>
 <section id="обнаружение-разладок-решает-преобразование" class="slide level2 smaller">
 <h2>Обнаружение разладок: решает преобразование</h2>
-<div id="ac20f652" class="cell" data-execution_count="15">
+<div id="5cd48165" class="cell" data-execution_count="15">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="15">
 <table class="caption-top">
 <colgroup>
@@ -4679,7 +4679,7 @@ flowchart LR
 </table>
 </div>
 </div>
-<div id="06578f8f" class="cell" data-execution_count="16">
+<div id="ff06ffb9" class="cell" data-execution_count="16">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="16">
 <p>Штраф 5 — по стенду, до реальных данных, край сетки: лучший мог лежать за ним. Зачёт — не позже 3 мес. после врезки, при молчащем нетронутом близнеце. Лучший J — у PELT и BinSeg. <strong>Но у методов со штрафом на темпах роста 64,4–79,7% засчитанного — сигналы в декабре; у PELT без них 4,6%.</strong></p>
 </div>
@@ -4690,7 +4690,7 @@ flowchart LR
 <h2>Интерпретация на реальных данных</h2>
 <div class="columns">
 <div class="column" style="width:52%;">
-<div id="32e3ac13" class="cell" data-execution_count="17">
+<div id="97c7b08e" class="cell" data-execution_count="17">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -4699,7 +4699,7 @@ flowchart LR
 </div>
 </div>
 </div>
-<div id="b979160b" class="cell" data-execution_count="18">
+<div id="ea3c4548" class="cell" data-execution_count="18">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="18">
 <table class="caption-top">
 <thead>
@@ -4730,7 +4730,7 @@ flowchart LR
 </div>
 </div>
 </div><div class="column" style="width:48%;">
-<div id="158605f2" class="cell" data-execution_count="19">
+<div id="d58619cd" class="cell" data-execution_count="19">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="19">
 <ul>
 <li><strong>Штраф 5, выбран по стенду:</strong> порог 50% не перейдён ни разу, наибольшая доля — 0,6% (октябрь 2023); октябрь 2023 — первый по доле месяц, но это 12 МО из 2 028; фон нулевой.</li>
@@ -4743,7 +4743,7 @@ flowchart LR
 </section>
 <section id="чего-мы-не-утверждаем" class="slide level2">
 <h2>Чего мы не утверждаем</h2>
-<div id="9995f2cd" class="cell" data-execution_count="20">
+<div id="a7b3318c" class="cell" data-execution_count="20">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="20">
 <p>Трёх событий недостаточно для вывода о причинности: связь с денежной политикой — совпадение и гипотеза.</p>
 <p>Октябрь 2023 и январь 2024 по полному ряду — не два шока: у 1 024 из 1 025 рядов с изломом в октябре 2023 есть излом и в январе 2024: это начало и конец одного отрезка.</p>
@@ -4754,7 +4754,7 @@ flowchart LR
 </section>
 <section id="что-не-сработало-модели" class="slide level2 smaller">
 <h2>Что не сработало: модели</h2>
-<div id="7bb238ee" class="cell" data-execution_count="21">
+<div id="8136aae7" class="cell" data-execution_count="21">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="21">
 <p><strong>Фундаментальные модели без дообучения.</strong> Chronos-Bolt small проигрывает наивной на 41%, Moirai на 22%, TimesFM 2.5 на 14% — в среднем; на третьем фолде Moirai, TimesFM 2.5 и Chronos-Bolt base наивную обходят. <strong>Три</strong> разных семейства сходятся, значит дело не в архитектуре. На горизонте 3 дообучение Chronos снимает 30% ошибки (2 620 → 1 830) и доводит его лишь до уровня наивной (на 1,2% лучше): эталону уступает 15,8%, панельной модели — в 1,5 раза. На наукасте — лишь 1,6% (2 026 → 1 994), и он на 23,8% хуже наивной; на 6 и 12 мес. дообучение пропускается или отказывает. Повтор с тем же сидом расходится на третьем фолде: 2 326 (снимок локального прогона, в репозиторий не входит) против 2 337. Больше параметров в среднем хуже: дообученный base даёт 2 004 против 1 830 у small.</p>
 </div>
@@ -4776,12 +4776,12 @@ flowchart LR
 </section>
 <section id="что-не-сработало-новости" class="slide level2 smaller">
 <h2>Что не сработало: новости</h2>
-<div id="aedc527d" class="cell" data-execution_count="22">
+<div id="9da0399e" class="cell" data-execution_count="22">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="22">
 <p><strong>Новости, четыре независимые конструкции.</strong> 589 тыс. заголовков, 18 регионов. Признаки в модели: +4,7 руб., корреляция с изломами не прошла Бонферрони (обе — на словаре до чистки). Событийный анализ, 42 проверки: ни одного значимого. <strong>Национальный уровень против федерального агрегата — 48 гипотез, порог объявлен заранее, не прошла ни одна.</strong></p>
 </div>
 </div>
-<div id="c2691e08" class="cell" data-execution_count="23">
+<div id="46dc3d6e" class="cell" data-execution_count="23">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="23">
 <p>Заголовки не виноваты: по выборке в 20 тыс. статей с телами тело добирает медианно <strong>1,2%</strong> из непопавших, а связь с целью меняется вдвое слабее шума выборки.</p>
 </div>
@@ -4790,19 +4790,19 @@ flowchart LR
 </section>
 <section id="выводы" class="slide level2 smaller">
 <h2>Выводы</h2>
-<div id="0ab8a9c6" class="cell" data-execution_count="24">
+<div id="2bba1c95" class="cell" data-execution_count="24">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="24">
 <p><strong>Прогноз.</strong> Лучшая модель обходит эталон на <strong>23,0%</strong> (MAE, 3 мес.) — 2 из 3 тестовых окон; на первом эталон точнее (1 096 против 1 641, в 1,5 раза). По фолдам горизонтов — h=1: 8 из 9, h=3: 2 из 3, h=6: 2 из 2, итого <strong>12 из 14</strong> (h=12 — без обучающих примеров у панели). Год вперёд без оракула: двухэтапная, +40% к эталону.</p>
 </div>
 </div>
-<div id="a7a24339" class="cell" data-execution_count="25">
+<div id="4144cf41" class="cell" data-execution_count="25">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="25">
 <p><strong>Изломы: решает преобразование, а не алгоритм.</strong> PELT на темпах роста при штрафе 5: обнаружено 13,9% (67% — сигналы в декабре, без них 4,6%), медиана задержки 3 мес., ложных тревог 0% (на сырых рядах 66,7%). В реальном времени при выбранном штрафе порог 50% не перейдён ни разу; при штрафе 1 — только октябрь 2024, с задержкой 2 мес., и порог перейдён в самом декабре.</p>
 </div>
 </div>
-<div id="3decdf67" class="cell" data-execution_count="26">
+<div id="dfe984f0" class="cell" data-execution_count="26">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="26">
-<p><strong>Фундаментальные модели (честно):</strong> zero-shot хуже наивной у всех трёх семейств (от 14% до 41%), дообучённый Chronos доходит лишь до её уровня (1 830 против 1 852), эталону уступает 15,8%. <strong>Новости (честно):</strong> 48 гипотез на национальном уровне, порог объявлен заранее, не прошла ни одна.</p>
+<p><strong>Фундаментальные модели:</strong> zero-shot хуже наивной у всех трёх семейств (от 14% до 41%), дообученный Chronos доходит лишь до её уровня (1 830 против 1 852), эталону уступает 15,8%. <strong>Новости:</strong> 48 гипотез на национальном уровне, порог объявлен заранее, не прошла ни одна.</p>
 </div>
 </div>
 <p><strong>Главный вывод.</strong> Задача — прогноз одного числа и разнос. Перенос замещает недостающую историю ровно в той мере, в какой её недостаёт — длину ряда не заменить, можно только занять недостающую сезонность у того, у кого она есть.</p>
@@ -4810,7 +4810,7 @@ flowchart LR
 <section id="что-из-этого-следует" class="slide level2">
 <h2>Что из этого следует</h2>
 <p><strong>Осторожно с определённостью.</strong> Ни одна модель не выигрывает у наивной на всех трёх фолдах. По фолдам интервалы накрывают ноль у всех конструкций. Приводим обе оценки и не выбираем удобную.</p>
-<div id="ed52f093" class="cell" data-execution_count="27">
+<div id="b0a4a79d" class="cell" data-execution_count="27">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="27">
 <p><strong>Главный практический вывод.</strong> Три дополнительных месяца истории меняют качество прогноза сильнее, чем переход от наивной модели к градиентному бустингу: на фолдах с обучением 18 и 21 точка MAE базовой панельной модели в среднем 1 006, на фолде с 15 точками — 2 387.</p>
 </div>
