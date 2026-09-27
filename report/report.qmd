@@ -61,6 +61,12 @@ def num(value: float, digits: int, sign: bool = False) -> str:
     text = format(value, ("+" if sign and value > 0 else "") + f",.{digits}f")
     return text.replace(",", "\u00a0").replace(".", ",").replace("-", "−")
 
+def num_up(value: float, digits: int) -> str:
+    """Верхняя граница для «не больше»: округление вверх до `digits` знаков. Обычное округление
+    у 0,0052 даёт 0,005 — меньше самого максимума, и «не больше чем на» перестаёт быть верным."""
+    scale = 10 ** digits
+    return num(np.ceil(value * scale - 1e-9) / scale, digits)
+
 def on_folds(k: int, n: int) -> str:
     """«на 2 фолдах из 3» с согласованием; «все» и «ни одного» — словами."""
     if k == 0:
@@ -326,27 +332,42 @@ if _rs_ready and "prophet" in _sum.index:
             + f" эталон точнее: {_vw_says}." if len(_vs_lost) == 1 else
             f"Эталон точнее на {and_join(_ORDINAL.get(f, str(f)) for f in _vs_lost)} фолдах; "
             f"сильнее всего на {_ORDINAL.get(_vw, str(_vw))}: {_vw_says}.")
+    from scipy import stats
     _top5 = list(_sum["MAE"].nsmallest(5).index)
     _gap5 = _sum.loc[_top5, "MAE"].max() - _sum.loc[_top5, "MAE"].min()
     _f5 = _ok[_ok["model"].isin(_top5)].groupby(["fold", "model"])["mae"].mean().unstack()
+    # «Неразличимы» — по пофолдовым интервалам разниц с верхней строкой (t с k − 1 степенями, как
+    # в таблице против эталона), а не по одной победе на одном фолде.
+    _k5, _rest = len(_f5), len(_top5) - 1
+    _d5 = {m: _f5[m] - _f5[_top] for m in _top5[1:]}
+    _indist = _k5 > 1 and all(
+        abs(d.mean()) < stats.t.ppf(0.975, _k5 - 1) * d.std(ddof=1) / np.sqrt(_k5) for d in _d5.values())
     _beat = {f: [m for m in _top5[1:] if _f5.loc[f, m] < _f5.loc[f, _top]] for f in _f5.index}
     _fb = max(_beat, key=lambda f: (len(_beat[f]), f)) if _beat else None
+    _five = in_words(len(_top5), "им_ж").capitalize()
+    _beat_says = ""
     if _fb is not None and _beat[_fb]:
         _marg = [_f5.loc[_fb, _top] - _f5.loc[_fb, m] for m in _beat[_fb]]
-        _k, _rest = len(_beat[_fb]), len(_top5) - 1
+        _k = len(_beat[_fb])
+        _beat_says = (f"на {_ORDINAL.get(_fb, str(_fb))} фолде "
+                      + (f"каждая из остальных {in_words(_rest, 'род')} обходит" if _k == _rest else
+                         f"{in_words(_k, 'им_ж')} из остальных {in_words(_rest, 'род')} "
+                         f"{'обходит' if _k == 1 else 'обходят'}")
+                      + f" верхнюю строку на {rub(min(_marg))}"
+                      + (f"–{rub(max(_marg))}" if round(max(_marg)) != round(min(_marg)) else "") + " ₽")
+    if _indist:
+        # Остальные уже названы в той же фразе — «каждая из них», без второго «из остальных четырёх».
+        _beat_them = _beat_says.replace(f"каждая из остальных {in_words(_rest, 'род')}", "каждая из них")
         _vs_parts.append(
-            f"{in_words(len(_top5), 'им_ж').capitalize()} верхних конструкций по фолдам неразличимы: "
-            f"по среднему их разделяет {rub(_gap5)} ₽, а на {_ORDINAL.get(_fb, str(_fb))} фолде "
-            + (f"каждая из остальных {in_words(_rest, 'род')} обходит" if _k == _rest else
-               f"{in_words(_k, 'им_ж')} из остальных {in_words(_rest, 'род')} "
-               f"{'обходит' if _k == 1 else 'обходят'}")
-            + f" верхнюю строку на {rub(min(_marg))}"
-            + (f"–{rub(max(_marg))}" if round(max(_marg)) != round(min(_marg)) else "")
-            + " ₽. Поэтому рекомендуемая модель выбирается по длине истории, а не по верхней "
-            "строке таблицы ([что из этого следует для практики](#sec-practice)).")
+            f"{_five} верхних конструкций по фолдам неразличимы: по среднему их разделяет {rub(_gap5)} ₽, "
+            f"пофолдовые интервалы разниц с верхней строкой накрывают ноль у всех {in_words(_rest, 'род')}"
+            + (f", а {_beat_them}" if _beat_says else "")
+            + ". Поэтому рекомендуемая модель выбирается по длине истории, а не по верхней строке "
+            "таблицы ([что из этого следует для практики](#sec-practice)).")
     else:
-        _vs_parts.append(f"{in_words(len(_top5), 'им_ж').capitalize()} верхних конструкций различаются "
-                         f"по среднему на {rub(_gap5)} ₽, и верхняя — лучшая из них на каждом фолде.")
+        _vs_parts.append(f"{_five} верхних конструкций различаются по среднему на {rub(_gap5)} ₽"
+                         + (f"; {_beat_says}" if _beat_says else
+                            ", и верхняя — лучшая из них на каждом фолде") + ".")
     # Фолдовый счёт по горизонтам: на каждом горизонте, где у лучшей модели есть число.
     _hw, _hw_none = [], []
     if "MAE" in _hfr:
@@ -375,9 +396,9 @@ if _rs_ready and "prophet" in _sum.index:
     # Коротко — для «Результатов»: окна, где лучшая впереди, и первое, где впереди эталон.
     _rs["folds_short"] = Markdown(
         on_folds(len(_won_mae), len(_r2_folds))
-        + (f", а на {_ORDINAL.get(_vs_lost[0], str(_vs_lost[0]))} эталон точнее" if _vs_lost else "")
+        + (f", а на {and_join(_ORDINAL.get(f, str(f)) for f in _vs_lost)} эталон точнее" if _vs_lost else "")
         + (f"; {in_words(len(_top5), 'им_ж')} верхних конструкций по фолдам неразличимы"
-           if _fb is not None and _beat[_fb] else ""))
+           if _indist else ""))
 if _rs_ready and {"chronos_small", "chronos_ft"} <= set(_sum.index):
     # Дообучение Chronos. Слова «уровень наивной» и «уступает эталону» выбираются
     # по числам: при другом прогоне фраза должна остаться верной.
@@ -388,23 +409,23 @@ if _rs_ready and {"chronos_small", "chronos_ft"} <= set(_sum.index):
     # дообучение хотя бы доходит до наивной: к «не спасает» такой хвост читался бы бессмыслицей.
     _ft_positive = _vp >= 0 or _vn > -5
     if _vp >= 0:
-        _ft_title = "дообучение Chronos обходит и эталон"
+        _ft_title = "дообученный Chronos обходит и эталон"
         _ft_level = (f"это лучше и наивной модели, и эталона — на {num(_vn, 1)}% "
                      f"и {num(_vp, 1)}%")
     elif abs(_vn) < 5:
-        _ft_title = "дообучение Chronos доводит лишь до её уровня"
+        _ft_title = "дообучение доводит Chronos лишь до её уровня"
         _ft_level = (f"это уровень наивной модели (на {num(abs(_vn), 1)}% "
                      f"{'лучше' if _vn > 0 else 'хуже'} неё), а не эталона — ему дообученный "
                      f"Chronos уступает {num(-_vp, 1)}%")
     elif _vn > 0:
-        _ft_title = "дообучение Chronos обходит её, но не эталон"
+        _ft_title = "дообученный Chronos обходит её, но не эталон"
         _ft_level = (f"это на {num(_vn, 1)}% лучше наивной модели, но эталону дообученный "
                      f"Chronos уступает {num(-_vp, 1)}%")
     else:
         _ft_title = "не спасает и дообучение"
         _ft_level = f"это всё ещё на {num(-_vn, 1)}% хуже наивной модели"
     _zero = [m for m in ("chronos_small", "timesfm", "moirai") if m in _sum.index]
-    _zero_head = ("без дообучения все три семейства хуже наивной"
+    _zero_head = ("без дообучения все три семейства в среднем хуже наивной"
                   if len(_zero) == 3 and all(_sum.loc[m, "к наивной, %"] < 0 for m in _zero)
                   else "без дообучения — в лучшем случае уровень наивной")
     _zero_says = ("Проверены Chronos-Bolt, TimesFM 2.5 и Moirai 1.1-R без дообучения; Chronos"
@@ -454,8 +475,8 @@ if _rs_ready and {"chronos_small", "chronos_ft"} <= set(_sum.index):
         _ft_hz_short = (
             " На наукасте дообучение "
             + (f"снимает {num(_cut1, 1)}% ошибки zero-shot" if _cut1 > 0 else "ошибку zero-shot не снижает")
-            + (f" и остаётся на {num(_vs_nv1, 1)}% хуже наивной" if _vs_nv1 > 0 else
-               f" и обходит наивную на {num(-_vs_nv1, 1)}%")
+            + (f", и модель остаётся на {num(_vs_nv1, 1)}% хуже наивной" if _vs_nv1 > 0 else
+               f", и модель обходит наивную на {num(-_vs_nv1, 1)}%")
             + (f"; на горизонтах {and_join(sorted(_ft_hz['untuned']))} мес. оно пропускается или "
                f"отказывает: обучающей истории для него мало" if _ft_hz["untuned"] else "")
             + ".")
@@ -472,8 +493,9 @@ if _rs_ready and {"chronos_small", "chronos_ft"} <= set(_sum.index):
                          f"точнее наивной и эталона ({rub(_hy['moirai'])} против {rub(_hy['naive_last'])} "
                          f"и {rub(_hy['prophet'])} ₽), но это {in_words(_nfy, 'им_м')} "
                          f"{plural(_nfy, 'фолд', 'фолда', 'фолдов')}.")
-    # Утечка валидации — находка, а не сноска: прежнее число было лучше из-за неё. Числа до
-    # исправления — только из снимков, которых на чистом клоне нет.
+    # Утечка валидации — находка, а не сноска. Какая часть разницы с прежними числами — от неё,
+    # а какая от сида, числами не разделить: исправлены были оба. Числа до исправления — только
+    # из снимков, которых на чистом клоне нет.
     _leak = (" Находка по дороге — утечка в валидации дообучения: цели проверочных окон частично "
              "совпадали с обучающими, и ранняя остановка выбирала модель отчасти по месяцам, на которых "
              f"та училась. {rub(_ft)} — число после исправления"
@@ -488,8 +510,9 @@ if _rs_ready and {"chronos_small", "chronos_ft"} <= set(_sum.index):
     # или на длинных горизонтах её нет вовсе.
     _only_main = bool(_ft_hz) and (_ft_hz["ft1"] > _ft_hz["nv1"] or bool(_ft_hz["untuned"]))
     _rs["foundation"] = Markdown(
-        f"**Фундаментальные модели: {_zero_head}, {_ft_title}"
-        f"{' — и только на основном горизонте' if _only_main and _ft_positive else ''}.** {_zero_says} "
+        # «На основном горизонте» — в начале: и zero-shot, и дообучение сравниваются там; наукаст
+        # и длинные горизонты — в теле пункта (TimesFM на h = 6 без дообучения точнее наивной).
+        f"**Фундаментальные модели: на основном горизонте {_zero_head}, {_ft_title}.** {_zero_says} "
         f"Дообучение снимает {num(_ft_cut, 0)}% его ошибки, {rub(_zs)} → {rub(_ft)} ₽: "
         f"{_ft_level}.{_ft_hz_short}{_moirai_y}{_leak}"
     )
@@ -1386,8 +1409,10 @@ if _cp_ready:
 Справка о конструкции: из чего собрано решение и где что проверяется. Результаты —
 в следующем разделе, подробности — по ссылкам.
 
+::: {.column-page}
 ```{mermaid}
 %%| echo: false
+%%{init: {"flowchart": {"nodeSpacing": 12, "rankSpacing": 20}, "themeVariables": {"fontSize": "12px"}}}%%
 flowchart LR
     P["Панель СберИндекса<br/>расходы МО по месяцам"] --> G["Панельный бустинг:<br/>во сколько раз изменится"]
     K["Категории трат"] -->|обучающие ряды| G
@@ -1396,13 +1421,14 @@ flowchart LR
     F -->|разнос долями| T["Двухэтапная модель:<br/>top-down по историческим долям"]
     P --> T
     B["Стенд: врезки известной величины,<br/>штраф выбран до реальных данных"] --> D
-    P --> D["Шесть детекторов<br/>в расширяющемся окне<br/>на темпах роста"]
+    P --> D["Детекторы<br/>в расширяющемся окне<br/>на темпах роста"]
     D --> S["Доля территорий<br/>с сигналом"]
-    G --> E["Скользящий origin:<br/>наукаст и 1, 3, 6, 12 мес."]
+    G --> E["Скользящий origin:<br/>наукаст и горизонты до года"]
     T --> E
     R["Эталон Prophet, наивная,<br/>фундаментальные модели"] --> E
     E --> M["MAE · R² по пулу<br/>MASE · sMAPE"]
 ```
+:::
 
 ```{python}
 #| echo: false
@@ -1413,13 +1439,19 @@ _mp_split = yaml.safe_load(Path("../configs/full.yaml").read_text(encoding="utf-
 _mp_h, _mp_k = int(_mp_split["horizon"]), int(_mp_split["n_folds"])
 _mp_main = (f"{in_words(_mp_k, 'им_м')} {plural(_mp_k, 'фолд', 'фолда', 'фолдов')} на горизонте "
             f"{_mp_h} {plural(_mp_h, 'месяц', 'месяца', 'месяцев')}")
+_mp_hz = ""  # без файлов горизонтов — только основной разбор, без «горизонты — мес.»
 if "MAE" in _hfr:
     # Обучение фолдов — из файла горизонтов: его столбец h = 3 — те же фолды, что основной разбор.
     _mp_te = sorted(int(t) for t in _hfr.loc[_hfr["horizon"] == _mp_h, "train_end"].unique())
     if len(_mp_te) == _mp_k:
         _mp_main += f" (обучение {and_join(_mp_te)} мес.)"
-    _mp["horizons"] = Markdown(and_join(int(h) for h in sorted(_hfr["horizon"].unique())))
-_mp["main"] = Markdown(_mp_main)
+    _mp_hz = (f", плюс наукаст и горизонты {and_join(int(h) for h in sorted(_hfr['horizon'].unique()))} "
+              f"мес. — на каждом столько фолдов, сколько допускают 24 точки")
+_mp["protocol"] = Markdown(_mp_main + _mp_hz)
+# «Лучшая» — только если это действительно верхняя строка сводки: описание ниже — про эту модель.
+_mp["hero1"] = Markdown("Лучшая панельная модель"
+                        if "MAE" in _sum and _sum["MAE"].idxmin() == "global_gbm_stack_factor"
+                        else "Панельная модель с переносом")
 _mp_dets = _cp_cfg["bench"]["detectors"]
 _mp["detectors"] = Markdown(
     f"{_cp_cap(in_words(len(_mp_dets), 'им_м'))} "
@@ -1429,19 +1461,19 @@ _mp["recent"] = Markdown(in_words(RECENT_WINDOW, "род"))
 ```
 
 **Данные.** Панель СберИндекса: потребительские безналичные расходы МО по месяцам,
-январь 2023 — декабрь 2024, итог и пять категорий трат; в оценке — `{python} _rs["n_mo"]`
+январь 2023 — декабрь 2024, шесть категорий трат (одна из них — итог «Все категории»); в оценке — `{python} _rs["n_mo"]`
 рядов. Длинные федеральные и отраслевые ряды СберИндекса дают годы истории и обрезаются
 по origin каждого фолда. Подробно — [Данные].
 
 **Три героя сравнения.**
 
-- **Лучшая панельная модель** (`global_gbm_stack_factor`). Один градиентный бустинг
+- **`{python} _mp["hero1"]`** (`global_gbm_stack_factor`). Один градиентный бустинг
   на всех МО сразу предсказывает не уровень, а во сколько раз изменится ряд к последнему
   месяцу, — так Магадан и сельский район учат модель одному и тому же. Сезонность,
   которой короткая панель не видела, модель берёт у общего фактора — прогноза длинного
   федерального ряда — и у категорий трат, поданных отдельными обучающими рядами.
   Подробно — [Перенос с длинных рядов].
-- **Двухэтапная модель** (`two_stage`) — top-down по историческим долям
+- **Двухэтапная модель** (`two_stage`) — по образцу top-down по историческим долям
   ([Hyndman & Athanasopoulos, FPP3, § 11.2](https://otexts.com/fpp3/single-level.html)):
   прогнозирует один федеральный ряд по его собственной длинной истории и разносит прогноз
   по МО долями — медианой отношения ряда к федеральному индексу за последние месяцы
@@ -1459,8 +1491,7 @@ _mp["recent"] = Markdown(in_words(RECENT_WINDOW, "род"))
 эпизод тревоги. Подробно — [в разделе об обнаружении](#sec-cp).
 
 **Протокол.** Скользящий origin с расширяющимся окном: основной разбор —
-`{python} _mp["main"]`, плюс наукаст и горизонты `{python} _mp["horizons"]` мес. — на
-каждом столько фолдов, сколько допускают 24 точки. Все модели проверяются на одних и тех же
+`{python} _mp["protocol"]`. Все модели проверяются на одних и тех же
 парах ряд × фолд; протокол живёт в `configs/*.yaml`, а не в коде моделей. Подробно —
 [Протокол оценки] и [Пять горизонтов](#sec-horizons).
 
@@ -1509,8 +1540,8 @@ Markdown(
     f"которую там не обошёл никто другой.\n\n"
     f"Лучшая по среднему модель даёт **MAE {rub(_best)} ₽** против "
     f"**{rub(_bench)} ₽** у эталона конкурса — выигрыш **{_pct}%** "
-    f"на {_rs['n_mo'].data} муниципалитетах и {_rs['n_pairs'].data} парах ряд × фолд, "
-    f"{_rs['folds_short'].data} ([сравнение с эталоном](#sec-vs-prophet)). "
+    f"на {_rs['n_mo'].data} муниципалитетах и {_rs['n_pairs'].data} парах ряд × фолд. "
+    f"Впереди она {_rs['folds_short'].data} ([сравнение с эталоном](#sec-vs-prophet)). "
     f"Но само это число — побочный продукт. Результат — то, почему оно именно такое."
 )
 ```
@@ -1929,7 +1960,7 @@ if "model" in _per and "prophet" in _sum.index:
             f"по фолдам, 95% ДИ по t({_k - 1})": f"[{num(_fd.mean() - _half, 0, sign=True)}; "
                                                  f"{num(_fd.mean() + _half, 0, sign=True)}]",
             "фолдов выиграно": f"{int((_fd > 0).sum())} из {_k}",
-            "рядов выиграно": f"{num(_vs_share[_m], 0)}%",
+            "пар выиграно": f"{num(_vs_share[_m], 0)}%",
         })
     _vs_tab = pd.DataFrame(_vs_rows).set_index("модель")
     _vs_npairs = len(_vs_piv["prophet"].dropna())
@@ -1943,16 +1974,20 @@ _vs_tab if _vs_tab is not None else _per
 # рядом, потому что год вперёд без неё не сравнить.
 _vs_h = None
 if "MAE" in _hfr and _rs_ready:
-    _vs_hrows, _vs_tot = [], {}
+    _vs_hrows, _vs_tot, _vs_used = [], {}, {}
     for _h in sorted(set(_hfr["horizon"])):
         _g = _hfr[_hfr["horizon"] == _h].pivot(index="train_end", columns="model", values="MAE")
         _row = {"горизонт, мес.": _h, "фолдов": len(_g)}
         for _m, _lab in ((_top, "лучшая панельная"), ("two_stage", "двухэтапная")):
-            _both = _g[[_m, "prophet"]].dropna() if {_m, "prophet"} <= set(_g.columns) else _g.iloc[0:0]
-            _w = int((_both[_m] < _both["prophet"]).sum())
-            _row[_lab] = f"{_w} из {len(_both)}" if len(_both) else "нет прогноза"
+            # Модели нет в файле горизонтов — сравнений ноль, а не KeyError на пустой рамке.
+            _both = _g[[_m, "prophet"]].dropna() if {_m, "prophet"} <= set(_g.columns) else None
+            _nb = 0 if _both is None else len(_both)
+            _w = int((_both[_m] < _both["prophet"]).sum()) if _nb else 0
+            _row[_lab] = f"{_w} из {_nb}" if _nb else "нет прогноза"
             _t = _vs_tot.setdefault(_lab, [0, 0])
-            _t[0], _t[1] = _t[0] + _w, _t[1] + len(_both)
+            _t[0], _t[1] = _t[0] + _w, _t[1] + _nb
+            if _nb:
+                _vs_used.setdefault(_lab, []).append(int(_h))
         _vs_hrows.append(_row)
     _vs_hrows.append({"горизонт, мес.": "всего", "фолдов": sum(r["фолдов"] for r in _vs_hrows),
                       **{lab: f"{w} из {n}" for lab, (w, n) in _vs_tot.items()}})
@@ -1963,12 +1998,13 @@ _vs_h if _vs_h is not None else _hfr
 ```{python}
 #| echo: false
 # Абзацы под таблицами — по их же числам. «Накрывают ноль у всех» — только если так у каждой
-# строки; доля выигранных рядов — у лучшей модели.
+# строки; доля выигранных пар ряд × фолд — у лучшей модели.
 if _vs_tab is not None:
     _vs_nc = [m for m, c in _vs_cover.items() if not c]
     _vs_cover_says = (f"накрывают ноль у всех {in_words(len(_vs_cover), 'род')} моделей таблицы"
                       if not _vs_nc else
-                      f"накрывают ноль у {len(_vs_cover) - len(_vs_nc)} моделей из {len(_vs_cover)}; "
+                      f"накрывают ноль у {len(_vs_cover) - len(_vs_nc)} "
+                      f"{plural(len(_vs_cover) - len(_vs_nc), 'модели', 'моделей', 'моделей')} из {len(_vs_cover)}; "
                       f"не накрывают — у {and_join(_VS_NAMES.get(m, m) for m in _vs_nc)}")
     _vs_says = (
         f"**Две оценки неопределённости, и обе верны.** Парные интервалы узкие, потому что пар "
@@ -1979,18 +2015,20 @@ if _vs_tab is not None:
         f"{in_words(len(_r2_folds), 'им_м')}, интервалы {_vs_cover_says}. Парная оценка говорит: "
         f"на этих {_rs['n_mo'].data} муниципалитетах в эти тестовые месяцы выигрыш лучшей модели "
         f"держится на большинстве территорий — она точнее эталона на {num(_vs_share[_top], 0)}% "
-        f"рядов. Фолдовая говорит: {in_words(len(_r2_folds), 'род')} тестовых окон слишком мало, "
+        f"пар ряд × фолд. Фолдовая говорит: {in_words(len(_r2_folds), 'род')} тестовых окон слишком мало, "
         f"чтобы утверждать, что выигрыш повторится на любом другом периоде. Мы приводим обе "
         f"и не выбираем удобную."
     )
-    if _vs_h is not None and "лучшая панельная" in _vs_tot:
+    if _vs_h is not None and _vs_tot.get("лучшая панельная", [0, 0])[1]:
         _bw, _bn = _vs_tot["лучшая панельная"]
         _tw, _tn = _vs_tot.get("двухэтапная", (0, 0))
         _vs_says += (
-            f"\n\n**Счёт по горизонтам сильнее одной строки.** По всем горизонтам вместе, "
-            f"с их собственными origin'ами, лучшая панельная модель точнее эталона в {_bw} фолдовых "
-            f"сравнениях из {_bn}"
-            + (f", двухэтапная — в {_tw} из {_tn}" if _tn else "")
+            f"\n\n**Счёт по горизонтам сильнее одной строки.** На горизонтах "
+            f"{and_join(_vs_used['лучшая панельная'])} мес., у каждого свои origin'ы, лучшая панельная "
+            f"модель точнее эталона в {_bw} фолдовых сравнениях из {_bn}"
+            # Точка сокращения «мес» — от точки конца предложения, которая идёт следом.
+            + (f", двухэтапная — в {_tw} из {_tn} на горизонтах {and_join(_vs_used['двухэтапная'])} мес"
+               if _tn else "")
             + ". Это счёт, а не тест: фолды разных горизонтов пересекаются по тестовым месяцам "
             "и независимыми не являются. Но знак выигрыша повторяется почти везде, а не только "
             "в среднем по трём фолдам основного разбора.")
@@ -2691,16 +2729,11 @@ _shown if "MAE" in summary else summary
 #| echo: false
 # Двойник в таблице — одна модель под двумя именами. Строки оставлены обе, а в счёт
 # моделей по тексту двойник идёт один раз.
-import decimal
-# Верхняя граница печатается округлением вверх: обычное round() у 0,0052 даёт 0,005 — меньше
-# самого максимума, и «расходятся не больше чем на» перестаёт быть верным.
-_ceil3 = lambda v: float(decimal.Decimal(str(v)).quantize(decimal.Decimal("0.001"),
-                                                           rounding=decimal.ROUND_CEILING))
 Markdown(
     " ".join(f"`{a}` и `{b}` — одна и та же модель"
              + (", Chronos-Bolt small, вызванный пакетно и по рядам"
                 if {a, b} == {"chronos_panel", "chronos_small"} else "")
-             + f": ошибки по рядам расходятся не больше чем на {num(_ceil3(d), 3)} ₽."
+             + f": ошибки по рядам расходятся не больше чем на {num_up(d, 3)} ₽."
              for a, b, d in _twins)
     + f" Поэтому различных моделей в таблице {_n_models}, и в тексте счёт идёт по ним."
 ) if _twins else None
@@ -3249,7 +3282,7 @@ if "model" in _per:
             "MAE": _piv[_m].mean(),
             "Δ к базовой, ₽": _d.mean(),
             "95% ДИ": f"[{num(_d.mean() - 1.96 * _se, 0, sign=True)}; {num(_d.mean() + 1.96 * _se, 0, sign=True)}]",
-            "доля выигранных рядов": f"{(_piv[_m] < _base).mean() * 100:.0f}%",
+            "доля выигранных пар": f"{(_piv[_m] < _base).mean() * 100:.0f}%",
         })
     _tab = pd.DataFrame(_out).set_index("конструкция").sort_values("MAE")
 _tab if "model" in _per else _per
@@ -3335,13 +3368,11 @@ pd.DataFrame(_diag).set_index("признак")
 
 ### Как это выглядит по фолдам и по длине обучения
 
-Все пять конструкций ведут себя похоже по форме: на первом фолде помогают
-сильно, на втором слабее, на третьем мешают — кроме долей категорий. Измеренная на десяти длинах
-обучения, эта зависимость оказалась главным результатом работы — она разобрана
-в разделе [Результаты] вместе с разложением ошибки, которое объясняет механизм,
-и с таблицей по фолдам. Здесь — только парные разницы к базовой модели внутри
-каждого фолда, потому что именно они показывают, что форма одинакова у всех
-источников, а не только у лучшего.
+Зависимость выигрыша от длины обучения, измеренная на десяти её значениях, оказалась
+главным результатом работы — она разобрана в разделе [Результаты] вместе с разложением
+ошибки, которое объясняет механизм, и с таблицей по фолдам. Здесь — только парные
+разницы к базовой модели внутри каждого фолда: по ним видно, у каких источников форма
+одна и та же, а не только у лучшего.
 
 ```{python}
 #| echo: false
@@ -3366,9 +3397,44 @@ if "model" in _per:
 _bf if "model" in _per else _per
 ```
 
-Отрицательное число означает, что источник помогает. Знак меняется на третьем
-фолде у всех источников кроме долей категорий, и это не совпадение: на двадцати
-одном месяце обучения модель уже знает месяцы сама.
+```{python}
+#| echo: false
+# Знак по фолдам — по той же таблице: у каких источников он держится до последнего фолда
+# и меняется на нём, у каких держится на всех, а какие знака не держат. Прежняя фраза
+# «знак меняется у всех, кроме долей категорий» была шире таблицы: регрессоры мешают уже
+# на первом фолде, предобучение — на втором.
+_sg_says = None
+if "model" in _per:
+    _sg_f = sorted(_ok["fold"].unique())
+    _sg = {}
+    for _m in _by_fold:
+        _pp = (_ok[_ok["model"].isin([_m, "global_gbm"])]
+               .pivot_table(index=["mo", "fold"], columns="model", values="mae").dropna())
+        _sg[_m] = (_pp[_m] - _pp["global_gbm"]).groupby(level="fold").mean()
+    _sg_late = [m for m in _by_fold if all(_sg[m][f] < 0 for f in _sg_f[:-1]) and _sg[m][_sg_f[-1]] > 0]
+    _sg_all = [m for m in _by_fold if all(_sg[m][f] < 0 for f in _sg_f)]
+    _sg_odd = [m for m in _by_fold if m not in _sg_late and m not in _sg_all]
+    _sg_last = _ORDINAL.get(_sg_f[-1], str(_sg_f[-1]))
+    _sg_says = "Отрицательное число означает, что источник помогает."
+    if _sg_late:
+        _sg_says += (f" У {in_words(len(_sg_late), 'род')} источников из {in_words(len(_by_fold), 'род')} "
+                     f"форма одна: на первых {in_words(len(_sg_f) - 1, 'род')} фолдах они помогают, "
+                     f"на {_sg_last} — мешают, потому что на самом длинном обучении модель уже знает "
+                     f"месяцы сама.")
+    if _sg_all:
+        _sg_says += (f" {_cp_cap(and_join(_names[m] for m in _sg_all))} "
+                     # Подписи вида «доли…», «категории…» — множественное число, «общий фактор…» — нет.
+                     f"{'помогает' if len(_sg_all) == 1 and not _names[_sg_all[0]].startswith(('доли', 'категории', 'длинные')) else 'помогают'} "
+                     f"на всех {in_words(len(_sg_f), 'род')} фолдах, на {_sg_last} — лишь на "
+                     f"{and_join(rub(-_sg[m][_sg_f[-1]]) for m in _sg_all)} ₽.")
+    if _sg_odd:
+        _sg_first = {m: next((f for f in _sg_f if _sg[m][f] > 0), None) for m in _sg_odd}
+        _sg_says += (" Знака не держат "
+                     + and_join(f"{_names[m]} (на {_ORDINAL.get(_sg_first[m], str(_sg_first[m]))} фолде "
+                                f"{num(_sg[m][_sg_first[m]], 0, sign=True)} ₽)" if _sg_first[m] is not None
+                                else _names[m] for m in _sg_odd) + ".")
+Markdown(_sg_says) if _sg_says else None
+```
 
 ### Что переносится на самом деле
 
@@ -3422,7 +3488,8 @@ Markdown(
     f"Парные интервалы в таблице конструкций узкие, а пофолдовые — по t с {_tr_k - 1} степенями "
     f"свободы — "
     + (f"накрывают ноль у всех {in_words(len(_tr_cover), 'род')} конструкций" if all(_tr_cover) else
-       f"накрывают ноль у {sum(_tr_cover)} конструкций из {len(_tr_cover)}")
+       f"накрывают ноль у {sum(_tr_cover)} "
+       f"{plural(sum(_tr_cover), 'конструкции', 'конструкций', 'конструкций')} из {len(_tr_cover)}")
     + ". Почему обе оценки верны и отвечают на разные вопросы — в [сравнении с эталоном]"
     "(#sec-vs-prophet), где те же два интервала посчитаны против Prophet."
 ) if _tr_cover is not None else None
@@ -4737,7 +4804,7 @@ if _real_ready and "chronos_ft" in _sum.index:
                 if _ex and min(_ex) == 1 else
                 f"до копейки на ряд — до последнего знака лишь {num(100 * min(_ex), 0)}–"
                 f"{num(100 * max(_ex), 0)}% рядов, у остальных расхождение не больше "
-                f"{num(max(_gap[f] for f in _same_folds), 3)} ₽ —"
+                f"{num_up(max(_gap[f] for f in _same_folds), 3)} ₽ —"
                 if _ex else "до копейки на ряд"
             )
             if _same_folds and _apart_folds:
@@ -4754,6 +4821,10 @@ if _real_ready and "chronos_ft" in _sum.index:
             else:
                 _real_text += (f" После исправления {_runs} совпали на всех фолдах "
                                f"{_exact_says.rstrip(' —')}: детерминизм подтверждён.")
+            # Диапазоны и доли выше включают снимок первого сидированного прогона, если он есть.
+            if set(_after) & set(_snap_labels):
+                _real_text += (" Один из этих прогонов — снимок локального прогона, в репозиторий "
+                               "не входит.")
         elif len(_after) == 1:
             _real_text += (" Реализация после исправления одна, и детерминизм по одной "
                            "реализации не проверить.")
