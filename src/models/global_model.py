@@ -29,15 +29,21 @@
 | `categories` | доли пяти категорий трат и их динамика | **да** |
 | `stack_categories` | шесть категорий как отдельные обучающие ряды | **да** |
 | `pretrain` | предобучение на длинных отраслевых рядах | нет |
+| `news_path` | доли новостных тем региона (`data/news/monthly.parquet`) | по региону |
 
 Первые два и четвёртый переносят **историю**: длинные ряды знают апрельскую
 сезонность, которой в пятнадцати месяцах панели нет ни одного раза. Третий
 переносит **сечение**: структура трат отличает районы друг от друга, и этого
 не умеет ни один федеральный ряд.
+
+Пятый, `news_path`, — ни то ни другое: не история и не структура трат, а внешний
+сигнал, различающий не районы, а их регионы — муниципалитеты одного региона получают
+одну и ту же новостную долю тем месяца.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -78,6 +84,42 @@ def _news_row(news: dict | None, region: str | None, month_index: int) -> dict:
     if not news or region is None:
         return {}
     return news.get((region, month_index), {})
+
+
+# Шесть долей тем в data/news/monthly.parquet — темы ДКП там нет, она есть только
+# в национальном файле (src/news.py). `intensity` не входит: нормирована средним
+# и разбросом числа публикаций издания за весь период, то есть заглядывает вперёд
+# (то же исключение, что у `TwoStageNews._candidates`). `n_articles`/`n_outlets` —
+# объём, а не тема, и корпус растёт с 19,7 до 30 тыс. публикаций в месяц: такой
+# признак работал бы меткой времени, а не темой.
+NEWS_TOPICS = ("t_ceny", "t_dohody", "t_zanjatost", "t_proizvodstvo", "t_kredit", "t_torgovlja")
+
+
+def _load_news(
+    path: Path, regions: dict[str, str], index: pd.PeriodIndex
+) -> dict[tuple[str, int], dict[str, float]]:
+    """Новостные признаки по (регион, позиция месяца t в панели). Вызывается один раз
+    из ``set_context`` — здесь только сопоставление месяца файла с его позицией в этой
+    панели: причинность самой доли темы месяца t (публикации только этого месяца)
+    обеспечивает ``scripts/build_news_features.py``, не эта функция.
+
+    Регион берётся из ``PanelContext.regions``, а не из колонки файла напрямую: ряд,
+    для которого регион не определён (омоним), новостных признаков не получит —
+    ключа с его именем в словаре просто не будет.
+    """
+    frame = pd.read_parquet(path)
+    months = pd.PeriodIndex(pd.to_datetime(frame["month"]), freq="M")
+    position = {period: t for t, period in enumerate(index)}
+    covered = set(regions.values())
+    out: dict[tuple[str, int], dict[str, float]] = {}
+    for row, period in zip(frame.itertuples(index=False), months):
+        if row.region_name not in covered:
+            continue
+        t = position.get(period)
+        if t is None:
+            continue
+        out[(row.region_name, t)] = {f"news_{topic}": getattr(row, topic) for topic in NEWS_TOPICS}
+    return out
 
 
 def _features(series: np.ndarray, t: int) -> dict | None:
@@ -150,12 +192,17 @@ class GlobalGBM:
 
     def __init__(
         self, max_iter: int = 300, learning_rate: float = 0.05, max_leaf_nodes: int = 31,
-        news: dict | None = None, regions: dict | None = None,
+        news_path: str | None = None, regions: dict | None = None,
         external: bool = False, common_factor: bool = False,
         categories: bool = False, pretrain: bool = False,
         regional_factor: bool = False, stack_categories: bool = False,
     ) -> None:
-        self.news = news
+        # Путь до data/news/monthly.parquet, относительно корня репозитория. По умолчанию
+        # выключен: остальные варианты GlobalGBM этот файл вообще не открывают. Сам словарь
+        # `news` строится лениво в `set_context` (там есть и регионы, и ось времени панели) —
+        # не здесь и не при каждом обращении к ряду.
+        self.news_path = news_path
+        self.news: dict | None = None
         self.regions = regions
         self.use_external = external
         self.use_factor = common_factor
@@ -186,6 +233,9 @@ class GlobalGBM:
 
     def set_context(self, context: PanelContext) -> None:
         self.context = context
+        if self.news_path is not None and self.news is None:
+            self.news = _load_news(Path(self.news_path), context.regions, context.index)
+            self.regions = context.regions
 
     # -- служебное ---------------------------------------------------------
 

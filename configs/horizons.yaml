@@ -44,6 +44,7 @@ models:
   - global_gbm
   - global_gbm_cat
   - global_gbm_stack_factor
+  - global_gbm_news
   - chronos_ft
   # Фундаментальные модели оцениваются на всех горизонтах, а не только на h=3:
   # zero-shot трёх семейств рядом с дообученным Chronos.

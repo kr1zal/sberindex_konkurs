@@ -39,6 +39,7 @@ models:
   - global_gbm_region
   - global_gbm_stack
   - global_gbm_stack_factor
+  - global_gbm_news
   - chronos_panel
   - chronos_ft
   - chronos_ft_base

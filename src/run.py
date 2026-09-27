@@ -76,6 +76,7 @@ GLOBAL_MODELS = {
     "global_gbm_region": lambda: GlobalGBM(common_factor=True, regional_factor=True),
     "global_gbm_stack": lambda: GlobalGBM(stack_categories=True),
     "global_gbm_stack_factor": lambda: GlobalGBM(stack_categories=True, common_factor=True),
+    "global_gbm_news": lambda: GlobalGBM(news_path="data/news/monthly.parquet"),
     # Фундаментальные модели тоже панельные: дообучение одно на фолд, а не своё
     # на каждый из 2028 рядов по пятнадцати точкам.
     "chronos_panel": lambda: ChronosPanel(size="small"),
