@@ -1,0 +1,710 @@
+"""Единственный источник страницы входа (`index.html`) и данных демонстрационного
+стенда (`demo/data/*.json`) для GitHub Pages.
+
+    .venv/bin/python scripts/build_site.py [--out DIR]
+
+Пишет `<DIR>/index.html` из `site/index.template.html` (`--out` по умолчанию — корень
+репозитория; тесты собирают во временный каталог) и `<DIR>/demo/data/**`. Стенд
+(`demo/index.html`, его JS и графики) собирает следующая задача — здесь только его
+данные и заглушка `demo/index.html`.
+
+## Пять чисел страницы входа
+
+Резюме отчёта (`report/report.qmd`) объясняет тот же прогон теми же файлами. Отсюда
+перенесена ЛОГИКА, а не результат: `compute_placeholders` пересчитывает её на текущих
+`results/*.csv`, и при другом прогоне подставит другие, но так же верные числа.
+Помощники форматирования (`rub`, `num`, `on_folds`, `plural`, `and_join`, `in_words_m`)
+и словарь русских названий моделей (`MODEL_LABELS`) — те же самые, что в отчёте
+(`report/report.qmd`, строки 42-102 и 1682-1692), с тем же поведением.
+
+## Формат данных стенда — контракт со следующей задачей
+
+Все значения — JSON без NaN (пропуск — ``null``), рубли — целыми, проценты и
+млрд руб. — с двумя знаками, месяцы — строки ``"YYYY-MM"``. Файлы компактные
+(``separators=(",", ":")``, ``ensure_ascii=False``).
+
+``demo/data/index.json``::
+
+    built                дата сборки, "YYYY-MM-DD"
+    unit                 "руб. на человека в месяц"
+    origin               последний месяц панели (configs/forecast_forward.yaml::origin)
+    panel_months         месяцы панели, индекс матрицы (24 штуки)
+    forecast_months      месяцы прогноза: origin+1 .. origin+max(horizons)
+    n_series             рядов всего (столбцов матрицы)
+    n_no_region          рядов без региона (region пуст в forecast_2025.csv)
+    n_homonym_names      названий (series_id без " #N"), у которых больше одного ряда
+    n_homonym_series     рядов, относящихся к таким названиям
+    default_mo           МО, которое стенд открывает по умолчанию
+    forecast_rule        [{from, to, model, horizon}, …] — отрезки месяцев прогноза
+                         подряд с одной моделью и горизонтом
+    known_model          модель пунктира (uses_published_aggregate), одна на все горизонты
+    breaks               {protocol, penalty, detector, mode} — источник изломов ниже
+    folds                [{fold, train_months, test_from, test_to}, …] — фолды
+                         основного протокола (configs/full.yaml, src.split.rolling_origin)
+    models               [{id, role, label}, …] — модели таблицы ошибок, см. ниже
+    panel_mae            {model_id: [fold0, fold1, fold2, среднее]}, руб.
+    series               [[series_id, регион|null, ОКТМО|null, номер файла mo/], …]
+
+``demo/data/mo/<номер>.json`` — ряды одного региона (номер — позиция региона
+в отсортированном списке уникальных регионов; ряды без региона — под отдельным,
+следующим по счёту номером)::
+
+    {series_id: {fact: [24], forecast: [12], known: [12], breaks: [месяцы],
+                 mae: {model_id: [fold0, fold1, fold2]}}, …}
+
+``demo/data/aggregate.json``::
+
+    unit, origin, horizon, model            — как в forecast_2025_aggregate_check.csv
+    history: {months, values}               — агрегат с первого месяца по origin включительно
+    check: {months, actual,
+            forecast: {two_stage, naive, seasonal_naive},
+            error_pct: {…те же ключи}}       — горизонт = max(configs/forecast_forward.yaml::horizons)
+    rule_names: {naive, seasonal_naive}     — из колонки aggregate_model
+    mape: {method: …}                       — средняя |ошибка| за check.months
+    mape_by_horizon: {"1": {method: …}, …}  — то же на каждом горизонте файла
+
+Роли ``models`` (порядок и правило — из брифа задачи): ``prophet`` — reference;
+``naive_last`` — naive; recommended-модель самого короткого горизонта
+`forecast_forward.yaml` — recommended; ``summary.csv`` ``MAE.idxmin()`` — best_mean;
+recommended-модель самого длинного горизонта — two_stage. Если две роли достаются
+одной модели — она входит одной строкой, ``role`` — их имена через ``+``.
+
+Откуда что: ряды — `forecast_2025.csv` (их множество сверяется со столбцами матрицы,
+иначе сборка падает); факт — `build_matrix`; прогноз/пунктир — строки
+`recommended`/`uses_published_aggregate`, месяц берётся с самого короткого горизонта,
+который его покрывает (`report/report.qmd::_fc_steps`); изломы — `cp_offline_series.csv`
+при протоколе `v{changepoints.yaml::protocol_version}` и штрафе
+`scripts/news_event_study.py::PENALTY` (модуль грузится по пути, как в отчёте) — так
+отчёт выбирает офлайновую картину; фолды — `src.split.rolling_origin` на
+`configs/full.yaml`; MAE — `per_series.csv` без отказов (`src.results_guard.refused`).
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import importlib.util
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+from string import Template
+
+import numpy as np
+import pandas as pd
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from src.data import build_matrix, load_panel  # noqa: E402
+from src.external import load_aggregate  # noqa: E402
+from src.results_guard import read_results, refused  # noqa: E402
+from src.split import rolling_origin  # noqa: E402
+
+# Порог из брифа задачи: суммарный размер demo/data/ не должен превышать это число байт.
+MAX_DEMO_BYTES = 2_000_000
+
+# МО стенда по умолчанию — то же, чем отчёт иллюстрирует изломы одного ряда
+# (report/report.qmd, ~строка 5008): готовая, проверенная на реальных данных иллюстрация.
+DEFAULT_MO = "городской округ город Орёл"
+
+# Названия моделей — копия `_ru` отчёта (report/report.qmd, ~строка 1682): тот же
+# читателю текст в обоих местах. Модель без записи здесь получает на странице
+# свой сырой идентификатор — работает, но подписи не будет; такого сейчас не бывает.
+MODEL_LABELS = {
+    "naive_last": "наивная: оставить как в прошлом месяце",
+    "prophet": "эталон конкурса (Prophet по умолчанию)",
+    "two_stage": "двухэтапная: одно число и разнос долями",
+    "global_gbm": "панельная модель, без внешних источников",
+    "global_gbm_cat": "панельная + доли категорий",
+    "global_gbm_factor": "панельная + общий фактор",
+    "global_gbm_stack": "панельная + категории рядами",
+    "global_gbm_stack_factor": "панельная + фактор + категории рядами",
+    "chronos_ft": "Chronos-Bolt, дообученный",
+}
+
+# ---------------------------------------------------------------------------
+# Форматирование чисел — перенесено из report/report.qmd (строки 42-102, 212) с тем же
+# поведением: неразрывный пробел в разрядах, запятая, минус «−», знак и NaN как там.
+# Число страницы обязано быть той же строкой, что число отчёта, а не только тем же
+# значением — отсюда копия функций, а не собственный форматтер.
+# ---------------------------------------------------------------------------
+
+_ORDINAL = {0: "первом", 1: "втором", 2: "третьем"}
+_NUMBER_WORDS_M = ["ноль", "один", "два", "три", "четыре", "пять",
+                    "шесть", "семь", "восемь", "девять", "десять"]
+MONTH_OF = ["января", "февраля", "марта", "апреля", "мая", "июня",
+            "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+MONTH_NOM = ["январь", "февраль", "март", "апрель", "май", "июнь",
+             "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+
+
+def rub(value: float) -> str:
+    """Число с неразрывным пробелом в разряде тысяч, как в отчёте (`report.qmd::rub`)."""
+    return f"{value:,.0f}".replace(",", " ")
+
+
+def num(value: float, digits: int, sign: bool = False) -> str:
+    """Число с `digits` знаками, минусом «−» и, при `sign`, «+» у положительных;
+    NaN — прочерк (`report.qmd::num` — то же поведение, включая правило знака у нуля)."""
+    if not np.isfinite(value):
+        return "—"
+    value = round(float(value), digits) + 0.0
+    text = format(value, ("+" if sign and value > 0 else "") + f",.{digits}f")
+    return text.replace(",", " ").replace(".", ",").replace("-", "−")
+
+
+def on_folds(k: int, n: int) -> str:
+    """«на 2 фолдах из 3»; «все» и «ни одного» — словами (`report.qmd::on_folds`)."""
+    if k == 0:
+        return "ни на одном фолде"
+    if k == n:
+        return "на всех фолдах"
+    return f"на {k} {'фолде' if k == 1 else 'фолдах'} из {n}"
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """Форма слова при числе: 1 ряд, 2 ряда, 5 рядов (`report.qmd::plural`)."""
+    n = abs(int(n)) % 100
+    if 11 <= n <= 14:
+        return many
+    return {1: one, 2: few, 3: few, 4: few}.get(n % 10, many)
+
+
+def and_join(items) -> str:
+    """«a», «a и b», «a, b и c» (`report.qmd::and_join`)."""
+    items = [str(i) for i in items]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " и " + items[-1]
+
+
+def in_words_m(n: int) -> str:
+    """Малое число мужского рода словом: «один фолд» (`report.qmd::in_words`, форма «им_м»)."""
+    return _NUMBER_WORDS_M[n] if 0 <= n <= 10 else str(n)
+
+
+def _date_words(value: dt.date) -> str:
+    return f"{value.day} {MONTH_OF[value.month - 1]} {value.year}"
+
+
+def _ruble(value: float) -> int | None:
+    """Рубль как в формате данных стенда — целым; пропуск (NaN, отказ модели) — null."""
+    return None if not np.isfinite(value) else int(round(float(value)))
+
+
+def _round2(value: float) -> float | None:
+    """Проценты и млрд руб. данных стенда — с двумя знаками; пропуск — null."""
+    return None if not np.isfinite(value) else round(float(value), 2)
+
+
+def _load_yaml(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _load_penalty() -> float:
+    """Штраф офлайновой картины изломов: `scripts/news_event_study.py::PENALTY`.
+
+    Модуль грузится по пути (`scripts/` — не пакет), как это делает сам отчёт
+    (`report/report.qmd`, ~строка 589), а не обычным импортом.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "news_event_study", ROOT / "scripts" / "news_event_study.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return float(module.PENALTY)
+
+
+# ---------------------------------------------------------------------------
+# Пять чисел страницы входа
+# ---------------------------------------------------------------------------
+
+
+def compute_placeholders(
+    *, wide: pd.DataFrame, summary: pd.DataFrame, ok: pd.DataFrame,
+    horizons_summary: pd.DataFrame, horizons_folds: pd.DataFrame,
+    agg_check: pd.DataFrame, full_cfg: dict, forward_cfg: dict, today: dt.date,
+) -> dict[str, str]:
+    """Считает все подстановки `${имя}` шаблона `site/index.template.html`.
+
+    Список подстановок (страница входа их не хранит нигде, кроме этого шаблона —
+    следующая задача переписывает текст вокруг них, опираясь на этот список):
+
+    - ``built`` — дата сборки словами, «29 сентября 2026».
+    - ``horizon_main`` — горизонт основного протокола, мес. (`configs/full.yaml::split.horizon`).
+    - ``forecast_year`` — год прогноза вперёд, `origin.year + 1` (`configs/forecast_forward.yaml::origin`).
+    - ``prophet_mae`` / ``best_mae`` — MAE эталона (Prophet) и лучшей модели на этом горизонте, ₽.
+    - ``best_gain`` — выигрыш лучшей модели к эталону, % (число 1 брифа).
+    - ``r2_prophet`` / ``r2_best`` — R² пул эталона и лучшей модели там же.
+    - ``folds_caveat`` — оговорка о фолдах целиком: «(Но )?выигрыш держится на N
+      фолдах из M[: на таком-то эталон точнее]».
+    - ``h1_best`` / ``h1_prophet`` / ``h1_gain`` — то же для наукаста, горизонт 1
+      (число 2 брифа); «—», если лучшая модель основного протокола не входит
+      в `configs/horizons.yaml`.
+    - ``h12_gain_naive`` / ``h12_gain_prophet`` — выигрыш лучшей модели года вперёд
+      (горизонт 12, без оракула) к наивной и к эталону, %.
+    - ``h12_note`` — оговорка целиком (число 3 брифа): модель, выигрыш или голые MAE
+      (если модель не бьёт обоих), число зачтённых фолдов, если оно меньше трёх.
+    - ``agg_own_pct`` / ``agg_rules_pct`` — ошибка первого этапа двухэтапной модели
+      и простых правил, % (диапазон по горизонтам проверки, схлопывается в одно
+      число, если границы совпадают после округления).
+    - ``agg_horizon_range`` — горизонты проверки, «1–12».
+    - ``agg_origin_label`` — месяц и год origin словами, «декабря 2024».
+    - ``agg_note`` — фраза целиком (число 4 брифа).
+    - ``n_series_rub`` / ``n_months`` — рядов и месяцев панели (число 5 брифа), из формы
+      матрицы `build_matrix` (`configs/forecast_forward.yaml::data`).
+    - ``panel_shape`` — «N рядов × M месяцев» целиком, слова — через `plural`.
+    - ``panel_span`` — первый и последний месяц панели словами, «январь 2023 — декабрь 2024».
+    """
+    top = summary["MAE"].idxmin()
+    horizon_main = int(full_cfg["split"]["horizon"])
+    origin = pd.Period(forward_cfg["origin"], "M")
+    # Год прогноза — origin (декабрь) + 1: настройка forecast_forward.yaml всегда
+    # прогнозирует от конца года на следующий целиком, поэтому «год вперёд» — один
+    # календарный год, а не только это число фолдов.
+    forecast_year = origin.year + 1
+
+    placeholders: dict[str, str] = {
+        "built": _date_words(today),
+        "horizon_main": str(horizon_main),
+        "forecast_year": str(forecast_year),
+        "prophet_mae": rub(summary.loc["prophet", "MAE"]),
+        "best_mae": rub(summary.loc[top, "MAE"]),
+        "best_gain": num(-summary.loc[top, "к Prophet, %"], 1),
+        "r2_prophet": num(summary.loc["prophet", "R² пул"], 3),
+        "r2_best": num(summary.loc[top, "R² пул"], 3),
+    }
+
+    # Оговорка о фолдах: держится ли выигрыш из summary.csv и на каком фолде, если
+    # нет, — эталон точнее (report.qmd::_rs["won_short"], логика _vs_lost/_won_mae).
+    fold_mae = (ok[ok["model"].isin([top, "prophet"])]
+                .groupby(["fold", "model"])["mae"].mean().unstack())
+    r2_folds = list(fold_mae.index)
+    won_mae = [f for f in r2_folds if fold_mae.loc[f, top] < fold_mae.loc[f, "prophet"]]
+    vs_lost = [f for f in r2_folds if fold_mae.loc[f, top] > fold_mae.loc[f, "prophet"]]
+    vs_first = len(vs_lost) == 1 and vs_lost[0] == min(r2_folds)
+    lead = "Но выигрыш держится " if vs_lost else "Выигрыш держится "
+    placeholders["folds_caveat"] = (
+        lead + on_folds(len(won_mae), len(r2_folds))
+        + (f": на {and_join(_ORDINAL.get(f, str(f)) for f in vs_lost)}"
+           + (", с самой короткой историей," if vs_first else "") + " эталон точнее"
+           if vs_lost else "")
+        + "."
+    )
+
+    # Наукаст — горизонт 1 по требованию организаторов (configs/horizons.yaml), не
+    # результат прогона: как и в отчёте, число горизонта здесь не выведено из файла.
+    hzi = horizons_summary.set_index(["horizon", "model"])
+    if (1, top) in hzi.index and (1, "prophet") in hzi.index:
+        placeholders["h1_best"] = rub(hzi.loc[(1, top), "MAE"])
+        placeholders["h1_prophet"] = rub(hzi.loc[(1, "prophet"), "MAE"])
+        placeholders["h1_gain"] = num(hzi.loc[(1, top), "к Prophet, %"], 1)
+    else:
+        placeholders["h1_best"] = placeholders["h1_prophet"] = placeholders["h1_gain"] = "—"
+
+    # Год вперёд — горизонт 12, без оракула two_stage_known (report.qmd::_rs["h12"] целиком).
+    year = horizons_summary[
+        (horizons_summary["horizon"] == 12) & horizons_summary["MAE"].notna()
+        & (horizons_summary["model"] != "two_stage_known")
+    ].set_index("model")
+    if len(year) and {"naive_last", "prophet"} <= set(year.index):
+        year_top = year["MAE"].idxmin()
+        panel_year = horizons_summary[
+            (horizons_summary["horizon"] == 12) & horizons_summary["model"].str.startswith("global_gbm")
+        ]
+        no_panel = len(panel_year) > 0 and bool(panel_year["MAE"].isna().all())
+        gain_naive = year.loc[year_top, "к наивной, %"]
+        gain_prophet = year.loc[year_top, "к Prophet, %"]
+        placeholders["h12_gain_naive"] = num(gain_naive, 0)
+        placeholders["h12_gain_prophet"] = num(gain_prophet, 0)
+        n_folds_top = int(horizons_folds.loc[
+            (horizons_folds["horizon"] == 12) & (horizons_folds["model"] == year_top), "MAE"
+        ].notna().sum())
+        model_label = "двухэтапная" if year_top == "two_stage" else f"`{year_top}`"
+        if min(gain_naive, gain_prophet) > 0:
+            body = f"точнее наивной и эталона на {num(gain_naive, 0)}% и {num(gain_prophet, 0)}%"
+        else:
+            body = (f"{rub(year.loc[year_top, 'MAE'])} против {rub(year.loc['naive_last', 'MAE'])} "
+                    f"у наивной и {rub(year.loc['prophet', 'MAE'])} у эталона")
+        placeholders["h12_note"] = (
+            f"На год вперёд{', где панельным моделям не на чем учиться,' if no_panel else ''} "
+            f"лучшая — {model_label}: {body}"
+            + (f", но это {in_words_m(n_folds_top)} {plural(n_folds_top, 'фолд', 'фолда', 'фолдов')}"
+               if 0 < n_folds_top < 3 else "")
+            + "."
+        )
+    else:
+        placeholders["h12_gain_naive"] = placeholders["h12_gain_prophet"] = "—"
+        placeholders["h12_note"] = "—"
+
+    # Проверка первого этапа по факту 2025 года (report.qmd::_rs["agg"]).
+    agg_mape = agg_check.assign(e=agg_check["error_pct"].abs()).groupby(["method", "horizon"])["e"].mean()
+    agg_own, agg_rules = agg_mape.loc["two_stage"], agg_mape.drop(index="two_stage")
+    agg_names = (agg_check.loc[agg_check["method"] != "two_stage"]
+                 .drop_duplicates("method")["aggregate_model"].tolist())
+    agg_hs = sorted(int(h) for h in agg_check["horizon"].unique())
+
+    def _range(lo: float, hi: float) -> str:
+        return num(lo, 1) if num(lo, 1) == num(hi, 1) else f"{num(lo, 1)}–{num(hi, 1)}"
+
+    placeholders["agg_own_pct"] = _range(agg_own.min(), agg_own.max())
+    placeholders["agg_rules_pct"] = _range(agg_rules.min(), agg_rules.max())
+    placeholders["agg_horizon_range"] = f"{agg_hs[0]}–{agg_hs[-1]}"
+    placeholders["agg_origin_label"] = f"{MONTH_OF[origin.month - 1]} {origin.year}"
+    placeholders["agg_note"] = (
+        "Первый этап двухэтапной модели — прогноз федерального ряда от "
+        f"{placeholders['agg_origin_label']} — ошибается в среднем на "
+        f"{placeholders['agg_own_pct']}% (горизонты {placeholders['agg_horizon_range']} мес.) "
+        f"против {placeholders['agg_rules_pct']}% у правил "
+        + and_join(f"«{name}»" for name in agg_names) + "."
+    )
+
+    # Панель — форма матрицы, а не результат прогона (число 5 брифа).
+    n_series, n_months = wide.shape[1], wide.shape[0]
+    placeholders["n_series_rub"] = rub(n_series)
+    placeholders["n_months"] = str(n_months)
+    placeholders["panel_shape"] = (
+        f"{rub(n_series)} {plural(n_series, 'ряд', 'ряда', 'рядов')} × "
+        f"{n_months} {plural(n_months, 'месяц', 'месяца', 'месяцев')}"
+    )
+    start, end = wide.index[0], wide.index[-1]
+    placeholders["panel_span"] = (
+        f"{MONTH_NOM[start.month - 1]} {start.year} — {MONTH_NOM[end.month - 1]} {end.year}"
+    )
+    return placeholders
+
+
+# ---------------------------------------------------------------------------
+# Данные демонстрационного стенда
+# ---------------------------------------------------------------------------
+
+
+def _check_series_match(forecast: pd.DataFrame, wide: pd.DataFrame) -> None:
+    """Ряды `forecast_2025.csv` обязаны совпасть со столбцами матрицы панели — иначе
+    протокол или конфиг разошлись между прогонами, и дальнейшая сборка была бы на вранье."""
+    forecast_series = set(forecast["series_id"].unique())
+    matrix_series = set(wide.columns)
+    if forecast_series != matrix_series:
+        only_forecast = sorted(forecast_series - matrix_series)
+        only_matrix = sorted(matrix_series - forecast_series)
+        example = ", ".join((only_forecast + only_matrix)[:5])
+        raise ValueError(
+            "ряды results/forecast_2025.csv не совпадают со столбцами матрицы панели: "
+            f"только в прогнозе {len(only_forecast)}, только в матрице {len(only_matrix)} "
+            f"(пример: {example}) — прогон forecast_forward.py и текущая панель не совпадают"
+        )
+
+
+def _step_horizon_map(horizons: list[int]) -> dict[int, int]:
+    """Шаг s (1..max) → наименьший горизонт, который его покрывает
+    (`report/report.qmd::_fc_steps`, ~строка 2102)."""
+    hs = sorted(horizons)
+    return {s: min(h for h in hs if h >= s) for s in range(1, hs[-1] + 1)}
+
+
+def _steps_frame(subset: pd.DataFrame, step_horizon: dict[int, int], origin: pd.Period,
+                  columns: pd.Index) -> pd.DataFrame:
+    """Матрица (ряд × шаг 1..max) значений `forecast` из `subset` (уже отфильтрованных
+    строк — `recommended` или `uses_published_aggregate`): на каждый шаг — значение
+    с месяца `origin + шаг` на покрывающем его горизонте. Ряд без строки на этот
+    шаг — NaN (в JSON станет null)."""
+    columns_by_step = {}
+    for step, horizon in step_horizon.items():
+        month = str(origin + step)
+        part = subset.loc[(subset["horizon"] == horizon) & (subset["month"] == month)]
+        columns_by_step[step] = part.set_index("series_id")["forecast"]
+    frame = pd.DataFrame(columns_by_step).reindex(columns)
+    return frame[sorted(frame.columns)]
+
+
+def _build_forecast_rule(recommended: pd.DataFrame, step_horizon: dict[int, int],
+                          origin: pd.Period) -> list[dict]:
+    """`forecast_rule`: отрезки подряд идущих месяцев с одной моделью и горизонтом."""
+    by_horizon = recommended.drop_duplicates(["horizon", "model"]).groupby("horizon")["model"].agg(list)
+    for horizon, models in by_horizon.items():
+        if len(models) != 1:
+            raise ValueError(f"на горизонте {horizon} среди recommended-строк больше одной модели: {models}")
+    model_of = by_horizon.map(lambda models: models[0])
+
+    runs: list[dict] = []
+    for step in sorted(step_horizon):
+        horizon = step_horizon[step]
+        model = model_of.loc[horizon]
+        month = str(origin + step)
+        if runs and runs[-1]["model"] == model and runs[-1]["horizon"] == horizon:
+            runs[-1]["to"] = month
+        else:
+            runs.append({"from": month, "to": month, "model": model, "horizon": int(horizon)})
+    return runs
+
+
+def _build_model_roles(summary: pd.DataFrame, forward_cfg: dict) -> list[dict]:
+    """Пять ролей таблицы ошибок стенда, в порядке из брифа задачи. `role` — строка;
+    модель в нескольких ролях сразу входит одной строкой, роли соединены «+»."""
+    recommended = forward_cfg["recommended"]
+    shortest, longest = min(recommended), max(recommended)
+    roles_in_order = [
+        ("prophet", "reference"),
+        ("naive_last", "naive"),
+        (recommended[shortest], "recommended"),
+        (summary["MAE"].idxmin(), "best_mean"),
+        (recommended[longest], "two_stage"),
+    ]
+    by_model: dict[str, list[str]] = {}
+    for model_id, role in roles_in_order:
+        by_model.setdefault(model_id, []).append(role)
+    return [
+        {"id": model_id, "role": "+".join(roles), "label": MODEL_LABELS.get(model_id, model_id)}
+        for model_id, roles in by_model.items()
+    ]
+
+
+def _load_breaks(cp_cfg: dict, penalty: float) -> dict[str, list[str]]:
+    """series_id → отсортированные месяцы изломов офлайновой картины: `cp_offline_series.csv`
+    на протоколе `v{protocol_version}` и штрафе `scripts/news_event_study.py::PENALTY`
+    (так отчёт выбирает офлайновую картину, `report/report.qmd` ~строки 587-600, 5005-5012)."""
+    protocol = f"v{cp_cfg['protocol_version']}"
+    offline = read_results(ROOT / "results" / "cp_offline_series.csv")
+    subset = offline.loc[(offline["protocol"] == protocol) & np.isclose(offline["penalty"], penalty)]
+    return {series: sorted(months) for series, months in subset.groupby("series_id")["month"]}
+
+
+def build_demo_data(
+    data_dir: Path, *, wide: pd.DataFrame, forecast: pd.DataFrame, ok: pd.DataFrame,
+    summary: pd.DataFrame, full_cfg: dict, forward_cfg: dict, cp_cfg: dict,
+    penalty: float, agg_check: pd.DataFrame, built: str,
+) -> int:
+    """Пишет `demo/data/index.json`, `demo/data/mo/<номер>.json` и `demo/data/aggregate.json`
+    (формат — докстринг модуля). Возвращает суммарный размер записанного, в байтах."""
+    horizons = sorted(forward_cfg["horizons"])
+    origin = pd.Period(forward_cfg["origin"], "M")
+    step_horizon = _step_horizon_map(horizons)
+
+    recommended_rows = forecast.loc[forecast["recommended"]]
+    known_rows = forecast.loc[forecast["uses_published_aggregate"]]
+    forecast_by_series = _steps_frame(recommended_rows, step_horizon, origin, wide.columns)
+    known_by_series = _steps_frame(known_rows, step_horizon, origin, wide.columns)
+    forecast_rule = _build_forecast_rule(recommended_rows, step_horizon, origin)
+
+    regions = (forecast.drop_duplicates("series_id").set_index("series_id")[["region", "oktmo"]]
+               .reindex(wide.columns))
+    unique_regions = sorted(r for r in regions["region"].dropna().unique())
+    region_number = {region: i for i, region in enumerate(unique_regions)}
+    no_region_number = len(unique_regions)
+
+    model_roles = _build_model_roles(summary, forward_cfg)
+    model_ids = [role["id"] for role in model_roles]
+    fold_mae = ok[ok["model"].isin(model_ids)].pivot_table(index=["mo", "model"], columns="fold", values="mae")
+    n_folds = int(full_cfg["split"]["n_folds"])
+
+    panel_mae = {}
+    for model_id in model_ids:
+        by_fold = ok.loc[ok["model"] == model_id].groupby("fold")["mae"].mean().reindex(range(n_folds))
+        values = [_ruble(v) for v in by_fold.to_numpy()]
+        panel_mae[model_id] = values + [_ruble(float(by_fold.mean()))]
+
+    breaks_by_series = _load_breaks(cp_cfg, penalty)
+
+    fold_specs = rolling_origin(len(wide), full_cfg["split"]["horizon"], n_folds)
+    folds = [
+        {
+            "fold": f.index, "train_months": f.train_end,
+            "test_from": wide.index[f.test_start].strftime("%Y-%m"),
+            "test_to": wide.index[f.test_end - 1].strftime("%Y-%m"),
+        }
+        for f in fold_specs
+    ]
+
+    # Гомонимы — по " #N" в series_id (src.data.load_panel), не по региону-омониму
+    # (src.regions.attach_regions — это n_no_region, другая причина).
+    base_names = pd.Index(wide.columns).map(lambda s: s.split(" #")[0])
+    homonym_counts = pd.Series(base_names).value_counts()
+    homonym_counts = homonym_counts[homonym_counts > 1]
+
+    if DEFAULT_MO not in wide.columns:
+        raise ValueError(f"МО стенда по умолчанию {DEFAULT_MO!r} не найдено среди рядов панели")
+
+    series_entries = []
+    mo_payload: dict[int, dict] = defaultdict(dict)
+    for series_id in wide.columns:
+        region = regions.at[series_id, "region"]
+        oktmo = regions.at[series_id, "oktmo"]
+        region = None if pd.isna(region) else region
+        oktmo = None if pd.isna(oktmo) else oktmo
+        number = region_number.get(region, no_region_number)
+        series_entries.append([series_id, region, oktmo, number])
+
+        mae = {}
+        for model_id in model_ids:
+            try:
+                row = fold_mae.loc[(series_id, model_id)]
+            except KeyError:
+                mae[model_id] = [None] * n_folds
+                continue
+            mae[model_id] = [_ruble(row.get(f, np.nan)) for f in range(n_folds)]
+
+        mo_payload[number][series_id] = {
+            "fact": [_ruble(v) for v in wide[series_id].to_numpy()],
+            "forecast": [_ruble(v) for v in forecast_by_series.loc[series_id].to_numpy()],
+            "known": [_ruble(v) for v in known_by_series.loc[series_id].to_numpy()],
+            "breaks": breaks_by_series.get(series_id, []),
+            "mae": mae,
+        }
+
+    index_payload = {
+        "built": built,
+        "unit": "руб. на человека в месяц",
+        "origin": forward_cfg["origin"],
+        "panel_months": [pd.Timestamp(m).strftime("%Y-%m") for m in wide.index],
+        "forecast_months": [str(origin + step) for step in range(1, horizons[-1] + 1)],
+        "n_series": int(wide.shape[1]),
+        "n_no_region": int(regions["region"].isna().sum()),
+        "n_homonym_names": int(len(homonym_counts)),
+        "n_homonym_series": int(homonym_counts.sum()) if len(homonym_counts) else 0,
+        "default_mo": DEFAULT_MO,
+        "forecast_rule": forecast_rule,
+        "known_model": forward_cfg["known_aggregate"],
+        "breaks": {
+            "protocol": f"v{cp_cfg['protocol_version']}", "penalty": penalty,
+            "detector": cp_cfg["realtime"]["detector"], "mode": cp_cfg["realtime"]["mode"],
+        },
+        "folds": folds,
+        "models": model_roles,
+        "panel_mae": panel_mae,
+        "series": series_entries,
+    }
+
+    written = _write_json(data_dir / "index.json", index_payload)
+    for number, payload in mo_payload.items():
+        written += _write_json(data_dir / "mo" / f"{number}.json", payload)
+    written += _write_json(data_dir / "aggregate.json",
+                            build_aggregate_json(agg_check, forward_cfg))
+    return written
+
+
+def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path = ROOT) -> dict:
+    """`demo/data/aggregate.json` — федеральный агрегат: история и проверка первого
+    этапа двухэтапной модели по факту 2025 года (формат — докстринг модуля)."""
+    origin_str = forward_cfg["origin"]
+    origin = pd.Period(origin_str, "M")
+    horizon = max(forward_cfg["horizons"])
+    methods = ["two_stage", "naive", "seasonal_naive"]
+
+    history = load_aggregate(root / "data" / "reference" / "sberindex").loc[:origin]
+
+    year = agg_check.loc[agg_check["horizon"] == horizon]
+    months = sorted(year["month"].unique())
+    forecast_by_method = year.pivot(index="month", columns="method", values="forecast").reindex(months)
+    error_by_method = year.pivot(index="month", columns="method", values="error_pct").reindex(months)
+
+    abs_error = agg_check.assign(e=agg_check["error_pct"].abs())
+    mape = abs_error.loc[abs_error["horizon"] == horizon].groupby("method")["e"].mean()
+    mape_by_horizon = {
+        str(h): {m: _round2(v) for m, v in
+                 abs_error.loc[abs_error["horizon"] == h].groupby("method")["e"].mean().items()}
+        for h in sorted(int(h) for h in agg_check["horizon"].unique())
+    }
+
+    return {
+        "unit": "млрд руб. в месяц",
+        "origin": origin_str,
+        "horizon": int(horizon),
+        "model": year.loc[year["method"] == "two_stage", "aggregate_model"].iloc[0],
+        "history": {
+            "months": [str(m) for m in history.index],
+            "values": [_round2(v) for v in history.to_numpy()],
+        },
+        "check": {
+            "months": months,
+            "actual": [_round2(v) for v in year.groupby("month")["actual"].first().reindex(months)],
+            "forecast": {m: [_round2(v) for v in forecast_by_method[m]] for m in methods},
+            "error_pct": {m: [_round2(v) for v in error_by_method[m]] for m in methods},
+        },
+        "rule_names": {
+            "naive": agg_check.loc[agg_check["method"] == "naive", "aggregate_model"].iloc[0],
+            "seasonal_naive":
+                agg_check.loc[agg_check["method"] == "seasonal_naive", "aggregate_model"].iloc[0],
+        },
+        "mape": {m: _round2(mape.get(m, np.nan)) for m in methods},
+        "mape_by_horizon": mape_by_horizon,
+    }
+
+
+def _write_json(path: Path, payload) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    path.write_text(text, encoding="utf-8")
+    return len(text.encode("utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Точка входа
+# ---------------------------------------------------------------------------
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Сборка страницы входа (index.html) и данных демонстрационного стенда"
+    )
+    parser.add_argument(
+        "--out", type=Path, default=ROOT,
+        help="куда писать index.html и demo/data/ (по умолчанию — корень репозитория)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    out = args.out
+    today = dt.date.today()
+
+    full_cfg = _load_yaml(ROOT / "configs" / "full.yaml")
+    forward_cfg = _load_yaml(ROOT / "configs" / "forecast_forward.yaml")
+    cp_cfg = _load_yaml(ROOT / "configs" / "changepoints.yaml")
+    penalty = _load_penalty()
+
+    panel = load_panel(ROOT / forward_cfg["data"]["path"])
+    wide, _ = build_matrix(panel, forward_cfg["data"]["category"], max_gap=forward_cfg["data"]["max_gap"])
+
+    per_series = read_results(ROOT / "results" / "per_series.csv", dtype={"error": object})
+    ok = per_series[~refused(per_series)]
+    summary = read_results(ROOT / "results" / "summary.csv", index_col=0)
+    horizons_summary = read_results(ROOT / "results" / "horizons_summary.csv")
+    horizons_folds = read_results(ROOT / "results" / "horizons_folds.csv")
+    agg_check = read_results(ROOT / "results" / "forecast_2025_aggregate_check.csv")
+    forecast = read_results(ROOT / "results" / "forecast_2025.csv")
+
+    _check_series_match(forecast, wide)
+
+    placeholders = compute_placeholders(
+        wide=wide, summary=summary, ok=ok, horizons_summary=horizons_summary,
+        horizons_folds=horizons_folds, agg_check=agg_check,
+        full_cfg=full_cfg, forward_cfg=forward_cfg, today=today,
+    )
+
+    data_dir = out / "demo" / "data"
+    demo_bytes = build_demo_data(
+        data_dir, wide=wide, forecast=forecast, ok=ok, summary=summary,
+        full_cfg=full_cfg, forward_cfg=forward_cfg, cp_cfg=cp_cfg, penalty=penalty,
+        agg_check=agg_check, built=today.isoformat(),
+    )
+
+    template_path = ROOT / "site" / "index.template.html"
+    html = Template(template_path.read_text(encoding="utf-8")).substitute(placeholders)
+    out.mkdir(parents=True, exist_ok=True)
+    index_path = out / "index.html"
+    index_path.write_text(html, encoding="utf-8")
+
+    print(f"написано: {index_path}")
+    print(f"данные стенда: {data_dir} — {demo_bytes} байт (порог {MAX_DEMO_BYTES})")
+    if demo_bytes > MAX_DEMO_BYTES:
+        raise ValueError(
+            f"данные стенда {demo_bytes} байт больше порога {MAX_DEMO_BYTES} — "
+            "сократите состав или точность полей demo/data/, не поднимайте порог не глядя"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
