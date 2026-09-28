@@ -209,6 +209,10 @@ QUARTO_PYTHON=$PWD/../.venv/bin/python quarto render report.qmd   # около �
 QUARTO_PYTHON=$PWD/../.venv/bin/python quarto render slides.qmd   # около 25 секунд
 ```
 
+Страница входа (`index.html`) и данные демонстрационного стенда (`demo/data/`) собираются
+тем же принципом — из закоммиченных `results/`, без прогона моделей:
+`.venv/bin/python scripts/build_site.py`.
+
 **Проверено на чистом клоне 28.09** (macOS arm64, Python 3.14.0, без кеша pip): `python -m venv .venv`
 и `pip install -r requirements.txt` — около 3,5 мин, окружение 1,5 ГБ (ядро Jupyter для Quarto ставится оттуда же);
 тесты — 302, около 2,5 мин; отчёт — около минуты, слайды — около 25 с. Отчёт и слайды, собранные на клоне,

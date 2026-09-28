@@ -38,6 +38,10 @@ scripts/build_news_features.py    пересборка data/news/monthly и nati
 scripts/crawl_news.py             выкачка заголовков региональных изданий; сырые заголовки в git не входят
 scripts/forecast_forward.py       прогноз на 2025 год по 2 028 МО и проверка федерального агрегата по факту → results/forecast_2025*.csv
 scripts/export_results.py         снимок .csv.gz пяти крупных results/ для публикации (per_series, horizons_per_series, forecast_2025, cp_bench, cp_v1/cp_bench); --check сверяет снимки с текущими CSV
+scripts/build_site.py   генератор страницы входа и данных демонстрационного стенда → index.html, demo/data/*.json
+site/                   шаблон (index.template.html) и общая тема (site.css) страницы входа и стенда
+index.html              страница входа GitHub Pages — сгенерирована build_site.py, коммитится
+demo/                   демонстрационный стенд «покажите мой город»: index.html (пока заглушка) и данные data/
 data/raw/               панель СберИндекса (parquet)
 data/news/              агрегаты новостного корпуса (monthly.parquet, national.parquet); headlines.parquet — только локально
 data/reference/         справочник МО, ключевая ставка
@@ -131,6 +135,16 @@ python -m venv .venv
 
 Тяжёлые прогоны запускать в фоне и не пропускать вывод через `grep` или `tail` —
 они буферизуют, и лог остаётся пустым до самого конца.
+
+Страница входа и данные стенда — из закоммиченных `results/*`, без прогона моделей:
+
+```bash
+.venv/bin/python scripts/build_site.py
+```
+
+Пишет `index.html` и `demo/data/*.json` в корень репозитория; `--out DIR` — в другой
+каталог (так пишут тесты). Печатает суммарный размер данных стенда и падает, если он
+больше порога модуля (`build_site.MAX_DEMO_BYTES`).
 
 Перед первым прогоном моделей с длинными рядами:
 
