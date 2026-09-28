@@ -1037,7 +1037,7 @@ margin-right: 0; }
 </div>
 </div>
 </div>
-<div id="9aaa6376" class="cell" data-execution_count="2">
+<div id="ce546cb3" class="cell" data-execution_count="2">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="2">
 <p><strong>Измерение.</strong> Ошибка делится на промах мимо общего движения страны и разброс между муниципалитетами. Разброс укладывается в <strong>695–849 ₽ по всем 18 сочетаниям модели и фолда</strong> при стандартном отклонении 47. MAE при этом гуляет от 781 до 3 535. Остальное не сдвинула ни одна из шести моделей разложения.</p>
 </div>
@@ -1046,7 +1046,7 @@ margin-right: 0; }
 </section>
 <section id="первая-находка-ловушка-годовой-сезонности" class="slide level2 smaller">
 <h2>Первая находка: ловушка годовой сезонности</h2>
-<div id="72c2c468" class="cell" data-execution_count="3">
+<div id="49b507f3" class="cell" data-execution_count="3">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -1056,7 +1056,7 @@ margin-right: 0; }
 </div>
 </div>
 <p>Годовая сезонность на 15 точках не идентифицируется — <strong>прогноз уходит в отрицательные значения</strong>. Prophet предупреждает об этом сам.</p>
-<div id="378df693" class="cell" data-execution_count="4">
+<div id="93846569" class="cell" data-execution_count="4">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="4">
 <p>Один флаг: на полной панели MAE <strong>22 527 ₽</strong> против 1 581 у эталона — в <strong>14 раз</strong> больше, R² пул −9,19; подгонка дороже.</p>
 </div>
@@ -1079,14 +1079,15 @@ margin-right: 0; }
 <h2>Архитектура решения</h2>
 <!-- Тот же файл, что в отчёте («Метод на одной странице»): report/method.svg.
 Раньше был mermaid — библиотека тянула
-в html ~2,8 МБ ради того же рисунка. Ширина картинки — не 100% слайда: во всю ширину
-(1094 px) фигура с заголовком и абзацем под ней не помещались в 760 px (964 px факта);
-780 px по замеру укладывает слайд с запасом. -->
+в html ~2,8 МБ ради того же рисунка. Ширина — в пикселях слайда (1280): во всю ширину
+(1094 px) фигура с заголовком и абзацем не помещались в 760 px (964 px факта), а подписи
+не мельче 12 px требуют не меньше 12 × 1113 / 17 ≈ 786 px (viewBox 1113, подписи связей
+17 px). 860 px — подписи 13,1 px, слайд помещается. -->
 <figure>
 <img role="img" aria-label="Схема метода: панель
 СберИндекса и внешние источники — длинные федеральные ряды, категории трат, стенд разладок,
 эталонные модели — через панельный бустинг и двухэтапную модель (общий фактор и разнос
-долями) и детекторы разладок сходятся в скользящем origin с метриками MAE, R², MASE, sMAPE." src="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTExMyA1NjYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSLQodGF0LXQvNCwINC80LXRgtC+0LTQsDog0L7RgiDQv9Cw0L3QtdC70Lgg0KHQsdC10YDQmNC90LTQtdC60YHQsCDQuCDQstC90LXRiNC90LjRhSDQuNGB0YLQvtGH0L3QuNC60L7QsiDRh9C10YDQtdC3INC/0LDQvdC10LvRjNC90YvQuSDQsdGD0YHRgtC40L3QsyDQuCDQtNCy0YPRhdGN0YLQsNC/0L3Rg9GOINC80L7QtNC10LvRjCwg0LAg0YLQsNC60LbQtSDQtNC10YLQtdC60YLQvtGA0Ysg0YDQsNC30LvQsNC00L7Quiwg0Log0L7RhtC10L3QutC1INC90LAg0YHQutC+0LvRjNC30Y/RidC10Lwgb3JpZ2luIj4KPGRlZnM+PG1hcmtlciBpZD0iYXJyb3ciIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOC41IiByZWZZPSI1IiBtYXJrZXJXaWR0aD0iNyIgbWFya2VySGVpZ2h0PSI3IiBvcmllbnQ9ImF1dG8tc3RhcnQtcmV2ZXJzZSI+PHBhdGggZD0iTTAsMCBMMTAsNSBMMCwxMCB6IiBmaWxsPSIjN0M4MThBIi8+PC9tYXJrZXI+PC9kZWZzPgo8cGF0aCBkPSJNIDI0OS4wLDQwMC4wIEMgMzExLjUsNDAwLjAgMzExLjUsMzE0LjAgMzc0LjAsMzE0LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0gMjQ5LjAsMzE0LjAgQyAzMTEuNSwzMTQuMCAzMTEuNSwzMTQuMCAzNzQuMCwzMTQuMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN0M4MThBIiBzdHJva2Utd2lkdGg9IjEuNzUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+PHBhdGggZD0iTSAyNDkuMCwxNjcuMCBDIDMxMS41LDE2Ny4wIDMxMS41LDE2Ny4wIDM3NC4wLDE2Ny4wIiBmaWxsPSJub25lIiBzdHJva2U9IiM3QzgxOEEiIHN0cm9rZS13aWR0aD0iMS43NSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz48cGF0aCBkPSJNIDQ4Ni41LDIxNi4wIEwgNDg2LjUsMjc2LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0gNTk5LjAsMTY3LjAgQyA2NDEuNSwxNjcuMCA2NDEuNSw0MDAuMCA1OTkuMCw0MDAuMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN0M4MThBIiBzdHJva2Utd2lkdGg9IjEuNzUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+PHBhdGggZD0iTSAyNDkuMCw0MDAuMCBDIDMxMS41LDQwMC4wIDMxMS41LDQwMC4wIDM3NC4wLDQwMC4wIiBmaWxsPSJub25lIiBzdHJva2U9IiM3QzgxOEEiIHN0cm9rZS13aWR0aD0iMS43NSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz48cGF0aCBkPSJNIDI0OS4wLDUwNy4wIEMgMzExLjUsNTA3LjAgMzExLjUsNTA3LjAgMzc0LjAsNTA3LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0gMjQ5LjAsNDAwLjAgQyAzMTEuNSw0MDAuMCAzMTEuNSw1MDcuMCAzNzQuMCw1MDcuMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN0M4MThBIiBzdHJva2Utd2lkdGg9IjEuNzUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+PHBhdGggZD0iTSA1OTkuMCw1MDcuMCBDIDY0MS41LDUwNy4wIDY0MS41LDUwNy4wIDY4NC4wLDUwNy4wIiBmaWxsPSJub25lIiBzdHJva2U9IiM3QzgxOEEiIHN0cm9rZS13aWR0aD0iMS43NSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz48cGF0aCBkPSJNIDU5OS4wLDMxNC4wIEMgNjQxLjUsMzE0LjAgNjQxLjUsMzU3LjAgNjg0LjAsMzU3LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0gNTk5LjAsNDAwLjAgQyA2NDEuNSw0MDAuMCA2NDEuNSwzNTcuMCA2ODQuMCwzNTcuMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN0M4MThBIiBzdHJva2Utd2lkdGg9IjEuNzUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+PHBhdGggZD0iTSAyNDkuMCw1OS4wIEwgNzg0LjAsNTkuMCBMIDc4NC4wLDMxOS4wIiBmaWxsPSJub25lIiBzdHJva2U9IiM3QzgxOEEiIHN0cm9rZS13aWR0aD0iMS43NSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz48cGF0aCBkPSJNIDg4NC4wLDM1Ny4wIEMgOTA0LjAsMzU3LjAgOTA0LjAsMzU3LjAgOTI0LjAsMzU3LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgo8cmVjdCB4PSIyNC4wIiB5PSIxMC4wIiB3aWR0aD0iMjI1LjAiIGhlaWdodD0iOTguMCIgcng9IjEwIiBmaWxsPSIjRjdGN0Y4IiBzdHJva2U9IiM4QThGOTgiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkhlbHZldGljYSBOZXVlLCBIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNTAwIiBmaWxsPSIjMUYyOTM3Ij48dHNwYW4geD0iMTM2LjUiIHk9IjI2LjAiPtCt0YLQsNC70L7QvSBQcm9waGV0LDwvdHNwYW4+PHRzcGFuIHg9IjEzNi41IiB5PSI0OC4wIj7QvdCw0LjQstC90LDRjyw8L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNzAuMCI+0YTRg9C90LTQsNC80LXQvdGC0LDQu9GM0L3Ri9C1PC90c3Bhbj48dHNwYW4geD0iMTM2LjUiIHk9IjkyLjAiPtC80L7QtNC10LvQuDwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjI0LjAiIHk9IjExOC4wIiB3aWR0aD0iMjI1LjAiIGhlaWdodD0iOTguMCIgcng9IjEwIiBmaWxsPSIjRjdGN0Y4IiBzdHJva2U9IiM4QThGOTgiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkhlbHZldGljYSBOZXVlLCBIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNTAwIiBmaWxsPSIjMUYyOTM3Ij48dHNwYW4geD0iMTM2LjUiIHk9IjEzNC4wIj7QlNC70LjQvdC90YvQtTwvdHNwYW4+PHRzcGFuIHg9IjEzNi41IiB5PSIxNTYuMCI+0YTQtdC00LXRgNCw0LvRjNC90YvQtTwvdHNwYW4+PHRzcGFuIHg9IjEzNi41IiB5PSIxNzguMCI+0YDRj9C00YssINC+0LHRgNC10LfQsNC90Ys8L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iMjAwLjAiPtC/0L4gb3JpZ2luPC90c3Bhbj48L3RleHQ+PHJlY3QgeD0iMjQuMCIgeT0iMjk0LjAiIHdpZHRoPSIyMjUuMCIgaGVpZ2h0PSI0MC4wIiByeD0iMTAiIGZpbGw9IiNGN0Y3RjgiIHN0cm9rZT0iIzhBOEY5OCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI1MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSIxMzYuNSIgeT0iMzE0LjAiPtCa0LDRgtC10LPQvtGA0LjQuCDRgtGA0LDRgjwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjI0LjAiIHk9IjM2Mi4wIiB3aWR0aD0iMjI1LjAiIGhlaWdodD0iNzYuMCIgcng9IjEwIiBmaWxsPSIjRjdGN0Y4IiBzdHJva2U9IiM4QThGOTgiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkhlbHZldGljYSBOZXVlLCBIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNTAwIiBmaWxsPSIjMUYyOTM3Ij48dHNwYW4geD0iMTM2LjUiIHk9IjM3OC4wIj7Qn9Cw0L3QtdC70Ywg0KHQsdC10YDQmNC90LTQtdC60YHQsDo8L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNDAwLjAiPtGA0LDRgdGF0L7QtNGLINCc0J48L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNDIyLjAiPtC/0L4g0LzQtdGB0Y/RhtCw0Lw8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIyNC4wIiB5PSI0NTguMCIgd2lkdGg9IjIyNS4wIiBoZWlnaHQ9Ijk4LjAiIHJ4PSIxMCIgZmlsbD0iI0Y3RjdGOCIgc3Ryb2tlPSIjOEE4Rjk4IiBzdHJva2Utd2lkdGg9IjEuNSIvPjx0ZXh0IHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EgTmV1ZSwgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxOCIgZm9udC13ZWlnaHQ9IjUwMCIgZmlsbD0iIzFGMjkzNyI+PHRzcGFuIHg9IjEzNi41IiB5PSI0NzQuMCI+0KHRgtC10L3QtDog0LLRgNC10LfQutC4PC90c3Bhbj48dHNwYW4geD0iMTM2LjUiIHk9IjQ5Ni4wIj7QuNC30LLQtdGB0YLQvdC+0Lkg0LLQtdC70LjRh9C40L3Riyw8L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNTE4LjAiPtGI0YLRgNCw0YQg0LLRi9Cx0YDQsNC9INC00L48L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNTQwLjAiPtGA0LXQsNC70YzQvdGL0YUg0LTQsNC90L3Ri9GFPC90c3Bhbj48L3RleHQ+PHJlY3QgeD0iMzc0LjAiIHk9IjExOC4wIiB3aWR0aD0iMjI1LjAiIGhlaWdodD0iOTguMCIgcng9IjEwIiBmaWxsPSIjRjdGN0Y4IiBzdHJva2U9IiM4QThGOTgiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkhlbHZldGljYSBOZXVlLCBIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNTAwIiBmaWxsPSIjMUYyOTM3Ij48dHNwYW4geD0iNDg2LjUiIHk9IjEzNC4wIj7Qn9GA0L7Qs9C90L7QtzwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSIxNTYuMCI+0YTQtdC00LXRgNCw0LvRjNC90L7Qs9C+PC90c3Bhbj48dHNwYW4geD0iNDg2LjUiIHk9IjE3OC4wIj7RgNGP0LTQsCDQv9C+INC10LPQvjwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSIyMDAuMCI+0LTQu9C40L3QvdC+0Lkg0LjRgdGC0L7RgNC40Lg8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIzNzQuMCIgeT0iMjc2LjAiIHdpZHRoPSIyMjUuMCIgaGVpZ2h0PSI3Ni4wIiByeD0iMTAiIGZpbGw9IiNFOUVCRkEiIHN0cm9rZT0iIzRDNEY4QyIgc3Ryb2tlLXdpZHRoPSIyLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSI0ODYuNSIgeT0iMjkyLjAiPtCf0LDQvdC10LvRjNC90YvQuSDQsdGD0YHRgtC40L3Qszo8L3RzcGFuPjx0c3BhbiB4PSI0ODYuNSIgeT0iMzE0LjAiPtCy0L4g0YHQutC+0LvRjNC60L4g0YDQsNC3PC90c3Bhbj48dHNwYW4geD0iNDg2LjUiIHk9IjMzNi4wIj7QuNC30LzQtdC90LjRgtGB0Y88L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIzNzQuMCIgeT0iMzYyLjAiIHdpZHRoPSIyMjUuMCIgaGVpZ2h0PSI3Ni4wIiByeD0iMTAiIGZpbGw9IiNFOUVCRkEiIHN0cm9rZT0iIzRDNEY4QyIgc3Ryb2tlLXdpZHRoPSIyLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSI0ODYuNSIgeT0iMzc4LjAiPtCU0LLRg9GF0Y3RgtCw0L/QvdCw0Y8g0LzQvtC00LXQu9GMOjwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSI0MDAuMCI+dG9wLWRvd24g0L/QvjwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSI0MjIuMCI+0LjRgdGC0L7RgNC40YfQtdGB0LrQuNC8INC00L7Qu9GP0Lw8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIzNzQuMCIgeT0iNDY5LjAiIHdpZHRoPSIyMjUuMCIgaGVpZ2h0PSI3Ni4wIiByeD0iMTAiIGZpbGw9IiNGN0Y3RjgiIHN0cm9rZT0iIzhBOEY5OCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI1MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSI0ODYuNSIgeT0iNDg1LjAiPtCU0LXRgtC10LrRgtC+0YDRiyDQsjwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSI1MDcuMCI+0YDQsNGB0YjQuNGA0Y/RjtGJ0LXQvNGB0Y8g0L7QutC90LU8L3RzcGFuPjx0c3BhbiB4PSI0ODYuNSIgeT0iNTI5LjAiPtC90LAg0YLQtdC80L/QsNGFINGA0L7RgdGC0LA8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSI2ODQuMCIgeT0iMzE5LjAiIHdpZHRoPSIyMDAuMCIgaGVpZ2h0PSI3Ni4wIiByeD0iMTAiIGZpbGw9IiNGN0Y3RjgiIHN0cm9rZT0iIzhBOEY5OCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI1MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSI3ODQuMCIgeT0iMzM1LjAiPtCh0LrQvtC70YzQt9GP0YnQuNC5IG9yaWdpbjo8L3RzcGFuPjx0c3BhbiB4PSI3ODQuMCIgeT0iMzU3LjAiPtC90LDRg9C60LDRgdGCINC4INCz0L7RgNC40LfQvtC90YLRizwvdHNwYW4+PHRzcGFuIHg9Ijc4NC4wIiB5PSIzNzkuMCI+0LTQviDQs9C+0LTQsDwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjY4NC4wIiB5PSI0ODAuMCIgd2lkdGg9IjIwMC4wIiBoZWlnaHQ9IjU0LjAiIHJ4PSIxMCIgZmlsbD0iI0Y3RjdGOCIgc3Ryb2tlPSIjOEE4Rjk4IiBzdHJva2Utd2lkdGg9IjEuNSIvPjx0ZXh0IHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EgTmV1ZSwgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxOCIgZm9udC13ZWlnaHQ9IjUwMCIgZmlsbD0iIzFGMjkzNyI+PHRzcGFuIHg9Ijc4NC4wIiB5PSI0OTYuMCI+0JTQvtC70Y8g0YLQtdGA0YDQuNGC0L7RgNC40Lk8L3RzcGFuPjx0c3BhbiB4PSI3ODQuMCIgeT0iNTE4LjAiPtGBINGB0LjQs9C90LDQu9C+0Lw8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSI5MjQuMCIgeT0iMzMwLjAiIHdpZHRoPSIxNjUuMCIgaGVpZ2h0PSI1NC4wIiByeD0iMTAiIGZpbGw9IiNGN0Y3RjgiIHN0cm9rZT0iIzhBOEY5OCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI1MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSIxMDA2LjUiIHk9IjM0Ni4wIj5NQUUgwrcgUsKyINC/0L4g0L/Rg9C70YM8L3RzcGFuPjx0c3BhbiB4PSIxMDA2LjUiIHk9IjM2OC4wIj5NQVNFIMK3IHNNQVBFPC90c3Bhbj48L3RleHQ+CjxyZWN0IHg9IjI1Ny41IiB5PSIyOTIuMCIgd2lkdGg9IjEwOC4xIiBoZWlnaHQ9IjQ0LjAiIGZpbGw9IiNGRkZGRkYiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTciIGZvbnQtc3R5bGU9Iml0YWxpYyIgZmlsbD0iIzRCNTE1OCI+PHRzcGFuIHg9IjMxMS41IiB5PSIzMTAuOSI+0L7QsdGD0YfQsNGO0YnQuNC1PC90c3Bhbj48dHNwYW4geD0iMzExLjUiIHk9IjMyNy45Ij7RgNGP0LTRizwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjU4MS4zIiB5PSIyMTguNSIgd2lkdGg9Ijc1LjQiIGhlaWdodD0iNDQuMCIgZmlsbD0iI0ZGRkZGRiIvPjx0ZXh0IHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EgTmV1ZSwgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNyIgZm9udC1zdHlsZT0iaXRhbGljIiBmaWxsPSIjNEI1MTU4Ij48dHNwYW4geD0iNjE5LjAiIHk9IjIzNy40Ij7QvtCx0YnQuNC5PC90c3Bhbj48dHNwYW4geD0iNjE5LjAiIHk9IjI1NC40Ij7RhNCw0LrRgtC+0YA8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSI2MDMuNiIgeT0iMjYxLjUiIHdpZHRoPSI3NS44IiBoZWlnaHQ9IjQ0LjAiIGZpbGw9IiNGRkZGRkYiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTciIGZvbnQtc3R5bGU9Iml0YWxpYyIgZmlsbD0iIzRCNTE1OCI+PHRzcGFuIHg9IjY0MS41IiB5PSIyODAuNCI+0YDQsNC30L3QvtGBPC90c3Bhbj48dHNwYW4geD0iNjQxLjUiIHk9IjI5Ny40Ij7QtNC+0LvRj9C80Lg8L3RzcGFuPjwvdGV4dD4KPC9zdmc+Cg==" style="width: 780px; max-width: 100%;" alt="Схема метода: панель
+долями) и детекторы разладок сходятся в скользящем origin с метриками MAE, R², MASE, sMAPE." src="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTExMyA1NjYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSLQodGF0LXQvNCwINC80LXRgtC+0LTQsDog0L7RgiDQv9Cw0L3QtdC70Lgg0KHQsdC10YDQmNC90LTQtdC60YHQsCDQuCDQstC90LXRiNC90LjRhSDQuNGB0YLQvtGH0L3QuNC60L7QsiDRh9C10YDQtdC3INC/0LDQvdC10LvRjNC90YvQuSDQsdGD0YHRgtC40L3QsyDQuCDQtNCy0YPRhdGN0YLQsNC/0L3Rg9GOINC80L7QtNC10LvRjCwg0LAg0YLQsNC60LbQtSDQtNC10YLQtdC60YLQvtGA0Ysg0YDQsNC30LvQsNC00L7Quiwg0Log0L7RhtC10L3QutC1INC90LAg0YHQutC+0LvRjNC30Y/RidC10Lwgb3JpZ2luIj4KPGRlZnM+PG1hcmtlciBpZD0iYXJyb3ciIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOC41IiByZWZZPSI1IiBtYXJrZXJXaWR0aD0iNyIgbWFya2VySGVpZ2h0PSI3IiBvcmllbnQ9ImF1dG8tc3RhcnQtcmV2ZXJzZSI+PHBhdGggZD0iTTAsMCBMMTAsNSBMMCwxMCB6IiBmaWxsPSIjN0M4MThBIi8+PC9tYXJrZXI+PC9kZWZzPgo8cGF0aCBkPSJNIDI0OS4wLDQwMC4wIEMgMzExLjUsNDAwLjAgMzExLjUsMzE0LjAgMzc0LjAsMzE0LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0gMjQ5LjAsMzE0LjAgQyAzMTEuNSwzMTQuMCAzMTEuNSwzMTQuMCAzNzQuMCwzMTQuMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN0M4MThBIiBzdHJva2Utd2lkdGg9IjEuNzUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+PHBhdGggZD0iTSAyNDkuMCwxNjcuMCBDIDMxMS41LDE2Ny4wIDMxMS41LDE2Ny4wIDM3NC4wLDE2Ny4wIiBmaWxsPSJub25lIiBzdHJva2U9IiM3QzgxOEEiIHN0cm9rZS13aWR0aD0iMS43NSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz48cGF0aCBkPSJNIDQ4Ni41LDIxNi4wIEwgNDg2LjUsMjc2LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0gNTk5LjAsMTY3LjAgQyA2NDEuNSwxNjcuMCA2NDEuNSw0MDAuMCA1OTkuMCw0MDAuMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN0M4MThBIiBzdHJva2Utd2lkdGg9IjEuNzUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+PHBhdGggZD0iTSAyNDkuMCw0MDAuMCBDIDMxMS41LDQwMC4wIDMxMS41LDQwMC4wIDM3NC4wLDQwMC4wIiBmaWxsPSJub25lIiBzdHJva2U9IiM3QzgxOEEiIHN0cm9rZS13aWR0aD0iMS43NSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz48cGF0aCBkPSJNIDI0OS4wLDUwNy4wIEMgMzExLjUsNTA3LjAgMzExLjUsNTA3LjAgMzc0LjAsNTA3LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0gMjQ5LjAsNDAwLjAgQyAzMTEuNSw0MDAuMCAzMTEuNSw1MDcuMCAzNzQuMCw1MDcuMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN0M4MThBIiBzdHJva2Utd2lkdGg9IjEuNzUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+PHBhdGggZD0iTSA1OTkuMCw1MDcuMCBDIDY0MS41LDUwNy4wIDY0MS41LDUwNy4wIDY4NC4wLDUwNy4wIiBmaWxsPSJub25lIiBzdHJva2U9IiM3QzgxOEEiIHN0cm9rZS13aWR0aD0iMS43NSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz48cGF0aCBkPSJNIDU5OS4wLDMxNC4wIEMgNjQxLjUsMzE0LjAgNjQxLjUsMzU3LjAgNjg0LjAsMzU3LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPjxwYXRoIGQ9Ik0gNTk5LjAsNDAwLjAgQyA2NDEuNSw0MDAuMCA2NDEuNSwzNTcuMCA2ODQuMCwzNTcuMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN0M4MThBIiBzdHJva2Utd2lkdGg9IjEuNzUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+PHBhdGggZD0iTSAyNDkuMCw1OS4wIEwgNzg0LjAsNTkuMCBMIDc4NC4wLDMxOS4wIiBmaWxsPSJub25lIiBzdHJva2U9IiM3QzgxOEEiIHN0cm9rZS13aWR0aD0iMS43NSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz48cGF0aCBkPSJNIDg4NC4wLDM1Ny4wIEMgOTA0LjAsMzU3LjAgOTA0LjAsMzU3LjAgOTI0LjAsMzU3LjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzdDODE4QSIgc3Ryb2tlLXdpZHRoPSIxLjc1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgo8cmVjdCB4PSIyNC4wIiB5PSIxMC4wIiB3aWR0aD0iMjI1LjAiIGhlaWdodD0iOTguMCIgcng9IjEwIiBmaWxsPSIjRjdGN0Y4IiBzdHJva2U9IiM4QThGOTgiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkhlbHZldGljYSBOZXVlLCBIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNTAwIiBmaWxsPSIjMUYyOTM3Ij48dHNwYW4geD0iMTM2LjUiIHk9IjI2LjAiPtCt0YLQsNC70L7QvSBQcm9waGV0LDwvdHNwYW4+PHRzcGFuIHg9IjEzNi41IiB5PSI0OC4wIj7QvdCw0LjQstC90LDRjyw8L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNzAuMCI+0YTRg9C90LTQsNC80LXQvdGC0LDQu9GM0L3Ri9C1PC90c3Bhbj48dHNwYW4geD0iMTM2LjUiIHk9IjkyLjAiPtC80L7QtNC10LvQuDwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjI0LjAiIHk9IjExOC4wIiB3aWR0aD0iMjI1LjAiIGhlaWdodD0iOTguMCIgcng9IjEwIiBmaWxsPSIjRjdGN0Y4IiBzdHJva2U9IiM4QThGOTgiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkhlbHZldGljYSBOZXVlLCBIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNTAwIiBmaWxsPSIjMUYyOTM3Ij48dHNwYW4geD0iMTM2LjUiIHk9IjEzNC4wIj7QlNC70LjQvdC90YvQtTwvdHNwYW4+PHRzcGFuIHg9IjEzNi41IiB5PSIxNTYuMCI+0YTQtdC00LXRgNCw0LvRjNC90YvQtTwvdHNwYW4+PHRzcGFuIHg9IjEzNi41IiB5PSIxNzguMCI+0YDRj9C00YssINC+0LHRgNC10LfQsNC90Ys8L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iMjAwLjAiPtC/0L4gb3JpZ2luPC90c3Bhbj48L3RleHQ+PHJlY3QgeD0iMjQuMCIgeT0iMjk0LjAiIHdpZHRoPSIyMjUuMCIgaGVpZ2h0PSI0MC4wIiByeD0iMTAiIGZpbGw9IiNGN0Y3RjgiIHN0cm9rZT0iIzhBOEY5OCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI1MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSIxMzYuNSIgeT0iMzE0LjAiPtCa0LDRgtC10LPQvtGA0LjQuCDRgtGA0LDRgjwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjI0LjAiIHk9IjM2Mi4wIiB3aWR0aD0iMjI1LjAiIGhlaWdodD0iNzYuMCIgcng9IjEwIiBmaWxsPSIjRjdGN0Y4IiBzdHJva2U9IiM4QThGOTgiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkhlbHZldGljYSBOZXVlLCBIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNTAwIiBmaWxsPSIjMUYyOTM3Ij48dHNwYW4geD0iMTM2LjUiIHk9IjM3OC4wIj7Qn9Cw0L3QtdC70Ywg0KHQsdC10YDQmNC90LTQtdC60YHQsDo8L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNDAwLjAiPtGA0LDRgdGF0L7QtNGLINCc0J48L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNDIyLjAiPtC/0L4g0LzQtdGB0Y/RhtCw0Lw8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIyNC4wIiB5PSI0NTguMCIgd2lkdGg9IjIyNS4wIiBoZWlnaHQ9Ijk4LjAiIHJ4PSIxMCIgZmlsbD0iI0Y3RjdGOCIgc3Ryb2tlPSIjOEE4Rjk4IiBzdHJva2Utd2lkdGg9IjEuNSIvPjx0ZXh0IHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EgTmV1ZSwgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxOCIgZm9udC13ZWlnaHQ9IjUwMCIgZmlsbD0iIzFGMjkzNyI+PHRzcGFuIHg9IjEzNi41IiB5PSI0NzQuMCI+0KHRgtC10L3QtDog0LLRgNC10LfQutC4PC90c3Bhbj48dHNwYW4geD0iMTM2LjUiIHk9IjQ5Ni4wIj7QuNC30LLQtdGB0YLQvdC+0Lkg0LLQtdC70LjRh9C40L3Riyw8L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNTE4LjAiPtGI0YLRgNCw0YQg0LLRi9Cx0YDQsNC9INC00L48L3RzcGFuPjx0c3BhbiB4PSIxMzYuNSIgeT0iNTQwLjAiPtGA0LXQsNC70YzQvdGL0YUg0LTQsNC90L3Ri9GFPC90c3Bhbj48L3RleHQ+PHJlY3QgeD0iMzc0LjAiIHk9IjExOC4wIiB3aWR0aD0iMjI1LjAiIGhlaWdodD0iOTguMCIgcng9IjEwIiBmaWxsPSIjRjdGN0Y4IiBzdHJva2U9IiM4QThGOTgiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkhlbHZldGljYSBOZXVlLCBIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNTAwIiBmaWxsPSIjMUYyOTM3Ij48dHNwYW4geD0iNDg2LjUiIHk9IjEzNC4wIj7Qn9GA0L7Qs9C90L7QtzwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSIxNTYuMCI+0YTQtdC00LXRgNCw0LvRjNC90L7Qs9C+PC90c3Bhbj48dHNwYW4geD0iNDg2LjUiIHk9IjE3OC4wIj7RgNGP0LTQsCDQv9C+INC10LPQvjwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSIyMDAuMCI+0LTQu9C40L3QvdC+0Lkg0LjRgdGC0L7RgNC40Lg8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIzNzQuMCIgeT0iMjc2LjAiIHdpZHRoPSIyMjUuMCIgaGVpZ2h0PSI3Ni4wIiByeD0iMTAiIGZpbGw9IiNFOUVCRkEiIHN0cm9rZT0iIzRDNEY4QyIgc3Ryb2tlLXdpZHRoPSIyLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSI0ODYuNSIgeT0iMjkyLjAiPtCf0LDQvdC10LvRjNC90YvQuSDQsdGD0YHRgtC40L3Qszo8L3RzcGFuPjx0c3BhbiB4PSI0ODYuNSIgeT0iMzE0LjAiPtCy0L4g0YHQutC+0LvRjNC60L4g0YDQsNC3PC90c3Bhbj48dHNwYW4geD0iNDg2LjUiIHk9IjMzNi4wIj7QuNC30LzQtdC90LjRgtGB0Y88L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIzNzQuMCIgeT0iMzYyLjAiIHdpZHRoPSIyMjUuMCIgaGVpZ2h0PSI3Ni4wIiByeD0iMTAiIGZpbGw9IiNFOUVCRkEiIHN0cm9rZT0iIzRDNEY4QyIgc3Ryb2tlLXdpZHRoPSIyLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSI0ODYuNSIgeT0iMzc4LjAiPtCU0LLRg9GF0Y3RgtCw0L/QvdCw0Y8g0LzQvtC00LXQu9GMOjwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSI0MDAuMCI+dG9wLWRvd24g0L/QvjwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSI0MjIuMCI+0LjRgdGC0L7RgNC40YfQtdGB0LrQuNC8INC00L7Qu9GP0Lw8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSIzNzQuMCIgeT0iNDY5LjAiIHdpZHRoPSIyMjUuMCIgaGVpZ2h0PSI3Ni4wIiByeD0iMTAiIGZpbGw9IiNGN0Y3RjgiIHN0cm9rZT0iIzhBOEY5OCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI1MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSI0ODYuNSIgeT0iNDg1LjAiPtCU0LXRgtC10LrRgtC+0YDRiyDQsjwvdHNwYW4+PHRzcGFuIHg9IjQ4Ni41IiB5PSI1MDcuMCI+0YDQsNGB0YjQuNGA0Y/RjtGJ0LXQvNGB0Y8g0L7QutC90LU8L3RzcGFuPjx0c3BhbiB4PSI0ODYuNSIgeT0iNTI5LjAiPtC90LAg0YLQtdC80L/QsNGFINGA0L7RgdGC0LA8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSI2ODQuMCIgeT0iMzE5LjAiIHdpZHRoPSIyMDAuMCIgaGVpZ2h0PSI3Ni4wIiByeD0iMTAiIGZpbGw9IiNGN0Y3RjgiIHN0cm9rZT0iIzhBOEY5OCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI1MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSI3ODQuMCIgeT0iMzM1LjAiPtCh0LrQvtC70YzQt9GP0YnQuNC5IG9yaWdpbjo8L3RzcGFuPjx0c3BhbiB4PSI3ODQuMCIgeT0iMzU3LjAiPtC90LDRg9C60LDRgdGCINC4INCz0L7RgNC40LfQvtC90YLRizwvdHNwYW4+PHRzcGFuIHg9Ijc4NC4wIiB5PSIzNzkuMCI+0LTQviDQs9C+0LTQsDwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjY4NC4wIiB5PSI0ODAuMCIgd2lkdGg9IjIwMC4wIiBoZWlnaHQ9IjU0LjAiIHJ4PSIxMCIgZmlsbD0iI0Y3RjdGOCIgc3Ryb2tlPSIjOEE4Rjk4IiBzdHJva2Utd2lkdGg9IjEuNSIvPjx0ZXh0IHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EgTmV1ZSwgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxOCIgZm9udC13ZWlnaHQ9IjUwMCIgZmlsbD0iIzFGMjkzNyI+PHRzcGFuIHg9Ijc4NC4wIiB5PSI0OTYuMCI+0JTQvtC70Y8g0YLQtdGA0YDQuNGC0L7RgNC40Lk8L3RzcGFuPjx0c3BhbiB4PSI3ODQuMCIgeT0iNTE4LjAiPtGBINGB0LjQs9C90LDQu9C+0Lw8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSI5MjQuMCIgeT0iMzMwLjAiIHdpZHRoPSIxNjUuMCIgaGVpZ2h0PSI1NC4wIiByeD0iMTAiIGZpbGw9IiNGN0Y3RjgiIHN0cm9rZT0iIzhBOEY5OCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI1MDAiIGZpbGw9IiMxRjI5MzciPjx0c3BhbiB4PSIxMDA2LjUiIHk9IjM0Ni4wIj5NQUUgwrcgUsKyINC/0L4g0L/Rg9C70YM8L3RzcGFuPjx0c3BhbiB4PSIxMDA2LjUiIHk9IjM2OC4wIj5NQVNFIMK3IHNNQVBFPC90c3Bhbj48L3RleHQ+CjxyZWN0IHg9IjI1Ny41IiB5PSIyOTIuMCIgd2lkdGg9IjEwOC4xIiBoZWlnaHQ9IjQ0LjAiIGZpbGw9IiNGRkZGRkYiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTciIGZvbnQtc3R5bGU9Iml0YWxpYyIgZmlsbD0iIzRCNTE1OCI+PHRzcGFuIHg9IjMxMS41IiB5PSIzMTAuOSI+0L7QsdGD0YfQsNGO0YnQuNC1PC90c3Bhbj48dHNwYW4geD0iMzExLjUiIHk9IjMyNy45Ij7RgNGP0LTRizwvdHNwYW4+PC90ZXh0PjxyZWN0IHg9IjQ5NC4wIiB5PSIyMjQuMCIgd2lkdGg9Ijc1LjQiIGhlaWdodD0iNDQuMCIgZmlsbD0iI0ZGRkZGRiIvPjx0ZXh0IHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EgTmV1ZSwgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNyIgZm9udC1zdHlsZT0iaXRhbGljIiBmaWxsPSIjNEI1MTU4Ij48dHNwYW4geD0iNTMxLjciIHk9IjI0Mi45Ij7QvtCx0YnQuNC5PC90c3Bhbj48dHNwYW4geD0iNTMxLjciIHk9IjI1OS45Ij7RhNCw0LrRgtC+0YA8L3RzcGFuPjwvdGV4dD48cmVjdCB4PSI2MDMuNiIgeT0iMjYxLjUiIHdpZHRoPSI3NS44IiBoZWlnaHQ9IjQ0LjAiIGZpbGw9IiNGRkZGRkYiLz48dGV4dCB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSGVsdmV0aWNhIE5ldWUsIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTciIGZvbnQtc3R5bGU9Iml0YWxpYyIgZmlsbD0iIzRCNTE1OCI+PHRzcGFuIHg9IjY0MS41IiB5PSIyODAuNCI+0YDQsNC30L3QvtGBPC90c3Bhbj48dHNwYW4geD0iNjQxLjUiIHk9IjI5Ny40Ij7QtNC+0LvRj9C80Lg8L3RzcGFuPjwvdGV4dD4KPC9zdmc+Cg==" style="width: 860px; max-width: 100%;" alt="Схема метода: панель
 СберИндекса и внешние источники — длинные федеральные ряды, категории трат, стенд разладок,
 эталонные модели — через панельный бустинг и двухэтапную модель (общий фактор и разнос
 долями) и детекторы разладок сходятся в скользящем origin с метриками MAE, R², MASE, sMAPE.">
@@ -1095,7 +1096,7 @@ margin-right: 0; }
 </section>
 <section id="сравнение-моделей-прогнозирования" class="slide level2 smaller">
 <h2>Сравнение моделей прогнозирования</h2>
-<div id="e4ee6778" class="cell" data-execution_count="5">
+<div id="cb37def0" class="cell" data-execution_count="5">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -1108,7 +1109,7 @@ margin-right: 0; }
 </section>
 <section id="метрики-рядом-mae-mase-r²" class="slide level2 smaller">
 <h2>Метрики рядом: MAE, MASE, R²</h2>
-<div id="923eabeb" class="cell" data-execution_count="6">
+<div id="3d2d1cce" class="cell" data-execution_count="6">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="6">
 <table class="caption-top" style="width:100%;">
 <colgroup>
@@ -1182,7 +1183,7 @@ margin-right: 0; }
 </table>
 </div>
 </div>
-<div id="6d3ea0fa" class="cell" data-execution_count="7">
+<div id="af7a8d3a" class="cell" data-execution_count="7">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="7">
 <p>Среднее R² по парам ряд × фолд в таблицы не идёт: на трёх тестовых точках оно вырождено — от −39,0 до −7,3, и лучшей по нему выходит наивная модель, худшая по MAE.</p>
 </div>
@@ -1207,7 +1208,7 @@ margin-right: 0; }
 </section>
 <section id="переносится-не-всё-и-не-как-угодно" class="slide level2">
 <h2>Переносится не всё и не как угодно</h2>
-<div id="efcd0dad" class="cell" data-execution_count="8">
+<div id="d53ff623" class="cell" data-execution_count="8">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="8">
 <table class="caption-top">
 <thead>
@@ -1261,7 +1262,7 @@ margin-right: 0; }
 </section>
 <section id="среднее-скрывает-перемену-мест" class="slide level2 smaller">
 <h2>Среднее скрывает перемену мест</h2>
-<div id="c6554e2d" class="cell" data-execution_count="9">
+<div id="593f889c" class="cell" data-execution_count="9">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="9">
 <table class="caption-top" style="width:100%;">
 <colgroup>
@@ -1306,7 +1307,7 @@ margin-right: 0; }
 </section>
 <section id="двухэтапная-модель-как-конструкция" class="slide level2 smaller">
 <h2>Двухэтапная модель как конструкция</h2>
-<div id="c4d9eaa8" class="cell" data-execution_count="10">
+<div id="ee1461a5" class="cell" data-execution_count="10">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="10">
 <table class="caption-top">
 <colgroup>
@@ -1351,7 +1352,7 @@ margin-right: 0; }
 </table>
 </div>
 </div>
-<div id="a7064e93" class="cell" data-execution_count="11">
+<div id="e6e31732" class="cell" data-execution_count="11">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="11">
 <p>Разброс двухэтапной модели <strong>совпадает с наивной до рубля</strong> — 695, 774 и 824: тождество по построению, обе дают «последнее значение × общий множитель». Разница между ними — ровно общий фактор, и он стоит <strong>460 ₽ из 1 852</strong>.</p>
 </div>
@@ -1360,7 +1361,7 @@ margin-right: 0; }
 </section>
 <section id="пять-горизонтов-от-наукаста-до-года" class="slide level2 smaller">
 <h2>Пять горизонтов: от наукаста до года</h2>
-<div id="85d82bdd" class="cell" data-execution_count="12">
+<div id="164ac75f" class="cell" data-execution_count="12">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="12">
 <table class="caption-top">
 <colgroup>
@@ -1412,7 +1413,7 @@ margin-right: 0; }
 </table>
 </div>
 </div>
-<div id="848d80bc" class="cell" data-execution_count="13">
+<div id="b16394ea" class="cell" data-execution_count="13">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="13">
 <p><strong>Наукаст: 45,9% над эталоном.</strong> Известный агрегат за текущий месяц добавляет 21,4 рубля: движение страны на месяц предсказуемо, остаток — разброс.</p>
 <p><strong>Год вперёд: у панельных моделей нет обучающих примеров</strong>, двухэтапная обходит эталон на 40%. Даже оракул общего движения не разносит точнее 1 356.</p>
@@ -1422,7 +1423,7 @@ margin-right: 0; }
 </section>
 <section id="прогноз-на-2025-год-первый-этап-сверен-с-фактом" class="slide level2 smaller">
 <h2>Прогноз на 2025 год: первый этап сверен с фактом</h2>
-<div id="b34ff55f" class="cell" data-execution_count="14">
+<div id="4b6fd517" class="cell" data-execution_count="14">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -1431,7 +1432,7 @@ margin-right: 0; }
 </div>
 </div>
 </div>
-<div id="ff1fb1fc" class="cell" data-execution_count="15">
+<div id="dcb201ea" class="cell" data-execution_count="15">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="15">
 <p><strong>Прогноз от последнего месяца панели, декабря 2024:</strong> на 1, 3 и 6 мес. — панельная модель с долями категорий, на 12 — двухэтапная; 2 028 рядов в <code>results/forecast_2025.csv</code>.</p>
 <p><strong>Федеральный агрегат за 2025 год уже опубликован:</strong> первый этап двухэтапной модели ошибся в среднем на 4,1%, «как в декабре» — на 7,0%, «как год назад» — на 12,4%. Прогноз ниже факта все 12 месяцев: первый этап берёт медианный прирост 2019–2024, а 2025-й рос быстрее.</p>
@@ -1442,7 +1443,7 @@ margin-right: 0; }
 <section id="короче-история-ценнее-перенос" class="slide level2 smaller">
 <h2>Короче история — ценнее перенос</h2>
 <p>Выигрыш переноса к базовой модели, ₽ (минус = помогает):</p>
-<div id="906ce334" class="cell" data-execution_count="16">
+<div id="2ac82343" class="cell" data-execution_count="16">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="16">
 <table class="caption-top">
 <colgroup>
@@ -1481,7 +1482,7 @@ margin-right: 0; }
 <p>Ранговая корреляция выигрыша с длиной обучения — <strong>0,96</strong>.</p>
 </div>
 </div>
-<div id="fcaf07d9" class="cell" data-execution_count="17">
+<div id="91613c72" class="cell" data-execution_count="17">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="17">
 <p><strong>Девять дополнительных месяцев улучшают модель в 10,4 раза</strong> — наивную модель тот же срок не улучшает вовсе: её ошибка зависит от того, какие месяцы попали в тест, а не от длины истории.</p>
 </div>
@@ -1516,7 +1517,7 @@ margin-right: 0; }
 0,92em, как на слайде «Выводы» (::: {style="font-size: 0.9em;"}), даёт запас с двузначным числом
 пикселей, не трогая ни состав, ни числа. -->
 <div style="font-size: 0.92em;">
-<div id="e5e21af9" class="cell" data-execution_count="18">
+<div id="049e4984" class="cell" data-execution_count="18">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="18">
 <table class="caption-top">
 <colgroup>
@@ -1598,7 +1599,7 @@ margin-right: 0; }
 </table>
 </div>
 </div>
-<div id="a9ad0f60" class="cell" data-execution_count="19">
+<div id="c011238d" class="cell" data-execution_count="19">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="19">
 <p>Штраф 5 — по стенду, до реальных данных, край сетки: лучший мог лежать за ним. Зачёт — не позже 3 мес. после врезки, при молчащем нетронутом близнеце. Лучший J — у PELT и BinSeg. <strong>Но у методов со штрафом на темпах роста 64,4–79,7% засчитанного — сигналы в декабре; у PELT без них 4,6%.</strong></p>
 </div>
@@ -1610,7 +1611,7 @@ margin-right: 0; }
 <h2>Интерпретация на реальных данных</h2>
 <div class="columns">
 <div class="column" style="width:52%;">
-<div id="5fe892cd" class="cell" data-execution_count="20">
+<div id="734facce" class="cell" data-execution_count="20">
 <div class="cell-output cell-output-display">
 <div>
 <figure>
@@ -1619,7 +1620,7 @@ margin-right: 0; }
 </div>
 </div>
 </div>
-<div id="aa0c91d8" class="cell" data-execution_count="21">
+<div id="4392790f" class="cell" data-execution_count="21">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="21">
 <table class="caption-top">
 <thead>
@@ -1650,7 +1651,7 @@ margin-right: 0; }
 </div>
 </div>
 </div><div class="column" style="width:48%;">
-<div id="24b205a5" class="cell" data-execution_count="22">
+<div id="737766f5" class="cell" data-execution_count="22">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="22">
 <ul>
 <li><strong>Штраф 5, выбран по стенду:</strong> порог 50% не перейдён ни разу, наибольшая доля — 0,6% (октябрь 2023); октябрь 2023 — первый по доле месяц, но это 12 МО из 2 028; фон нулевой.</li>
@@ -1663,7 +1664,7 @@ margin-right: 0; }
 </section>
 <section id="чего-мы-не-утверждаем" class="slide level2">
 <h2>Чего мы не утверждаем</h2>
-<div id="4620581a" class="cell" data-execution_count="23">
+<div id="ceb2a8dd" class="cell" data-execution_count="23">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="23">
 <p>Трёх событий недостаточно для вывода о причинности: связь с денежной политикой — совпадение и гипотеза.</p>
 <p>Октябрь 2023 и январь 2024 по полному ряду — не два шока: у 1 024 из 1 025 рядов с изломом в октябре 2023 есть излом и в январе 2024: это начало и конец одного отрезка.</p>
@@ -1674,7 +1675,7 @@ margin-right: 0; }
 </section>
 <section id="что-не-сработало-модели" class="slide level2 smaller">
 <h2>Что не сработало: модели</h2>
-<div id="1c806c1a" class="cell" data-execution_count="24">
+<div id="becce9c4" class="cell" data-execution_count="24">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="24">
 <p><strong>Фундаментальные модели без дообучения.</strong> На горизонте 3 мес. Chronos-Bolt small проигрывает наивной на 41%, Moirai на 22%, TimesFM 2.5 на 14% — в среднем; на третьем фолде Moirai, TimesFM 2.5 и Chronos-Bolt base наивную обходят. <strong>Три</strong> разных семейства сходятся, значит дело не в архитектуре. Там же дообучение Chronos снимает 30% ошибки (2 620 → 1 830) и доводит его лишь до уровня наивной (на 1,2% лучше): эталону уступает 15,8%, панельной модели — в 1,5 раза. На наукасте — лишь 1,6% (2 026 → 1 994), и он на 23,8% хуже наивной; на 6 и 12 мес. дообучение пропускается или отказывает. Повтор с тем же сидом расходится на третьем фолде: 2 326 (снимок локального прогона, в репозиторий не входит) против 2 337. Больше параметров в среднем хуже: дообученный base даёт 2 004 против 1 830 у small.</p>
 </div>
@@ -1696,12 +1697,12 @@ margin-right: 0; }
 </section>
 <section id="что-не-сработало-новости-и-длинные-ряды" class="slide level2 smaller">
 <h2>Что не сработало: новости и длинные ряды</h2>
-<div id="12915bf8" class="cell" data-execution_count="25">
+<div id="d0003945" class="cell" data-execution_count="25">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="25">
 <p><strong>Новости, три независимые конструкции.</strong> 589 тыс. заголовков, 18 регионов. Признаки в модели на наукасте: ошибка ниже на 21,5 ₽ на 396 покрытых рядах, но интервал по фолдам [−78; +35] накрывает ноль, на всех рядах не лучше базовой. Событийный анализ на изломах, 42 проверки, и та же региональная проверка корреляцией, 12: ни одной значимой. <strong>Национальный уровень против федерального агрегата — 48 гипотез, порог объявлен заранее, не прошла ни одна.</strong></p>
 </div>
 </div>
-<div id="11cb9769" class="cell" data-execution_count="26">
+<div id="31c2a56f" class="cell" data-execution_count="26">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="26">
 <p>Заголовки не виноваты: по выборке в 20 тыс. статей с телами тело добирает медианно <strong>1,2%</strong> из непопавших, а связь с целью меняется вдвое слабее шума выборки.</p>
 </div>
@@ -1712,7 +1713,7 @@ margin-right: 0; }
 <h2>Выводы</h2>
 <!-- Девять тем шрифтом {.smaller} не помещались: 864 px из 760; при 0,9 — по строке на тему. -->
 <div style="font-size: 0.9em;">
-<div id="ffc9d5c4" class="cell" data-execution_count="27">
+<div id="da2ed0a9" class="cell" data-execution_count="27">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="27">
 <ul>
 <li><strong>Главный вывод:</strong> задача — прогноз одного числа и разнос его по территориям.</li>
@@ -1732,7 +1733,7 @@ margin-right: 0; }
 <section id="что-из-этого-следует" class="slide level2">
 <h2>Что из этого следует</h2>
 <p><strong>Осторожно с определённостью.</strong> Ни одна модель не выигрывает у наивной на всех трёх фолдах. По фолдам интервалы накрывают ноль у всех конструкций. Приводим обе оценки и не выбираем удобную.</p>
-<div id="0828d5fe" class="cell" data-execution_count="28">
+<div id="1052b648" class="cell" data-execution_count="28">
 <div class="cell-output cell-output-display cell-output-markdown" data-execution_count="28">
 <p><strong>Главный практический вывод.</strong> Три дополнительных месяца истории меняют качество прогноза сильнее, чем переход от наивной модели к градиентному бустингу: на фолдах с обучением 18 и 21 точка MAE базовой панельной модели в среднем 1 006, на фолде с 15 точками — 2 387.</p>
 </div>
