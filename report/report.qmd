@@ -6085,28 +6085,37 @@ _body_text
 
 ## Воспроизводимость
 
+Отчёт и слайды собираются из закоммиченных результатов без единого прогона — что лежит
+в репозитории, сказано ниже. Пересчитать числа заново можно командами ниже; время — на полной
+панели, на машине автора (macOS arm64), по журналам прогонов и замеру на чистом клоне 28.09;
+у скриптов, которые мерились на чистом клоне, выход совпал с закоммиченным байт в байт.
+
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -u scripts/check_no_leakage.py        # внешние ряды не заглядывают за origin
-.venv/bin/python -u src/run.py --config configs/full.yaml  # основной протокол → results/per_series.csv, summary.csv
-.venv/bin/python -u scripts/horizons.py                 # пять горизонтов → results/horizons_*.csv
-.venv/bin/python -u scripts/error_decomposition.py      # → results/error_decomposition.csv
-.venv/bin/python -u scripts/training_length_sweep.py    # → results/training_length_sweep.csv
+.venv/bin/python -u src/run.py --config configs/full.yaml  # основной протокол → results/per_series.csv, summary.csv;
+                                                        #   модели гонялись по одной (--models): от минуты до 5 ч 37 мин
+                                                        #   у prophet_forced_yearly (машина уходила в подкачку)
+.venv/bin/python -u scripts/horizons.py                 # пять горизонтов, 2 ч 41 мин → results/horizons_*.csv
+.venv/bin/python -u scripts/error_decomposition.py      # около 12 минут → results/error_decomposition.csv
+.venv/bin/python -u scripts/training_length_sweep.py    # около 32 минут → results/training_length_sweep.csv
 .venv/bin/python -u scripts/changepoints.py             # стенд разладок v2, около 7 минут → results/cp_*.csv
 .venv/bin/python -u scripts/changepoints.py --config configs/changepoints_v1.yaml
-                                                        #   первая версия стенда → results/cp_v1/
+                                                        #   первая версия стенда, около 2 минут → results/cp_v1/
 .venv/bin/python -u scripts/forecast_forward.py        # прогноз на 2025 год, около 3 минут →
                                                         #   results/forecast_2025.csv, forecast_2025_aggregate_check.csv
 .venv/bin/python -u scripts/build_news_features.py      # словарь тем → results/news_dictionary.csv,
                                                         #   data/news/monthly.parquet и national.parquet;
                                                         #   нужен локальный data/news/headlines.parquet (ниже)
-.venv/bin/python -u scripts/news_national.py            # → results/news_national.csv
-.venv/bin/python -u scripts/news_event_study.py         # → results/news_event_study.csv
-.venv/bin/python -u scripts/news_panel.py               # новости в модели и изломы → results/news_panel.csv,
-                                                        #   news_breaks_corr.csv (после run.py, horizons.py и changepoints.py)
+.venv/bin/python -u scripts/news_national.py            # около 15 секунд → results/news_national.csv
+.venv/bin/python -u scripts/news_event_study.py         # около 12 секунд → results/news_event_study.csv
+.venv/bin/python -u scripts/news_panel.py               # около 8 секунд, новости в модели и изломы →
+                                                        #   results/news_panel.csv, news_breaks_corr.csv
+                                                        #   (после run.py, horizons.py и changepoints.py)
 .venv/bin/python -u scripts/fetch_bodies.py             # выборка тел статей (обход сайтов, в git не входит)
 .venv/bin/python -u scripts/compare_headline_body.py    # → results/headline_vs_body.csv, headline_vs_body_corr.csv
+.venv/bin/python -u scripts/export_results.py           # снимки .csv.gz построчных файлов для git; --check — сверка
 ```
 
 Протокол оценки целиком вынесен в `configs/full.yaml` (пилот на 300 рядах —

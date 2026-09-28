@@ -1,5 +1,11 @@
 # Прогнозирование потребительских расходов муниципальных образований
 
+**Отчёт** — [на GitHub Pages](https://kr1zal.github.io/sberindex-forecast-2026/report/report.html)
+и [в PDF](report/report.pdf) · **слайды** —
+[на GitHub Pages](https://kr1zal.github.io/sberindex-forecast-2026/report/slides.html)
+и [в PDF](report/slides.pdf) · **прогноз на 2025 год** по муниципальным образованиям —
+[`results/forecast_2025.csv.gz`](results/forecast_2025.csv.gz).
+
 Работа на конкурс СберИндекса по анализу данных, экономике и машинному обучению,
 направление «Прогнозирование».
 
@@ -140,6 +146,10 @@ forecast, recommended, uses_published_aggregate`. Строки `two_stage_known`
 
 ## Запуск
 
+Проверено на Python 3.14.0, macOS arm64 (`.python-version`). Версии пакетов, на которых
+посчитаны результаты, — `requirements.lock.txt`; `requirements.txt` задаёт только нижние
+границы.
+
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
@@ -180,6 +190,58 @@ python -m venv .venv
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
+
+## Воспроизводимость
+
+**Отчёт и слайды собираются из закоммиченных результатов, без прогонов.** В `results/` лежат все
+файлы, из которых взяты их числа: сводки — как есть, построчные файлы — сжатыми снимками `.csv.gz`
+(`per_series`, `horizons_per_series`, `forecast_2025`, `cp_bench` и `cp_v1/cp_bench`). Отчёт и
+слайды читают обычный CSV, если он есть, иначе снимок (`src/results_guard.py::resolve_results`).
+Сборка — Quarto 1.10.18:
+
+```bash
+cd report
+QUARTO_PYTHON=$PWD/../.venv/bin/python quarto render report.qmd   # около минуты
+QUARTO_PYTHON=$PWD/../.venv/bin/python quarto render slides.qmd   # около 25 секунд
+```
+
+PDF — печатью из headless Chrome; без `--virtual-time-budget` слайды печатаются раньше, чем
+reveal.js их разложит, и выходит одна пустая страница:
+
+```bash
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+"$CHROME" --headless=new --disable-gpu --virtual-time-budget=15000 --no-pdf-header-footer \
+  --print-to-pdf=slides.pdf "file://$PWD/slides.html?print-pdf"
+"$CHROME" --headless=new --disable-gpu --virtual-time-budget=15000 --no-pdf-header-footer \
+  --print-to-pdf=report.pdf "file://$PWD/report.html"
+```
+
+Вне git — только снимки прежних реализаций моделей (`results/realizations/`): на чистом клоне
+таблица реализаций дообученного Chronos покажет одни текущие строки, а числа прежних прогонов
+в тексте помечены как снимки локального прогона.
+
+**Пересчёт чисел.** Каждый прогон переписывает свои файлы в `results/`. После прогона, изменившего
+построчный файл, снимок обновляет `scripts/export_results.py`, а `--check` сверяет снимки с CSV.
+Время — на полной панели, на машине автора (macOS arm64), по журналам прогонов и замеру на чистом
+клоне 28.09: у скриптов, которые там мерились (от `error_decomposition.py` до `news_panel.py`),
+выход совпал с закоммиченным байт в байт.
+
+| прогон | что пишет в `results/` | время |
+|---|---|---|
+| `src/run.py` | `per_series.csv`, `summary.csv` | модели гоняются по одной (`--models`): от минуты до 5 ч 37 мин у `prophet_forced_yearly` (машина уходила в подкачку) |
+| `scripts/horizons.py` | `horizons_*.csv` | 2 ч 41 мин на все модели |
+| `scripts/forecast_forward.py` | `forecast_2025.csv`, `forecast_2025_aggregate_check.csv` | около 3 мин |
+| `scripts/changepoints.py` | `cp_*.csv` — десять файлов | около 7 мин; первая версия стенда — около 2 мин |
+| `scripts/error_decomposition.py` | `error_decomposition.csv` | около 12 мин |
+| `scripts/training_length_sweep.py` | `training_length_sweep.csv` | около 32 мин |
+| `scripts/news_national.py` | `news_national.csv` | около 15 с |
+| `scripts/news_event_study.py` | `news_event_study.csv` | около 12 с |
+| `scripts/news_panel.py` | `news_panel.csv`, `news_breaks_corr.csv` | около 8 с |
+
+`scripts/build_news_features.py` (словарь тем, `news_dictionary.csv`) и
+`scripts/compare_headline_body.py` (`headline_vs_body*.csv`) требуют сырых текстов, которых в
+репозитории нет: заголовки собирает `scripts/crawl_news.py`, выборку тел статей —
+`scripts/fetch_bodies.py`.
 
 ## Структура
 
