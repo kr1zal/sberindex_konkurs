@@ -84,6 +84,25 @@ class _LinkCollector(HTMLParser):
                 self.links.append(value)
 
 
+class _ResourceCollector(HTMLParser):
+    """Ресурсы, которые браузер грузит сам (скрипты и стили) — не обычные ссылки
+    `<a href>`: те вправе вести куда угодно (репозиторий, дашборд СберИндекса)."""
+
+    RESOURCE_ATTR = {"script": "src", "link": "href"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.resources: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_name = self.RESOURCE_ATTR.get(tag)
+        if not attr_name:
+            return
+        value = dict(attrs).get(attr_name)
+        if value:
+            self.resources.append((tag, value))
+
+
 class BuildSiteTest(unittest.TestCase):
     """Сборка один раз на все проверки; данные для независимой сверки — тоже один раз."""
 
@@ -99,6 +118,12 @@ class BuildSiteTest(unittest.TestCase):
         cls.data_dir = cls.out_dir / "demo" / "data"
         cls.index_json = json.loads((cls.data_dir / "index.json").read_text(encoding="utf-8"))
         cls.aggregate_json = json.loads((cls.data_dir / "aggregate.json").read_text(encoding="utf-8"))
+
+        # demo/index.html — рукописный файл этой задачи, генератор его не пишет
+        # (в отличие от index.html и demo/data/**), поэтому читаем закоммиченный
+        # файл репозитория, а не то, что build_site.main() положил во временный out_dir.
+        cls.demo_html_path = ROOT / "demo" / "index.html"
+        cls.demo_html = cls.demo_html_path.read_text(encoding="utf-8")
 
         # Источники чисел — те же results/*.csv и конфиги, что читает генератор,
         # но независимо: свои pandas-выражения, не вызов build_site.compute_placeholders.
@@ -296,6 +321,40 @@ class BuildSiteTest(unittest.TestCase):
                     self.assertTrue((target / "index.html").exists(), f"{link}: нет index.html внутри")
                 else:
                     self.assertTrue(target.exists(), f"{link}: файла {target} нет")
+
+    # -- ссылки и ресурсы стенда (demo/index.html) ----------------------------
+
+    def test_demo_index_html_relative_links_resolve_to_existing_files(self) -> None:
+        collector = _LinkCollector()
+        collector.feed(self.demo_html)
+        self.assertTrue(collector.links, "в demo/index.html не нашлось ни одной ссылки")
+
+        for link in collector.links:
+            if link.startswith(("http://", "https://", "mailto:", "data:")):
+                continue
+            with self.subTest(link=link):
+                # demo/index.html лежит в demo/, относительные ссылки — от этой папки
+                # (а не от корня репозитория, как у index.html на верхнем уровне).
+                target = (self.demo_html_path.parent / link).resolve()
+                if target.is_dir():
+                    self.assertTrue((target / "index.html").exists(), f"{link}: нет index.html внутри")
+                else:
+                    self.assertTrue(target.exists(), f"{link}: файла {target} нет")
+
+    def test_no_page_loads_external_scripts_or_stylesheets(self) -> None:
+        # Бриф: «ни одна страница не грузит внешних скриптов и стилей» — ни index.html
+        # (страница входа), ни demo/index.html (стенд). Обычные ссылки `<a href>`
+        # (репозиторий, дашборд СберИндекса) сюда не относятся — только script/link.
+        for page, html in (("index.html", self.html), ("demo/index.html", self.demo_html)):
+            collector = _ResourceCollector()
+            collector.feed(html)
+            self.assertTrue(collector.resources, f"{page}: не нашлось ни одного script/link")
+            for tag, value in collector.resources:
+                with self.subTest(page=page, tag=tag, value=value):
+                    self.assertFalse(
+                        value.startswith(("http://", "https://", "//")),
+                        f"{page}: внешний ресурс <{tag}> -> {value}",
+                    )
 
 
 if __name__ == "__main__":
