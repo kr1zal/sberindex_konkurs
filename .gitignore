@@ -25,6 +25,10 @@ results/horizons_per_series.csv
 results/forecast_2025.csv
 results/cp_bench.csv
 results/cp_v1/cp_bench.csv
+# Временный файл записи снимка (scripts/export_results.py::export_one) — атомарная
+# замена убирает его сама, но при обрыве записи или сбое проверки он не должен
+# случайно попасть в коммит.
+results/**/*.tmp
 results/**/*.json
 # Копии прежних файлов признаков, которые пересборка новостей кладёт в results/backup_*
 results/**/*.parquet

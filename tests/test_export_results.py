@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gzip
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -52,6 +53,17 @@ class ExportOneTest(unittest.TestCase):
         export_results.export_one(self.source)
         leftovers = list(self.dir.glob("*.tmp"))
         self.assertEqual(leftovers, [])
+
+    def test_temp_file_is_removed_when_verification_fails(self):
+        # Порча при проверке (диск, прерывание) не должна оставлять .tmp рядом с целью:
+        # запись и сверка идут в try/finally, снимающем .tmp при любом исключении.
+        fake_readback = mock.MagicMock()
+        fake_readback.__enter__.return_value.read.return_value = b"corrupted"
+        with mock.patch.object(export_results.gzip, "open", return_value=fake_readback):
+            with self.assertRaises(ValueError):
+                export_results.export_one(self.source)
+        self.assertEqual(list(self.dir.glob("*.tmp")), [])
+        self.assertFalse((self.dir / "per_series.csv.gz").exists())  # цель тоже не подменена мусором
 
     def test_gzip_header_has_no_filename_and_zero_mtime(self):
         # RFC 1952: байт 3 — флаги (бит 0x08 = FNAME), байты 4..7 — MTIME.
@@ -128,6 +140,41 @@ class MainCliTest(unittest.TestCase):
         self.run_main()
         self.source.write_bytes(CONTENT + "мо_500,0,9999.000\n".encode("utf-8"))
         self.assertEqual(self.run_main("--check"), 1)
+
+
+class TrackedCsvSizeTest(unittest.TestCase):
+    """`.gitignore`: `!results/*.csv` (и `!results/cp_v1/*.csv`) снимает игнор с любого
+    CSV верхнего уровня без предела по размеру — крупные файлы обязаны идти только
+    снимком `.csv.gz` (`SOURCES`). Сеть на случай, если такой файл всё же закоммитят
+    обычным CSV: живой git-индекс, а не список файлов на диске, — git не обязателен
+    в каждом окружении, тест пропускается, если его нет."""
+
+    LIMIT_BYTES = 2 * 1024 * 1024
+
+    def test_every_tracked_csv_is_under_two_megabytes(self):
+        try:
+            done = subprocess.run(
+                ["git", "ls-files", "--", "results"],
+                cwd=ROOT, capture_output=True, text=True, timeout=30,
+            )
+        except FileNotFoundError:
+            self.skipTest("git недоступен в этом окружении")
+        if done.returncode != 0:
+            self.skipTest(f"git ls-files не сработал: {done.stderr.strip()}")
+
+        tracked_csv = [line for line in done.stdout.splitlines() if line.endswith(".csv")]
+        self.assertTrue(tracked_csv, "git ls-files results не нашёл ни одного CSV — проверять нечего")
+
+        oversized = []
+        for rel in tracked_csv:
+            size = (ROOT / rel).stat().st_size
+            if size > self.LIMIT_BYTES:
+                oversized.append(f"{rel} ({size / (1024 * 1024):.1f} МБ)")
+        self.assertEqual(
+            oversized, [],
+            "отслеживаемые CSV крупнее 2 МБ: снимком через export_results.py — "
+            + ", ".join(oversized),
+        )
 
 
 if __name__ == "__main__":

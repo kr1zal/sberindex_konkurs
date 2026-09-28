@@ -65,22 +65,27 @@ def export_one(source: Path) -> Path:
     из-за чего два экспорта одного и того же CSV давали бы разные байты снимка.
     Пишет во временный файл и заменяет им цель только после того, как распакованные
     байты совпали с исходником, — атомарно (`os.replace`), чтобы битый снимок
-    не оставался на диске при обрыве или несовпадении."""
+    не оставался на диске при обрыве или несовпадении. Запись и проверка — внутри
+    `try`/`finally`: любое исключение по пути (диск, прерывание) не должно оставлять
+    `.tmp` рядом с целью — `finally` убирает его всегда, а после удачного `os.replace`
+    файла по этому имени уже нет, и удаление — no-op (`missing_ok=True`)."""
     data = source.read_bytes()
     target = Path(f"{source}.gz")
     tmp = target.with_name(target.name + ".tmp")
-    with open(tmp, "wb") as raw:
-        with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=COMPRESSLEVEL,
-                            mtime=0, filename="") as gz:
-            gz.write(data)
-    with gzip.open(tmp, "rb") as gz:
-        restored = gz.read()
-    if restored != data:
-        tmp.unlink()
-        raise ValueError(
-            f"{target}: распакованные байты снимка не совпали с {source} — не записан"
-        )
-    os.replace(tmp, target)
+    try:
+        with open(tmp, "wb") as raw:
+            with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=COMPRESSLEVEL,
+                                mtime=0, filename="") as gz:
+                gz.write(data)
+        with gzip.open(tmp, "rb") as gz:
+            restored = gz.read()
+        if restored != data:
+            raise ValueError(
+                f"{target}: распакованные байты снимка не совпали с {source} — не записан"
+            )
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
     return target
 
 
