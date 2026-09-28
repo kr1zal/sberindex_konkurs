@@ -59,6 +59,9 @@ const MONTH_NOM = ["январь", "февраль", "март", "апрель",
                     "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
 const MONTH_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня",
                     "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+// Предложный падеж («в январе») — как _MONTH_IN в report/report.qmd.
+const MONTH_PREP = ["январе", "феврале", "марте", "апреле", "мае", "июне",
+                     "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"];
 
 function parseYM(ym) {
   const [y, m] = ym.split("-").map(Number);
@@ -75,6 +78,11 @@ function monthGenYear(ym) {
   return `${MONTH_GEN[m - 1]} ${y}`;
 }
 
+function monthPrepYear(ym) {
+  const { y, m } = parseYM(ym);
+  return `${MONTH_PREP[m - 1]} ${y}`;
+}
+
 /** «февраль–март 2025» (один год) или «январь 2025» (from===to) — для таблиц и подписей,
  * не для оси графика (там короткие подписи — LineChart.formatMonthShort). */
 function monthRangeNom(fromYm, toYm) {
@@ -83,6 +91,23 @@ function monthRangeNom(fromYm, toYm) {
   const b = parseYM(toYm);
   if (a.y === b.y) return `${MONTH_NOM[a.m - 1]}–${MONTH_NOM[b.m - 1]} ${a.y}`;
   return `${monthNomYear(fromYm)} – ${monthNomYear(toYm)}`;
+}
+
+/** Короткая форма диапазона для тесных мест (узкие заголовки таблицы ошибок) —
+ * «апр–июн 2024», год один раз, месяцы — сокращения LineChart.formatMonthShort. */
+function monthRangeAxis(fromYm, toYm) {
+  if (fromYm === toYm) return LineChart.formatMonthShort(fromYm, true);
+  const a = parseYM(fromYm);
+  const b = parseYM(toYm);
+  return a.y === b.y
+    ? `${LineChart.formatMonthShort(fromYm, false)}–${LineChart.formatMonthShort(toYm, true)}`
+    : `${LineChart.formatMonthShort(fromYm, true)} – ${LineChart.formatMonthShort(toYm, true)}`;
+}
+
+/** «1, 3 и 6» — перечень чисел через запятую с «и» перед последним. */
+function andJoinRu(items) {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} и ${items[items.length - 1]}`;
 }
 
 function monthsBetweenInclusive(fromYm, toYm) {
@@ -97,32 +122,17 @@ function dateWordsFromISO(iso) {
 }
 
 // ---------------------------------------------------------------------------
-// Названия моделей и ролей, детектор изломов — короткие словари для текста.
-// MODEL_LABELS_FALLBACK совпадает со словарём MODEL_LABELS в scripts/build_site.py:
-// используется, только если forecast_rule сослался на модель вне пятёрки таблицы
-// ошибок (index.json.models) — держите их одинаковыми при правке текстов.
+// Роли моделей, детектор изломов — короткие словари для текста. Названия самих
+// моделей (полные, для второй, приглушённой строки) генератор кладёт прямо
+// в данные — models[].label и forecast_rule[].label (scripts/build_site.py,
+// словарь MODEL_LABELS) — второго, JS-словаря с тем же текстом не держим.
 // ---------------------------------------------------------------------------
 
-const MODEL_LABELS_FALLBACK = {
-  naive_last: "наивная: оставить как в прошлом месяце",
-  prophet: "эталон конкурса (Prophet по умолчанию)",
-  two_stage: "двухэтапная: одно число и разнос долями",
-  global_gbm: "панельная модель, без внешних источников",
-  global_gbm_cat: "панельная + доли категорий",
-  global_gbm_factor: "панельная + общий фактор",
-  global_gbm_stack: "панельная + категории рядами",
-  global_gbm_stack_factor: "панельная + фактор + категории рядами",
-  chronos_ft: "Chronos-Bolt, дообученный",
-};
-
-function modelLabel(modelId, models) {
-  const found = models.find((m) => m.id === modelId);
-  if (found) return found.label;
-  return MODEL_LABELS_FALLBACK[modelId] || modelId;
-}
-
-const ROLE_LABELS = {
-  reference: "эталон конкурса",
+// Короткая, первая строка ячейки таблицы ошибок — по роли, не по полному названию
+// модели (то — второй, приглушённой строкой, model.label). Roles.reference — всегда
+// prophet (см. build_site.py::_build_model_roles), поэтому «(Prophet)» — не догадка.
+const ROLE_SHORT_LABELS = {
+  reference: "эталон (Prophet)",
   naive: "наивная",
   recommended: "рекомендуемая панельная",
   best_mean: "лучшая по среднему",
@@ -131,8 +141,8 @@ const ROLE_LABELS = {
 
 // role — строка через «+» (see: models[].role в докстринге build_site.py), а не
 // список: одна модель может занимать несколько ролей сразу.
-function roleLabel(roleStr) {
-  return roleStr.split("+").map((r) => ROLE_LABELS[r] || r).join(" + ");
+function roleShortLabel(roleStr) {
+  return roleStr.split("+").map((r) => ROLE_SHORT_LABELS[r] || r).join(" + ");
 }
 
 // Как в отчёте (report/report.qmd :: _CP_DET / _CP_ON) — те же подписи для тех же
@@ -232,9 +242,13 @@ function pushMoParam(seriesId) {
 // ---------------------------------------------------------------------------
 
 function introText(index) {
+  // Ошибки моделей (таблица ниже) — на тестовых месяцах фолдов, а не на всей
+  // панели: ошибка меряется там, где есть факт, с которым сравнить прогноз фолда.
   const forecastYear = parseYM(index.forecast_months[0]).y;
-  const start = monthNomYear(index.panel_months[0]);
-  const end = monthNomYear(index.panel_months[index.panel_months.length - 1]);
+  const firstFold = index.folds[0];
+  const lastFold = index.folds[index.folds.length - 1];
+  const start = monthPrepYear(firstFold.test_from);
+  const end = monthPrepYear(lastFold.test_to);
   return `Прогноз потребительских расходов выбранного муниципального образования на ${forecastYear} год ` +
     `и то, как разные модели ошибались на нём в ${start} — ${end}.`;
 }
@@ -263,14 +277,36 @@ function noRegionExplanationText(seriesId) {
   return text;
 }
 
+/** forecast_rule мержит отрезки по паре (модель, горизонт) — у одной модели на
+ * нескольких горизонтах подряд получится несколько отрезков (см. пример в
+ * докстринге build_site.py). Для текста они группируются заново, уже только
+ * по модели, иначе одно и то же название повторяется в тексте по разу на горизонт. */
+function groupForecastRuleByModel(rule) {
+  const groups = [];
+  rule.forEach((seg) => {
+    const last = groups[groups.length - 1];
+    if (last && last.model === seg.model) {
+      last.to = seg.to;
+      last.horizons.push(seg.horizon);
+    } else {
+      groups.push({ model: seg.model, label: seg.label, from: seg.from, to: seg.to, horizons: [seg.horizon] });
+    }
+  });
+  return groups;
+}
+
 function forecastRuleText(index) {
   const forecastYear = parseYM(index.forecast_months[0]).y;
-  const parts = index.forecast_rule.map((seg) => {
-    const label = modelLabel(seg.model, index.models);
-    const range = seg.from === seg.to ? monthNomYear(seg.from) : monthRangeNom(seg.from, seg.to);
-    return `${range} — «${label}»`;
+  const groups = groupForecastRuleByModel(index.forecast_rule);
+  const parts = groups.map((g) => {
+    const range = g.from === g.to ? monthNomYear(g.from) : monthRangeNom(g.from, g.to);
+    const horizons = g.horizons.length === 1
+      ? `горизонт ${g.horizons[0]} мес.`
+      : `горизонты ${andJoinRu(g.horizons.map(String))} мес.`;
+    return `${range} — «${g.label}» (${horizons})`;
   });
-  return `Прогноз собран по нескольким горизонтам одной и той же модели: ${parts.join("; ")}. ` +
+  // Не «одна модель на всё» — сколько их на самом деле, видно по частям ниже.
+  return `Прогноз собран по нескольким горизонтам, не всегда одной моделью: ${parts.join("; ")}. ` +
     `Муниципальный разрез ${forecastYear} года СберИндекс ещё не опубликовал — прогноз по этому МО фактом не проверен.`;
 }
 
@@ -297,9 +333,11 @@ function aggregateLeadText(agg) {
 }
 
 function aggregateCaptionText(agg) {
-  return `История федерального ряда по ${monthGenYear(agg.origin)}, факт ${parseYM(agg.check.months[0]).y} года ` +
-    `поверх неё, прогноз первого этапа (модель «${agg.model}») от конца панели и два простых правила для сравнения. ` +
-    `Единица — ${agg.unit}.`;
+  // «по» в значении «включительно по» берёт тот же падеж, что «в» (винительный,
+  // у месяцев он совпадает с именительным) — не родительный, как после «от».
+  return `История федерального ряда по ${monthNomYear(agg.origin)}, факт ${parseYM(agg.check.months[0]).y} года ` +
+    `поверх неё, прогноз первого этапа (модель «${agg.model_label}») от конца панели и два простых правила ` +
+    `для сравнения. Единица — ${agg.unit}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -422,14 +460,24 @@ function renderErrorsTable(index, mo) {
   table.innerHTML = "";
   const nFolds = index.folds.length;
 
+  // Компактные подписи фолдов — общие для широких заголовков (две строки в <th>)
+  // и узких карточек (data-label каждой ячейки, см. demo.css): «апр–июн 2024».
+  const foldLabels = index.folds.map((fold) => monthRangeAxis(fold.test_from, fold.test_to));
+
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
   const thModel = document.createElement("th");
   thModel.textContent = "Модель";
   headRow.appendChild(thModel);
-  index.folds.forEach((fold) => {
+  index.folds.forEach((fold, i) => {
     const th = document.createElement("th");
-    th.textContent = `${monthRangeNom(fold.test_from, fold.test_to)} (обучение ${fold.train_months} мес.)`;
+    const monthsLine = document.createElement("span");
+    monthsLine.className = "fold-head-months";
+    monthsLine.textContent = foldLabels[i];
+    const trainLine = document.createElement("span");
+    trainLine.className = "fold-head-train";
+    trainLine.textContent = `обучение ${fold.train_months} мес.`;
+    th.append(monthsLine, trainLine);
     headRow.appendChild(th);
   });
   const thMean = document.createElement("th");
@@ -446,27 +494,39 @@ function renderErrorsTable(index, mo) {
     const tr = document.createElement("tr");
     const rowTh = document.createElement("th");
     rowTh.setAttribute("scope", "row");
-    rowTh.textContent = `${model.label} (${roleLabel(model.role)})`;
+    // Короткая роль — первой, жирной строкой; полное название модели — второй,
+    // приглушённой (на узком экране скрыта стилем, см. demo.css) — без прежнего
+    // дублирования, когда роль повторялась и в названии модели, и в скобках.
+    const primary = document.createElement("span");
+    primary.className = "role-primary";
+    primary.textContent = roleShortLabel(model.role);
+    const secondary = document.createElement("span");
+    secondary.className = "cell-sub role-desc";
+    secondary.textContent = model.label;
+    rowTh.append(primary, secondary);
     tr.appendChild(rowTh);
 
     const { perFold, mean } = means[model.id];
     const panelRow = panelMae[model.id] || [null, null, null, null];
 
     perFold.forEach((v, col) => {
-      tr.appendChild(errorCell(v, panelRow[col], v !== null && v === best[col]));
+      tr.appendChild(errorCell(v, panelRow[col], v !== null && v === best[col], foldLabels[col]));
     });
-    tr.appendChild(errorCell(mean, panelRow[3], mean !== null && mean === best[nFolds]));
+    tr.appendChild(errorCell(mean, panelRow[3], mean !== null && mean === best[nFolds], "Среднее"));
     tbody.appendChild(tr);
   });
   table.append(thead, tbody);
 }
 
-function errorCell(value, panelValue, isBest) {
+function errorCell(value, panelValue, isBest, narrowLabel) {
   const td = document.createElement("td");
   const classes = [];
   if (isBest) classes.push("cell-best");
   if (value === null) classes.push("cell-dash");
   if (classes.length) td.className = classes.join(" ");
+  // На узком экране таблица становится карточками (demo.css): data-label — это
+  // подпись столбца у ячейки, которую иначе показывал бы скрытый <thead>.
+  td.dataset.label = narrowLabel;
   td.textContent = value === null ? "—" : rubFmt(value);
   const sub = document.createElement("span");
   sub.className = "cell-sub";
@@ -524,13 +584,16 @@ function buildAggregateChartSpec(agg, legendEl) {
 }
 
 function renderAggregateTable(agg) {
+  // Как в таблице отчёта (report/report.qmd, ~2148-2163): факт и прогноз целыми
+  // (rub), ошибка — только в процентах (свой знак у каждой из трёх), без рублёвого
+  // разноса и рублёвой средней ошибки — они здесь ничего не добавляют к процентам.
   const table = document.getElementById("agg-table");
   table.innerHTML = "";
 
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
   [
-    "Месяц", "Факт", "Прогноз", "Ошибка", "Ошибка, %",
+    "Месяц", "Факт", "Прогноз", "Ошибка, %",
     `«${agg.rule_names.naive}», %`, `«${agg.rule_names.seasonal_naive}», %`,
   ].forEach((text) => {
     const th = document.createElement("th");
@@ -540,22 +603,15 @@ function renderAggregateTable(agg) {
   thead.appendChild(headRow);
 
   const tbody = document.createElement("tbody");
-  let sumAbsError = 0;
   agg.check.months.forEach((ym, i) => {
-    const actual = agg.check.actual[i];
-    const forecast = agg.check.forecast.two_stage[i];
-    const error = forecast - actual;
-    sumAbsError += Math.abs(error);
-
     const tr = document.createElement("tr");
     const rowTh = document.createElement("th");
     rowTh.setAttribute("scope", "row");
     rowTh.textContent = LineChart.formatMonthShort(ym, true);
     tr.appendChild(rowTh);
     [
-      numFmt(actual, 2),
-      numFmt(forecast, 2),
-      numFmt(error, 2, { sign: true }),
+      rubFmt(agg.check.actual[i]),
+      rubFmt(agg.check.forecast.two_stage[i]),
       pctFmt(agg.check.error_pct.two_stage[i], { sign: true }),
       pctFmt(agg.check.error_pct.naive[i], { sign: true }),
       pctFmt(agg.check.error_pct.seasonal_naive[i], { sign: true }),
@@ -570,7 +626,6 @@ function renderAggregateTable(agg) {
   tr.appendChild(rowTh);
   [
     "—", "—",
-    numFmt(sumAbsError / agg.check.months.length, 2),
     pctFmt(agg.mape.two_stage), pctFmt(agg.mape.naive), pctFmt(agg.mape.seasonal_naive),
   ].forEach((text) => appendDataCell(tr, text));
   tbody.appendChild(tr);

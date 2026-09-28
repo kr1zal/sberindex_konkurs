@@ -384,3 +384,99 @@ table.data-table tbody tr:last-child td {
 .cell-dash {
   color: var(--ink-soft);
 }
+
+/* Заголовок модели в таблице ошибок: короткая роль жирным, полное название модели —
+   строкой ниже, приглушённой (переиспользует .cell-sub) — скрыта на узком экране,
+   там на счету каждый миллиметр строки. */
+.role-primary {
+  display: block;
+  font-weight: 600;
+}
+
+/* Заголовок фолда: месяцы теста и длина обучения — двумя строками, а не одной
+   длинной («апрель–июнь 2024 (обучение 15 мес.)» не помещается ни в одну колонку
+   таблицы на телефоне). */
+.fold-head-months {
+  display: block;
+}
+
+.fold-head-train {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78em;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
+/* -- таблица ошибок на телефоне: карточка на модель, значения — сеткой 2×2 ---
+   Пять узких колонок (модель + 3 фолда + среднее) не помещаются без прокрутки
+   даже с компактными заголовками — вместо неё каждая строка таблицы становится
+   отдельным блоком, а тело <thead> — подписью каждой ячейки (data-label). */
+@media (max-width: 479px) {
+  /* Тоньше поля у всех таблиц — освобождает пиксели там, где считает каждый:
+     первые четыре колонки агрегата (месяц/факт/прогноз/ошибка %) должны влезать
+     без прокрутки, а с полем 0.7rem с каждой стороны им не хватало ~1-2px. */
+  table.data-table th, table.data-table td {
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+  }
+
+  .role-desc {
+    display: none;
+  }
+
+  #errors-table {
+    min-width: 0;
+  }
+
+  #errors-table, #errors-table thead, #errors-table tbody,
+  #errors-table tr, #errors-table th, #errors-table td {
+    display: block;
+    width: auto;
+  }
+
+  #errors-table thead {
+    display: none;
+  }
+
+  #errors-table tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 0.6rem;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.6rem 0.7rem;
+    margin: 0.6rem 0;
+  }
+
+  #errors-table tbody tr:first-child {
+    margin-top: 0;
+  }
+
+  #errors-table tbody th[scope="row"] {
+    grid-column: 1 / -1;
+    text-align: left;
+    white-space: normal;
+    border-bottom: 1px solid var(--rule);
+    padding: 0 0 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+
+  #errors-table tbody td {
+    border-bottom: none;
+    padding: 0.3rem 0;
+  }
+
+  #errors-table .cell-best {
+    border-left: none;
+    padding-left: 0;
+  }
+
+  #errors-table tbody td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.72em;
+    color: var(--ink-soft);
+    margin-bottom: 0.1rem;
+  }
+}
