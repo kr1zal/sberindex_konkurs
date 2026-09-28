@@ -9,8 +9,18 @@ statsmodels>=0.14
 tabulate>=0.9
 matplotlib>=3.8
 
+# Справочник МО СберИндекса — xlsx: src/regions.py читает его через pandas.read_excel,
+# а без openpyxl тот падает — и прогон run.py, и сборка отчёта.
+openpyxl>=3.1
+
 # Нужен только скриптам выкачки новостей (scripts/crawl_news.py, scripts/fetch_bodies.py)
 requests>=2.31
+
+# Сборка отчёта и слайдов: Quarto исполняет python-чанки через Jupyter,
+# без ядра он сообщает «Jupyter is not available in this Python installation».
+ipykernel>=6.29
+nbclient>=0.10
+nbformat>=5.10
 
 # Фундаментальные модели. Chronos и TimesFM ставятся обычным образом.
 chronos-forecasting>=2.3
