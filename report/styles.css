@@ -10,3 +10,21 @@ figure img,
 .cell-output-display {
   overflow-x: visible;
 }
+/* Печать (report.pdf): `pre` по умолчанию не переносится, и блок команд
+   «Воспроизводимости» обрезался справа шириной страницы — на экране это
+   незаметно, скролл есть, поэтому правило только для печати. */
+@media print {
+  pre,
+  pre code {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+/* Печать по умолчанию — Letter (движок Chrome/Quarto); подача — на A4.
+   slides.qmd этот файл не подключает (revealjs со своим форматом печати),
+   поэтому размер страницы слайдов остаётся прежним. */
+@media print {
+  @page {
+    size: A4;
+  }
+}
