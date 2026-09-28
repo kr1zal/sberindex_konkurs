@@ -130,8 +130,9 @@ y = wide["городской округ город Орёл"].to_numpy(float)
 rows = {}
 for label, kw in [("Prophet с годовой насильно", dict(yearly_seasonality=True)),
                   ("Prophet по умолчанию", {})]:
-    rows[label] = np.round(ProphetModel(**kw).set_index(wide.index).fit(y[:15]).predict(3))
-rows["факт"] = np.round(y[15:18])
+    rows[label] = np.round(ProphetModel(**kw).set_index(wide.index)
+                           .fit(y[:_full_folds[0].train_end]).predict(_full_cfg["split"]["horizon"]))
+rows["факт"] = np.round(y[_full_folds[0].train_end:_full_folds[0].train_end + _full_cfg["split"]["horizon"]])
 from src import charts
 _fig = charts.prophet_failure(wide, "городской округ город Орёл", rows["Prophet с годовой насильно"], rows["Prophet по умолчанию"])
 _ax = _fig.axes[0]
@@ -152,7 +153,7 @@ _fig.tight_layout()
 plt.show()
 ```
 
-Годовая сезонность на 15 точках не идентифицируется — **прогноз уходит
+Годовая сезонность на `{python} Markdown(str(_full_folds[0].train_end))` точках не идентифицируется — **прогноз уходит
 в отрицательные значения**. Prophet предупреждает об этом сам.
 
 ```{python}
@@ -369,9 +370,8 @@ Markdown(
 ```
 
 Сезонно сглаженный агрегат не годится: сглаживание вычищает именно ту сезонность,
-которую разнос делит между муниципалитетами, — январь и декабрь у сырого агрегата и у самой
-панели расходятся на десятки процентных пунктов, у сглаженного разница на порядок меньше.
-Внутренний бэктест выбирает на нём `random_walk`.
+которую разнос делит между муниципалитетами, и доля перестаёт быть устойчивой. Внутренний
+бэктест выбирает на нём `random_walk`.
 
 ## Пять горизонтов: от наукаста до года {.smaller}
 
@@ -393,7 +393,10 @@ for _m, _label in _hz_rows.items():
     _cells = []
     for _h in _hw.columns:
         _v = _hw.loc[_m, _h]
-        _cell = "нет примеров" if not np.isfinite(_v) else _num(_v, 0)
+        # NaN у модели из файла — отказ (нет обучающих примеров); модели нет в файле вовсе —
+        # её нет в configs/horizons.yaml, и горизонты для неё не считались.
+        _cell = (_num(_v, 0) if np.isfinite(_v) else
+                 "нет примеров" if _m in set(_hz["model"]) else "не считалась")
         _cells.append(f"**{_cell}**" if _m == _hbest[_h] else _cell)
     _name = f"**{_label}**" if _m == _sum["MAE"].idxmin() else _label
     _hlines.append(f"| {_name} | " + " | ".join(_cells) + " |")
@@ -1086,13 +1089,19 @@ _ccl.append(f"**Агрегат на факте {pd.Period(_fc_cfg['origin'], 'M'
             f"{_ccl_rng(_ccl_own.min(), _ccl_own.max())}% против "
             f"{_ccl_rng(_ccl_rules.min(), _ccl_rules.max())}% у простых правил.")
 _ccl_sw = _sw.set_index("обучение, мес")["базовая"]
-_ccl.append(f"**Закон переноса:** корреляция выигрыша с длиной обучения {_num(_sw_rho, 2)}; базовая модель "
-            f"при {_ccl_sw.index.max()} мес. точнее, чем при {_ccl_sw.index.min()}, в "
+# Выигрыш в файле — «конструкция минус базовая»: без чисел на краях «корреляция выигрыша
+# с длиной» читалась бы наоборот, поэтому, как в резюме, — края развёртки.
+_ccl_g = (_sw.set_index("обучение, мес")[_sw_col] - _ccl_sw)
+_ccl_gs = lambda g: (f"снимает {_num(-g, 0)} ₽" if g < 0 else f"добавляет {_num(g, 0)} ₽")
+_ccl.append(f"**Закон переноса:** при {_ccl_sw.index.min()} мес. обучения перенос "
+            f"{_ccl_gs(_ccl_g.loc[_ccl_sw.index.min()])}, при {_ccl_sw.index.max()} — "
+            f"{_ccl_gs(_ccl_g.loc[_ccl_sw.index.max()])} (корреляция с длиной {_num(_sw_rho, 2)}); "
+            f"базовая модель при {_ccl_sw.index.max()} мес. точнее, чем при {_ccl_sw.index.min()}, в "
             f"{_num(_ccl_sw.loc[_ccl_sw.index.min()] / _ccl_sw.loc[_ccl_sw.index.max()], 1)} раза.")
 if "prophet_forced_yearly" in _sum.index:
     _ccl.append(f"**Ловушка:** насильная годовая сезонность — MAE {_num(_sum.loc['prophet_forced_yearly', 'MAE'], 0)} ₽ "
                 f"вместо {_num(_sum.loc['prophet', 'MAE'], 0)} ₽ у Prophet по умолчанию.")
-_ccl.append(f"**Фундаментальные:** без дообучения "
+_ccl.append(f"**Фундаментальные:** без дообучения на {_full_cfg['split']['horizon']} мес. в среднем "
             + ("хуже наивной" if (_loss > 0).all() else "в лучшем случае на уровне наивной")
             + f", дообученный Chronos — {_num(_ftm, 0)} против {_num(_sum.loc['naive_last', 'MAE'], 0)} ₽ у неё.")
 _ccl.append(f"**Новости:** на наукасте ошибка "
@@ -1109,11 +1118,11 @@ _ccl_prng = lambda v: (_cp_pct(min(v)) if round(min(v), 1) == round(max(v), 1)
 _ccl_cross = [e for e in _cp_events if isinstance(_cp_EV.loc[(_cp_sel, e), "crossed_month"], str)]
 _ccl_no_early = not _ccl_cross or all(_cp_dec(_cp_sel, e) for e in _ccl_cross)
 _ccl.append(
-    ("**Изломы:** решает преобразование — ложных " if _cp_thesis else
-     "**Изломы:** преобразование решает не всё — ложных ")
+    ("**Изломы:** решает преобразование — у методов со штрафом ложных " if _cp_thesis else
+     "**Изломы:** преобразование решает не всё — у методов со штрафом ложных ")
     + f"{_ccl_prng(_ccl_raw)} на сырых рядах, {_ccl_prng(_ccl_rat)} на темпах роста; уровень "
     + ("скромный" if _cp_S.loc[(_cp_det, _cp_mode), "J Юдена"] < 20 else "заметный")
-    + (", раннего предупреждения нет." if _ccl_no_early else "."))
+    + (", раннего предупреждения не показано." if _ccl_no_early else "."))
 Markdown("\n".join(f"- {line}" for line in _ccl))
 ```
 
@@ -1131,8 +1140,10 @@ _gbf = _pf.loc["global_gbm"]
 Markdown(
     f"**Главный практический вывод.** Три дополнительных месяца истории меняют качество "
     f"прогноза сильнее, чем переход от наивной модели к градиентному бустингу: на фолдах "
-    f"с обучением 18 и 21 точка MAE базовой панельной модели в среднем "
-    f"{_num(_gbf.drop(index=0).mean(), 0)}, на фолде с 15 точками — {_num(_gbf[0], 0)}."
+    f"с обучением {_and_join(f.train_end for f in _full_folds[1:])} "
+    f"{_plural(_full_folds[-1].train_end, 'точка', 'точки', 'точек')} MAE базовой панельной модели "
+    f"в среднем {_num(_gbf.drop(index=0).mean(), 0)}, на фолде с {_full_folds[0].train_end} точками — "
+    f"{_num(_gbf[0], 0)}."
 )
 ```
 
