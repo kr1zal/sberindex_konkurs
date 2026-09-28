@@ -1,8 +1,8 @@
 # Прогнозирование потребительских расходов муниципальных образований
 
-**Отчёт** — [на GitHub Pages](https://kr1zal.github.io/sberindex-forecast-2026/report/report.html)
+**Отчёт** — [на GitHub Pages](https://kr1zal.github.io/sberindex_konkurs/report/report.html)
 и [в PDF](report/report.pdf) · **слайды** —
-[на GitHub Pages](https://kr1zal.github.io/sberindex-forecast-2026/report/slides.html)
+[на GitHub Pages](https://kr1zal.github.io/sberindex_konkurs/report/slides.html)
 и [в PDF](report/slides.pdf) · **прогноз на 2025 год** по муниципальным образованиям —
 [`results/forecast_2025.csv.gz`](results/forecast_2025.csv.gz).
 
