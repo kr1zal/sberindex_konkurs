@@ -65,6 +65,15 @@ class ExportOneTest(unittest.TestCase):
         self.assertEqual(list(self.dir.glob("*.tmp")), [])
         self.assertFalse((self.dir / "per_series.csv.gz").exists())  # цель тоже не подменена мусором
 
+    def test_temp_file_is_removed_when_write_fails(self):
+        # Сбой посреди записи (диск кончился) — до сверки дело не доходит, и без try/finally
+        # вокруг записи недописанный .tmp оставался рядом с целью: предыдущий тест этого не ловит.
+        with mock.patch.object(export_results.gzip.GzipFile, "write", side_effect=OSError("диск")):
+            with self.assertRaises(OSError):
+                export_results.export_one(self.source)
+        self.assertEqual(list(self.dir.glob("*.tmp")), [])
+        self.assertFalse((self.dir / "per_series.csv.gz").exists())
+
     def test_gzip_header_has_no_filename_and_zero_mtime(self):
         # RFC 1952: байт 3 — флаги (бит 0x08 = FNAME), байты 4..7 — MTIME.
         # Оба должны быть пустыми, иначе два экспорта расходятся байтами без причины в данных.
