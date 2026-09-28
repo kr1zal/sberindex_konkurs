@@ -349,6 +349,13 @@ def merge_results(per_path: Path, fresh: pd.DataFrame, *, stamp: str) -> pd.Data
     бы в итоговой таблице только последнюю партию. Строки моделей партии заменяются
     новыми — повторный прогон обновляет, а не дублирует.
 
+    «Предыдущие результаты» читаются через `read_results` (`resolve_results`), а не
+    по `per_path.exists()`: на чистом клоне обычного файла ещё нет, есть только снимок
+    `<per_path>.gz`, и партия из одной-двух моделей должна слиться с ним, а не лечь
+    в файл одна — иначе файл остался бы с этой партией в одиночестве, а отчёт молча
+    потерял бы все остальные модели снимка. `FileNotFoundError` (нет ни файла, ни
+    снимка — первый прогон вообще) — единственный случай, когда мержить не с чем.
+
     Замена честна, только если партия считана на тех же рядах и тех же номерах
     фолдов, что весь файл (сверка по номерам, не по границам обучения `train_end` —
     предел описан в `results_guard.check_same_panel`): сверка идёт до отбрасывания
@@ -361,8 +368,11 @@ def merge_results(per_path: Path, fresh: pd.DataFrame, *, stamp: str) -> pd.Data
     рядом с файлом (`save_realization`). `stamp` — один на вызов `main`.
     """
     merged = fresh
-    if per_path.exists():
+    try:
         previous = read_results(per_path)
+    except FileNotFoundError:
+        previous = None
+    if previous is not None:
         check_same_panel(previous, fresh, path=per_path)
         replaced = previous["model"].isin(fresh["model"].unique())
         for model, rows in previous.loc[replaced].groupby("model"):
@@ -400,10 +410,16 @@ def main() -> int:
     out_dir = ROOT / cfg["output"]["dir"]
     per_path = out_dir / "per_series.csv"
     stamp = realization_stamp()  # один на вызов: снимки заменённых строк партии — под одним именем
-    if per_path.exists():
-        # Перед записью партия сверяется с файлом ещё раз, но там несовпадение
-        # всплывает, когда часы счёта уже потрачены, а результаты некуда деть.
-        check_plan(read_results(per_path), wide.columns, [f.index for f in folds], path=per_path)
+    # Сверка нужна и на чистом клоне, где обычного файла ещё нет, а есть только снимок
+    # `.gz` (per_path.exists() его не увидел бы) — read_results находит его сам через
+    # resolve_results; FileNotFoundError (нет ни файла, ни снимка) — план сверять не с чем.
+    try:
+        previous_plan = read_results(per_path)
+    except FileNotFoundError:
+        previous_plan = pd.DataFrame()
+    # Перед записью партия сверяется с файлом ещё раз, но там несовпадение
+    # всплывает, когда часы счёта уже потрачены, а результаты некуда деть.
+    check_plan(previous_plan, wide.columns, [f.index for f in folds], path=per_path)
 
     workers = int(cfg.get("compute", {}).get("workers", 0)) or max(1, (os.cpu_count() or 2) - 1)
     print(f"параллельно процессов: {workers}\n")

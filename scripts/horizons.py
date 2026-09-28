@@ -189,6 +189,15 @@ def merge_into(
     отказавшей на всех фолдах горизонта, кадр шагов пуст, и её старые шаги иначе
     остались бы в файле рядом с одними отказами в файле по рядам.
 
+    Прежние строки читаются через `read_results` (`resolve_results`), а не по
+    `path.exists()`: у файла по рядам (`horizons_per_series.csv`) есть снимок `.gz`,
+    и на чистом клоне партия из одной пары модель × горизонт должна слиться с ним,
+    а не лечь в файл одна — иначе файл остался бы с этой парой в одиночестве, а отчёт
+    молча потерял бы остальные пары снимка. У файла шагов (`horizons_steps.csv`)
+    снимка нет, и для него `FileNotFoundError` срабатывает ровно как прежний
+    `.exists()`: пустой кадр без строк не пишется, кадр с данными ложится первым
+    файлом.
+
     `same_panel` — до записи сверить ряды и номера фолдов партии со всем файлом
     (`src.results_guard.check_same_panel`; сверка по номерам, не по границам обучения
     `train_end` — предел описан там же); при несовпадении файл не меняется.
@@ -203,11 +212,12 @@ def merge_into(
     только для файла по рядам: реализации сравниваются по строкам ряд × фолд, и файл
     шагов не снимается.
     """
-    if not path.exists():
+    try:
+        previous = read_results(path)
+    except FileNotFoundError:
         if not fresh.empty:
             fresh.to_csv(path, index=False)
         return  # пустой кадр без колонок записался бы файлом, который потом не читается
-    previous = read_results(path)
     if same_panel:
         check_same_panel(previous, fresh, path=path)
     keys = list(replace)
@@ -310,11 +320,17 @@ def main() -> int:
     per_path = out_dir / f"{prefix}_per_series.csv"
     steps_path = out_dir / f"{prefix}_steps.csv"
     stamp = realization_stamp()  # один на вызов main: снимки всех пар партии — под одним именем
-    if per_path.exists():
-        # Перед каждой записью партия сверяется с файлом ещё раз (merge_into), но там
-        # несовпадение всплывает, когда первая пара модель × горизонт уже посчитана.
-        plan_folds = {horizon: [f.index for f in folds] for horizon, folds in plan}
-        check_plan(read_results(per_path), wide.columns, plan_folds, path=per_path)
+    # Сверка нужна и на чистом клоне, где обычного файла ещё нет, а есть только снимок
+    # `.gz` (per_path.exists() его не увидел бы) — read_results находит его сам через
+    # resolve_results; FileNotFoundError (нет ни файла, ни снимка) — план сверять не с чем.
+    try:
+        previous_plan = read_results(per_path)
+    except FileNotFoundError:
+        previous_plan = pd.DataFrame()
+    # Перед каждой записью партия сверяется с файлом ещё раз (merge_into), но там
+    # несовпадение всплывает, когда первая пара модель × горизонт уже посчитана.
+    plan_folds = {horizon: [f.index for f in folds] for horizon, folds in plan}
+    check_plan(previous_plan, wide.columns, plan_folds, path=per_path)
 
     for name in names:
         for horizon, folds in plan:

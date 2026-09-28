@@ -157,6 +157,47 @@ class MergeIntoTest(unittest.TestCase):
         self.assertFalse((self.dir / "realizations").exists())
 
 
+class MergeIntoFromSnapshotTest(unittest.TestCase):
+    """I1: на чистом клоне обычного `horizons_per_series.csv` нет, есть только его
+    `.csv.gz` (`scripts/export_results.py`). `merge_into` должен слить партию со
+    снимком, а не лечь в файл в одиночестве — иначе пересчёт сводок горизонтов молча
+    теряет все пары модель × горизонт, которых не было в партии."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.path = self.dir / "horizons_per_series.csv"
+        self.gz = self.dir / "horizons_per_series.csv.gz"
+
+    def test_batch_of_one_pair_keeps_the_rest_of_the_snapshot(self):
+        # Ровно инцидент I1: партия из одной пары на клоне с одним .csv.gz.
+        pd.concat([per_series("m", 3, [0, 1, 2]), per_series("other", 3, [0, 1, 2], mae=5.0)],
+                  ignore_index=True).to_csv(self.gz, index=False, compression="gzip")
+        horizons.merge_into(self.path, per_series("m", 3, [0, 1, 2], mae=2.0), PAIR, same_panel=True)
+        self.assertTrue(self.path.exists())  # обычный CSV появился и сразу полный
+        after = pd.read_csv(self.path)
+        self.assertEqual(pairs(after), [("m", 3), ("other", 3)])
+        self.assertEqual(after.loc[after["model"] == "m", "mae"].unique().tolist(), [2.0])
+        self.assertEqual(after.loc[after["model"] == "other", "mae"].unique().tolist(), [5.0])
+
+    def test_new_pair_is_added_next_to_the_whole_snapshot(self):
+        per_series("other", 3, [0, 1, 2]).to_csv(self.gz, index=False, compression="gzip")
+        horizons.merge_into(self.path, per_series("m", 3, [0, 1, 2]), PAIR, same_panel=True)
+        after = pd.read_csv(self.path)
+        self.assertEqual(pairs(after), [("m", 3), ("other", 3)])
+
+    def test_batch_on_other_series_is_rejected_against_the_snapshot(self):
+        # Сверка (check_same_panel) срабатывает против снимка, не только против
+        # обычного файла: партия на подмножестве рядов отклоняется так же.
+        per_series("m", 3, [0, 1, 2]).to_csv(self.gz, index=False, compression="gzip")
+        fresh = per_series("m", 3, [0, 1, 2], series=SERIES[:2], mae=2.0)
+        with self.assertRaises(ValueError):
+            horizons.merge_into(self.path, fresh, PAIR, same_panel=True, stamp=STAMP)
+        self.assertFalse(self.path.exists())  # партия отклонена — обычный файл не создан
+        self.assertFalse((self.dir / "realizations").exists())
+
+
 class _Silent:
     """Модель, падающая исключением без текста: так падает голый `assert` в библиотеке."""
 
@@ -444,6 +485,38 @@ class MainTest(unittest.TestCase):
         series.assert_not_called()
         panel.assert_not_called()
         self.assertEqual(self.per_path.read_bytes(), before)
+
+    def test_plan_check_works_against_gz_snapshot_when_plain_csv_is_missing(self):
+        # I1: на чистом клоне обычного файла нет, есть только horizons_per_series.csv.gz —
+        # сверка плана должна сработать против него, а не молча пропуститься.
+        five = [f"мо_{i}" for i in range(5)]
+        gz_path = self.per_path.with_name(self.per_path.name + ".gz")
+        pd.concat([per_series("naive_last", 3, [0, 1, 2], series=five, mae=999.0),
+                   per_series("drift", 3, [0, 1, 2], series=five, mae=5.0)],
+                  ignore_index=True).to_csv(gz_path, index=False, compression="gzip")
+        series, panel = mock.Mock(side_effect=_model_started), mock.Mock(side_effect=_model_started)
+        with self.assertRaises(ValueError) as caught:
+            run_main(self.root, H3, matrix(five[:3]),
+                     evaluate_series_models=series, evaluate_panel_model=panel)
+        self.assertIn("модели не запускались", str(caught.exception))
+        series.assert_not_called()
+        panel.assert_not_called()
+        self.assertFalse(self.per_path.exists())  # план отклонён — обычный файл не появился
+
+    def test_batch_merges_with_gz_snapshot_when_plain_csv_is_missing(self):
+        # Тот же инцидент целиком через main(): пересчёт сводок горизонтов не должен
+        # потерять drift, которого не было в партии, только потому что обычного файла
+        # ещё нет — есть только снимок.
+        gz_path = self.per_path.with_name(self.per_path.name + ".gz")
+        pd.concat([per_series("naive_last", 3, [0, 1, 2], mae=999.0),
+                   per_series("drift", 3, [0, 1, 2], mae=5.0)],
+                  ignore_index=True).to_csv(gz_path, index=False, compression="gzip")
+        run_main(self.root, H3, matrix(SERIES))
+        self.assertTrue(self.per_path.exists())
+        on_disk = pd.read_csv(self.per_path)
+        self.assertEqual(pairs(on_disk), [("drift", 3), ("naive_last", 3)])
+        self.assertFalse((on_disk.loc[on_disk["model"] == "naive_last", "mae"] == 999.0).any())
+        self.assertEqual(on_disk.loc[on_disk["model"] == "drift", "mae"].unique().tolist(), [5.0])
 
     def test_merges_existing_and_new_horizon_and_writes_steps(self):
         self.write_files(SERIES)

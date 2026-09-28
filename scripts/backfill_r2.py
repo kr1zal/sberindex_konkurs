@@ -327,10 +327,15 @@ def main() -> int:
     h_per_path = h_dir / f"{prefix}_per_series.csv"
     h_paths = {"summary": h_dir / f"{prefix}_summary.csv", "folds": h_dir / f"{prefix}_folds.csv"}
     h_tables, missing = {}, []
-    if h_per_path.exists():
+    try:
         # Тем же чтением, что в scripts/horizons.py::main: сводка горизонтов
-        # пересчитывается из тех же чисел, из которых её считает прогон.
+        # пересчитывается из тех же чисел, из которых её считает прогон — обычного
+        # файла может не быть на чистом клоне, есть только снимок `.gz`
+        # (read_results находит его через resolve_results, а не через `.exists()`).
         h_per = read_results(h_per_path)
+    except FileNotFoundError:
+        h_per = None
+    if h_per is not None:
         missing = [column for column in ("r2", *PARTS) if column not in h_per.columns]
         by_fold, by_horizon = horizons.summarise(h_per)
         h_tables = {"summary": (by_horizon, ["horizon", "model"]),

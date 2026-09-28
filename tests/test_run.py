@@ -321,6 +321,52 @@ class MergeResultsTest(unittest.TestCase):
         self.assertEqual(len(merged), len(on_disk))
 
 
+class MergeResultsFromSnapshotTest(unittest.TestCase):
+    """I1: частичный прогон на чистом клоне, где обычного файла нет — есть только
+    `.csv.gz` (`scripts/export_results.py`). `merge_results` должен слить партию со
+    снимком, а не лечь в файл в одиночестве: иначе `summary.csv` и отчёт молча теряют
+    все модели, которых не было в партии."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / "per_series.csv"
+        self.gz = Path(tmp.name) / "per_series.csv.gz"
+        self.snapshots = Path(tmp.name) / "realizations"
+        frame(["naive_last", "drift"], SERIES).to_csv(self.gz, index=False, compression="gzip")
+
+    def merge(self, fresh: pd.DataFrame) -> pd.DataFrame:
+        with contextlib.redirect_stdout(io.StringIO()):  # путь снимка реализации печатается
+            return run.merge_results(self.path, fresh, stamp=STAMP)
+
+    def test_batch_of_one_model_keeps_the_rest_of_the_snapshot(self):
+        # Ровно инцидент I1: --models naive_last на клоне с одним per_series.csv.gz.
+        merged = self.merge(frame(["naive_last"], SERIES, mae=2.0))
+        self.assertEqual(set(merged["model"].unique()), {"naive_last", "drift"})
+        self.assertTrue(self.path.exists())  # обычный CSV появился и сразу полный
+        on_disk = read_results(self.path)
+        self.assertEqual(set(on_disk["model"].unique()), {"naive_last", "drift"})
+        self.assertEqual(on_disk.loc[on_disk["model"] == "naive_last", "mae"].unique().tolist(), [2.0])
+        self.assertEqual(on_disk.loc[on_disk["model"] == "drift", "mae"].unique().tolist(), [1.0])
+        # Прежние строки naive_last пришли из снимка — снимок реализации всё равно снят.
+        self.assertEqual(sorted(p.name for p in self.snapshots.iterdir()), [f"naive_last__{STAMP}.csv"])
+
+    def test_new_model_is_added_next_to_the_whole_snapshot(self):
+        merged = self.merge(frame(["theta"], SERIES, mae=3.0))
+        self.assertEqual(set(merged["model"].unique()), {"naive_last", "drift", "theta"})
+        on_disk = read_results(self.path)
+        self.assertEqual(len(on_disk), 3 * len(SERIES) * 3)
+        self.assertFalse(self.snapshots.exists())  # модели раньше не было — снимать нечего
+
+    def test_batch_on_other_series_is_rejected_against_the_snapshot(self):
+        # Сверка партии (check_same_panel) срабатывает против снимка, не только
+        # против обычного файла: партия на подмножестве рядов отклоняется так же.
+        with self.assertRaises(ValueError) as caught:
+            self.merge(frame(["naive_last"], SERIES[:3], mae=2.0))
+        self.assertIn("другое множество рядов", str(caught.exception))
+        self.assertFalse(self.path.exists())  # партия отклонена — обычный файл не создан
+
+
 class _Report:
     def as_text(self) -> str:
         return ""
@@ -381,6 +427,34 @@ class MainTest(unittest.TestCase):
         evaluate.assert_not_called()
         panel.assert_not_called()
         self.assertEqual(digest(self.per_path), before)
+
+    def test_plan_check_works_against_gz_snapshot_when_plain_csv_is_missing(self):
+        # I1: на чистом клоне обычного файла нет, есть только per_series.csv.gz —
+        # сверка плана должна сработать против него, а не молча пропуститься.
+        gz_path = self.per_path.with_name(self.per_path.name + ".gz")
+        frame(["naive_last", "drift"], SERIES).to_csv(gz_path, index=False, compression="gzip")
+        evaluate, panel = mock.Mock(side_effect=_model_started), mock.Mock(side_effect=_model_started)
+        with self.assertRaises(ValueError) as caught:
+            run_main(self.root, ["naive_last"], matrix(SERIES[:3]),
+                     evaluate=evaluate, evaluate_global=panel)
+        self.assertIn("модели не запускались", str(caught.exception))
+        evaluate.assert_not_called()
+        panel.assert_not_called()
+        self.assertFalse(self.per_path.exists())  # план отклонён — обычный файл не появился
+
+    def test_batch_merges_with_gz_snapshot_when_plain_csv_is_missing(self):
+        # Тот же инцидент целиком через main(): summary.csv не должен потерять drift,
+        # которого не было в партии, только потому что обычного файла ещё нет.
+        gz_path = self.per_path.with_name(self.per_path.name + ".gz")
+        frame(["naive_last", "drift"], SERIES[:3], mae=999.0).to_csv(gz_path, index=False, compression="gzip")
+        run_main(self.root, ["naive_last"], matrix(SERIES[:3]))
+        self.assertTrue(self.per_path.exists())
+        on_disk = pd.read_csv(self.per_path)
+        self.assertEqual(set(on_disk["model"].unique()), {"naive_last", "drift"})
+        self.assertFalse((on_disk.loc[on_disk["model"] == "naive_last", "mae"] == 999.0).any())
+        self.assertEqual(on_disk.loc[on_disk["model"] == "drift", "mae"].unique().tolist(), [999.0])
+        summary = pd.read_csv(self.root / "results" / "summary.csv", index_col=0)
+        self.assertEqual(set(summary.index), {"naive_last", "drift"})  # сводка не потеряла drift
 
     def test_batch_replaces_its_models_keeps_the_rest_and_writes_summary(self):
         frame(["naive_last"], SERIES[:3], mae=999.0).to_csv(self.per_path, index=False)
