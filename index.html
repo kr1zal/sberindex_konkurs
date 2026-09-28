@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прогнозирование потребительских расходов муниципальных образований</title>
+<meta name="description" content="Конкурс СберИндекса, направление «Прогнозирование»: прогноз потребительских расходов 2 028 муниципальных образований России и разладки в них — отчёт, код и демонстрационный стенд.">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="site/site.css">
+</head>
+<body>
+<main class="page">
+
+<header>
+  <p class="eyebrow">Конкурс СберИндекса · направление «Прогнозирование»</p>
+  <h1>Прогнозирование потребительских расходов муниципальных образований</h1>
+  <p class="lead">
+    Мы прогнозируем потребительские расходы 2 028 муниципальных образований
+    России помесячно на горизонтах от наукаста до года вперёд и ищем в них точки
+    структурных изменений.
+  </p>
+  <p class="lead">
+    Задача только выглядит как прогноз каждого муниципалитета по отдельности:
+    на деле это прогноз одного числа по стране и разнос его по территориям.
+  </p>
+</header>
+
+<ul class="stats" aria-label="Пять ключевых чисел работы">
+  <li class="stat">
+    <p class="stat-number">−23,0%</p>
+    <p class="stat-caption">
+      точнее эталона конкурса (Prophet) на горизонте 3 мес.:
+      1 581 ₽ → 1 217 ₽ на человека в месяц, R² пул 0,961 → 0,978
+    </p>
+    <p class="stat-note">Но выигрыш держится на 2 фолдах из 3: на первом, с самой короткой историей, эталон точнее.</p>
+  </li>
+
+  <li class="stat">
+    <p class="stat-number">45,9%</p>
+    <p class="stat-caption">точнее эталона на наукасте: 839 против 1 550 ₽</p>
+  </li>
+
+  <li class="stat">
+    <p class="stat-number">40%</p>
+    <p class="stat-caption">точнее эталона на год вперёд (к наивной — 39%)</p>
+    <p class="stat-note">На год вперёд, где панельным моделям не на чем учиться, лучшая — двухэтапная: точнее наивной и эталона на 39% и 40%, но это один фолд.</p>
+  </li>
+
+  <li class="stat">
+    <p class="stat-number">3,8–4,5%</p>
+    <p class="stat-caption">
+      средняя ошибка первого этапа двухэтапной модели на факте 2025 года
+      (горизонты 1–12 мес.), против 7,0–17,1% у простых правил
+    </p>
+    <p class="stat-note">Первый этап двухэтапной модели — прогноз федерального ряда от декабря 2024 — ошибается в среднем на 3,8–4,5% (горизонты 1–12 мес.) против 7,0–17,1% у правил «как в декабре» и «как год назад».</p>
+  </li>
+
+  <li class="stat">
+    <p class="stat-number">2 028 рядов × 24 месяца</p>
+    <p class="stat-caption">панель СберИндекса, январь 2023 — декабрь 2024, без длинных пропусков</p>
+  </li>
+</ul>
+
+<section class="method" aria-label="Схема метода">
+  <h2>Метод на одной странице</h2>
+  <div class="method-figure">
+    <img src="report/method.svg" width="1113" height="566"
+         alt="Схема метода: от панели СберИндекса и внешних источников через панельный бустинг и двухэтапную модель, а также детекторы разладок, к оценке на скользящем origin">
+  </div>
+</section>
+
+<nav class="actions" aria-label="Материалы работы">
+  <a class="action action-primary" href="report/report.html">Отчёт</a>
+  <a class="action action-primary" href="demo/">Демонстрационный стенд</a>
+  <a class="action" href="report/slides.html">Слайды</a>
+  <a class="action" href="report/report.pdf">Отчёт (PDF)</a>
+  <a class="action" href="report/slides.pdf">Слайды (PDF)</a>
+  <a class="action" href="results/forecast_2025.csv.gz">Прогноз на 2025 год (CSV)</a>
+  <a class="action" href="https://github.com/kr1zal/sberindex_konkurs">Репозиторий</a>
+</nav>
+
+<footer class="footer">
+  <p>
+    Данные — <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>.
+    Лицензия MIT — на код и тексты; данные — на условиях СберИндекса;
+    справочник муниципальных образований — CC BY-SA 4.0.
+  </p>
+  <p>Собрано 29 сентября 2026.</p>
+</footer>
+
+</main>
+</body>
+</html>
