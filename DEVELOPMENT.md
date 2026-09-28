@@ -37,7 +37,7 @@ scripts/compare_headline_body.py  что теряется на заголовк�
 scripts/build_news_features.py    пересборка data/news/monthly и national.parquet — единственный, кто их пишет
 scripts/crawl_news.py             выкачка заголовков региональных изданий; сырые заголовки в git не входят
 scripts/forecast_forward.py       прогноз на 2025 год по 2 028 МО и проверка федерального агрегата по факту → results/forecast_2025*.csv
-scripts/export_results.py         снимок .csv.gz трёх крупных results/ для публикации (per_series, horizons_per_series, forecast_2025); --check сверяет снимки с текущими CSV
+scripts/export_results.py         снимок .csv.gz пяти крупных results/ для публикации (per_series, horizons_per_series, forecast_2025, cp_bench, cp_v1/cp_bench); --check сверяет снимки с текущими CSV
 data/raw/               панель СберИндекса (parquet)
 data/news/              агрегаты новостного корпуса (monthly.parquet, national.parquet); headlines.parquet — только локально
 data/reference/         справочник МО, ключевая ставка
