@@ -210,7 +210,10 @@ QUARTO_PYTHON=$PWD/../.venv/bin/python quarto render slides.qmd   # около 2
 ```
 
 PDF — печатью из headless Chrome; без `--virtual-time-budget` слайды печатаются раньше, чем
-reveal.js их разложит, и выходит одна пустая страница:
+reveal.js их разложит, и выходит одна пустая страница. Бывает, что и с ним: фоновые задачи Chrome
+(обновление) съедают виртуальное время — тогда надёжнее напечатать из самого браузера: открыть
+`slides.html?print-pdf`, «Печать» → «Сохранить как PDF», поля — нет, фон — да. Отчёт печатается
+в A4 (правило `@page` в `report/styles.css`).
 
 ```bash
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
