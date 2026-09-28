@@ -3,15 +3,94 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Стенд — Прогнозирование потребительских расходов муниципальных образований</title>
+<title>Стенд — прогноз расходов муниципального образования</title>
+<meta name="description" content="Найдите муниципальное образование и посмотрите прогноз его потребительских расходов на будущий год, точки структурных изменений и то, как модели ошибались на нём.">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="../site/site.css">
+<link rel="stylesheet" href="demo.css">
 </head>
 <body>
-<main class="stub">
-  <h1>Стенд</h1>
-  <p>Страница собирается.</p>
-  <p><a href="../">Назад</a></p>
+<main class="page">
+
+<header>
+  <p class="back-link"><a href="../">&larr; страница входа</a></p>
+  <p class="eyebrow">Демонстрационный стенд</p>
+  <h1>Прогноз расходов вашего муниципалитета</h1>
+  <p class="lead" id="intro-text">Загрузка данных…</p>
+</header>
+
+<section class="search-section" aria-label="Поиск муниципального образования">
+  <label class="search-label" for="mo-search">Найдите муниципальное образование по названию или региону</label>
+  <div class="combobox">
+    <input
+      id="mo-search" type="text" autocomplete="off"
+      role="combobox" aria-expanded="false" aria-controls="mo-listbox" aria-haspopup="listbox"
+      aria-autocomplete="list"
+      placeholder="например: михайловский рязан">
+    <ul id="mo-listbox" role="listbox" class="listbox" aria-label="Результаты поиска" hidden></ul>
+  </div>
+  <p class="section-note" id="search-hint"></p>
+  <p class="mo-note" id="mo-invalid-note" role="alert" hidden></p>
+</section>
+
+<section class="mo-section" aria-labelledby="mo-heading">
+  <h2 id="mo-heading">Выбранный муниципалитет</h2>
+  <p class="mo-name" id="mo-name">—</p>
+  <p class="mo-meta" id="mo-meta"></p>
+  <p class="mo-note" id="mo-no-region-note" hidden></p>
+
+  <div class="chart-figure">
+    <div class="chart-legend" id="mo-legend"></div>
+    <div class="chart-container" id="mo-chart"></div>
+    <p class="chart-caption" id="mo-forecast-caption"></p>
+    <p class="chart-caption" id="mo-breaks-caption"></p>
+  </div>
+
+  <details class="numbers-details">
+    <summary>Числа графика</summary>
+    <div class="table-scroll">
+      <table class="data-table" id="mo-numbers-table"></table>
+    </div>
+  </details>
+</section>
+
+<section class="errors-section" aria-labelledby="errors-heading">
+  <h2 id="errors-heading">Как модели ошибались на этом муниципалитете</h2>
+  <p class="section-note" id="errors-caption"></p>
+  <div class="table-scroll">
+    <table class="data-table" id="errors-table"></table>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="aggregate-section" aria-labelledby="aggregate-heading">
+  <h2 id="aggregate-heading">Единственный прогноз, уже проверенный фактом: федеральный агрегат</h2>
+  <p class="lead" id="agg-lead">Загрузка данных…</p>
+
+  <div class="chart-figure">
+    <div class="chart-legend" id="agg-legend"></div>
+    <div class="chart-container" id="agg-chart"></div>
+    <p class="chart-caption" id="agg-chart-caption"></p>
+  </div>
+
+  <div class="table-scroll">
+    <table class="data-table" id="agg-table"></table>
+  </div>
+</section>
+
+<footer class="footer">
+  <p>
+    Данные — <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>.
+    Лицензия MIT — на код и тексты; данные — на условиях СберИндекса;
+    справочник муниципальных образований — CC BY-SA 4.0.
+  </p>
+  <p id="footer-built"></p>
+  <p><a href="../">Страница входа</a></p>
+</footer>
+
 </main>
+<script src="linechart.js" defer></script>
+<script src="demo.js" defer></script>
 </body>
 </html>
