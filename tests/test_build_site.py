@@ -40,7 +40,8 @@ INDEX_JSON_KEYS = {
     "forecast_rule", "known_model", "breaks", "folds", "models", "panel_mae", "series",
 }
 AGGREGATE_JSON_KEYS = {
-    "unit", "origin", "horizon", "model", "history", "check", "rule_names", "mape", "mape_by_horizon",
+    "unit", "origin", "horizon", "model", "model_label",
+    "history", "check", "rule_names", "mape", "mape_by_horizon",
 }
 
 _MONTH_OF = ["января", "февраля", "марта", "апреля", "мая", "июня",
@@ -160,6 +161,31 @@ class BuildSiteTest(unittest.TestCase):
 
     def test_aggregate_json_top_level_keys(self) -> None:
         self.assertEqual(set(self.aggregate_json), AGGREGATE_JSON_KEYS)
+
+    def test_aggregate_history_starts_at_module_start_constant(self) -> None:
+        # Как на графике отчёта (src/charts.py::aggregate_check, start="2022-01") —
+        # не с первого месяца длинного ряда, иначе 2025 год прижат к правому краю.
+        history = self.aggregate_json["history"]
+        self.assertEqual(history["months"][0], build_site.AGGREGATE_CHART_START)
+        origin = pd.Period(self.aggregate_json["origin"], "M")
+        start = pd.Period(build_site.AGGREGATE_CHART_START, "M")
+        self.assertEqual(history["months"][-1], str(origin))
+        self.assertEqual(len(history["months"]), int((origin - start).n) + 1)
+
+    def test_aggregate_model_label_matches_module_mapping(self) -> None:
+        model_id = self.aggregate_json["model"]
+        self.assertIn(model_id, build_site.AGGREGATE_MODEL_LABELS)
+        self.assertEqual(self.aggregate_json["model_label"], build_site.AGGREGATE_MODEL_LABELS[model_id])
+
+    def test_forecast_rule_label_matches_models_list(self) -> None:
+        # Независимо от MODEL_LABELS генератора: label каждого отрезка forecast_rule
+        # сверяется с label той же модели в models — если модель там есть, подписи
+        # обязаны совпасть дословно (одно название и там, и там).
+        models_by_id = {m["id"]: m["label"] for m in self.index_json["models"]}
+        for segment in self.index_json["forecast_rule"]:
+            with self.subTest(model=segment["model"], horizon=segment["horizon"]):
+                expected = models_by_id.get(segment["model"], segment["model"])
+                self.assertEqual(segment["label"], expected)
 
     def test_no_template_placeholders_left(self) -> None:
         self.assertNotIn("${", self.html)

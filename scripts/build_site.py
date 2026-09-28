@@ -35,8 +35,9 @@
     n_homonym_names      названий (series_id без " #N"), у которых больше одного ряда
     n_homonym_series     рядов, относящихся к таким названиям
     default_mo           МО, которое стенд открывает по умолчанию
-    forecast_rule        [{from, to, model, horizon}, …] — отрезки месяцев прогноза
-                         подряд с одной моделью и горизонтом
+    forecast_rule        [{from, to, model, horizon, label}, …] — отрезки месяцев
+                         прогноза подряд с одной моделью и горизонтом; label — как
+                         в models[].label (или сырой model, если такой модели там нет)
     known_model          модель пунктира (uses_published_aggregate), одна на все горизонты
     breaks               {protocol, penalty, detector, mode} — источник изломов ниже
     folds                [{fold, train_months, test_from, test_to}, …] — фолды
@@ -54,8 +55,11 @@
 
 ``demo/data/aggregate.json``::
 
-    unit, origin, horizon, model            — как в forecast_2025_aggregate_check.csv
-    history: {months, values}               — агрегат с первого месяца по origin включительно
+    unit, origin, horizon, model             — как в forecast_2025_aggregate_check.csv
+    model_label                             — название model, как в отчёте (_fc_agg_ru)
+    history: {months, values}               — агрегат с AGGREGATE_CHART_START по origin
+                                               включительно (как на графике отчёта,
+                                               src/charts.py::aggregate_check)
     check: {months, actual,
             forecast: {two_stage, naive, seasonal_naive},
             error_pct: {…те же ключи}}       — горизонт = max(configs/forecast_forward.yaml::horizons)
@@ -108,6 +112,12 @@ MAX_DEMO_BYTES = 2_000_000
 # (report/report.qmd, ~строка 5008): готовая, проверенная на реальных данных иллюстрация.
 DEFAULT_MO = "городской округ город Орёл"
 
+# С какого месяца рисовать историю на графике федерального агрегата — как в
+# фигуре отчёта (`src/charts.py::aggregate_check`, параметр по умолчанию
+# `start="2022-01"`), чтобы год проверки (2025) не оказался прижат к правому
+# краю: без обрезки график начинался бы в 2018 году.
+AGGREGATE_CHART_START = "2022-01"
+
 # Названия моделей — копия `_ru` отчёта (report/report.qmd, ~строка 1682): тот же
 # читателю текст в обоих местах. Модель без записи здесь получает на странице
 # свой сырой идентификатор — работает, но подписи не будет; такого сейчас не бывает.
@@ -121,6 +131,17 @@ MODEL_LABELS = {
     "global_gbm_stack": "панельная + категории рядами",
     "global_gbm_stack_factor": "панельная + фактор + категории рядами",
     "chronos_ft": "Chronos-Bolt, дообученный",
+}
+
+# Кандидаты первого этапа двухэтапной модели (`src/external.py::CANDIDATES`) —
+# копия `_fc_agg_ru` отчёта (report/report.qmd, ~строка 2081): та же модель,
+# то же название на странице и в отчёте.
+AGGREGATE_MODEL_LABELS = {
+    "seasonal_median": "медианный по годам прирост того же месяца",
+    "seasonal_naive": "прошлогодний прирост того же месяца",
+    "ets": "экспоненциальное сглаживание с затухающим трендом",
+    "sarima": "SARIMA",
+    "random_walk": "последнее значение",
 }
 
 # ---------------------------------------------------------------------------
@@ -420,7 +441,11 @@ def _steps_frame(subset: pd.DataFrame, step_horizon: dict[int, int], origin: pd.
 
 def _build_forecast_rule(recommended: pd.DataFrame, step_horizon: dict[int, int],
                           origin: pd.Period) -> list[dict]:
-    """`forecast_rule`: отрезки подряд идущих месяцев с одной моделью и горизонтом."""
+    """`forecast_rule`: отрезки подряд идущих месяцев с одной моделью и горизонтом.
+
+    `label` — то же название, что в `models[].label`, а не только сырой `model`:
+    стенду не нужен свой словарь названий моделей рядом с генератором (одна модель
+    без записи в `MODEL_LABELS` — сырой идентификатор, как и у `models[].label`)."""
     by_horizon = recommended.drop_duplicates(["horizon", "model"]).groupby("horizon")["model"].agg(list)
     for horizon, models in by_horizon.items():
         if len(models) != 1:
@@ -435,7 +460,10 @@ def _build_forecast_rule(recommended: pd.DataFrame, step_horizon: dict[int, int]
         if runs and runs[-1]["model"] == model and runs[-1]["horizon"] == horizon:
             runs[-1]["to"] = month
         else:
-            runs.append({"from": month, "to": month, "model": model, "horizon": int(horizon)})
+            runs.append({
+                "from": month, "to": month, "model": model, "horizon": int(horizon),
+                "label": MODEL_LABELS.get(model, model),
+            })
     return runs
 
 
@@ -591,7 +619,7 @@ def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path 
     horizon = max(forward_cfg["horizons"])
     methods = ["two_stage", "naive", "seasonal_naive"]
 
-    history = load_aggregate(root / "data" / "reference" / "sberindex").loc[:origin]
+    history = load_aggregate(root / "data" / "reference" / "sberindex").loc[AGGREGATE_CHART_START:origin]
 
     year = agg_check.loc[agg_check["horizon"] == horizon]
     months = sorted(year["month"].unique())
@@ -606,11 +634,13 @@ def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path 
         for h in sorted(int(h) for h in agg_check["horizon"].unique())
     }
 
+    model_id = year.loc[year["method"] == "two_stage", "aggregate_model"].iloc[0]
     return {
         "unit": "млрд руб. в месяц",
         "origin": origin_str,
         "horizon": int(horizon),
-        "model": year.loc[year["method"] == "two_stage", "aggregate_model"].iloc[0],
+        "model": model_id,
+        "model_label": AGGREGATE_MODEL_LABELS.get(model_id, model_id),
         "history": {
             "months": [str(m) for m in history.index],
             "values": [_round2(v) for v in history.to_numpy()],
