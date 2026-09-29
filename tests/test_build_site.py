@@ -77,6 +77,15 @@ def _fmt_signed(value: float, digits: int) -> str:
     return f"+{text}" if round(float(value), digits) > 0 else text
 
 
+def _fmt_rub_or_dash(value: float) -> str:
+    """Как build_site.rub — целое число, неразрывный пробел в разрядах; пропуск (NaN) —
+    «—», формат рублёвых строк агрегата (actual_rub/forecast_rub), независимый от
+    build_site.rub/_rub_or_dash. Величины агрегата в этих данных неотрицательны, поэтому
+    расхождение в знаке минуса (build_site.rub пишет ASCII-дефис, здесь — «−», как
+    у остальных чисел этого файла) не проверяется — оно не встречается."""
+    return "—" if not np.isfinite(value) else _fmt(value, digits=0)
+
+
 def _plural(n: int, one: str, few: str, many: str) -> str:
     n = abs(int(n)) % 100
     if 11 <= n <= 14:
@@ -118,9 +127,9 @@ class _ResourceCollector(HTMLParser):
 
 class _StatsParser(HTMLParser):
     """Пять пунктов `<li class="stat">` страницы входа, по порядку — текст
-    `.stat-number` и `.stat-caption` каждого, не текст «где-то в HTML» (Important 3
-    итогового ревью): связь «число ↔ его подпись» проверяется, только если число
-    и текст сверяются в границах одного и того же пункта."""
+    `.stat-number` и `.stat-caption` каждого, не текст «где-то в HTML»: связь
+    «число ↔ его подпись» проверяется, только если число и текст сверяются
+    в границах одного и того же пункта."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -233,9 +242,9 @@ class BuildSiteTest(unittest.TestCase):
     def test_hash_suffixed_series_counts_match_matrix_columns(self) -> None:
         # Подсказка поиска говорит «их различает номер после «#»» про ряды с суффиксом
         # " #N" в series_id — считаем их независимо, регулярным выражением над столбцами
-        # матрицы, а не значением, которое положил генератор (Minor 11 итогового ревью).
-        # У пяти названий вторая копия выпала из панели по пропускам, и подсчёт по
-        # совпадению базового имени (n_homonym_series/_names) их бы недосчитал.
+        # матрицы, а не значением, которое положил генератор. У пяти названий вторая
+        # копия выпала из панели по пропускам, и подсчёт по совпадению базового имени
+        # (n_homonym_series/_names) их бы недосчитал.
         suffixed = [s for s in self.wide.columns if re.search(r" #\d+$", s)]
         names = {re.sub(r" #\d+$", "", s) for s in suffixed}
         self.assertEqual(self.index_json["n_hash_series"], len(suffixed))
@@ -260,15 +269,19 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual(self.aggregate_json["model_label"], build_site.AGGREGATE_MODEL_LABELS[model_id])
 
     def test_aggregate_error_pct_and_mape_are_report_formatted_strings(self) -> None:
-        # check.error_pct и mape — уже готовые строки (Important 2 итогового ревью):
-        # раньше генератор писал сотые (_round2), а JS округлял их ещё раз до десятых
-        # своим Math.round, и на одном и том же месяце стенд и отчёт расходились в
-        # последнем знаке («−3,9%» на стенде против «−4,0» в отчёте). Сверяем со своим
-        # форматтером (_fmt_signed/_fmt), посчитанным по исходному CSV независимо от
-        # build_site.num — те же принципы, что у остальных тестов файла.
+        # check.error_pct, mape и рублёвые check.actual_rub/forecast_rub — уже готовые
+        # строки: генератор форматирует их сам (num/rub), а JS показывает как есть, без
+        # своего округления — иначе на одном и том же месяце стенд и отчёт могут
+        # разойтись в последнем знаке («−3,9%» на стенде против «−4,0» в отчёте, если
+        # JS ещё раз округляет уже округлённые питоном сотые). Сверяем со своими
+        # форматтерами (_fmt_signed/_fmt/_fmt_rub_or_dash), посчитанными по исходному
+        # CSV независимо от build_site.num/rub — те же принципы, что у остальных
+        # тестов файла.
         horizon = max(int(h) for h in self.agg_check["horizon"].unique())
         year = self.agg_check.loc[self.agg_check["horizon"] == horizon]
         months = sorted(year["month"].unique())
+        actual_by_month = year.groupby("month")["actual"].first().reindex(months)
+        forecast_by_method = year.pivot(index="month", columns="method", values="forecast").reindex(months)
         error_by_method = year.pivot(index="month", columns="method", values="error_pct").reindex(months)
         abs_error = self.agg_check.assign(e=self.agg_check["error_pct"].abs())
         mape = abs_error.loc[abs_error["horizon"] == horizon].groupby("method")["e"].mean()
@@ -278,6 +291,11 @@ class BuildSiteTest(unittest.TestCase):
                 expected_series = [_fmt_signed(v, 1) for v in error_by_method[method]]
                 self.assertEqual(self.aggregate_json["check"]["error_pct"][method], expected_series)
                 self.assertEqual(self.aggregate_json["mape"][method], _fmt(mape[method], 1))
+
+        expected_actual_rub = [_fmt_rub_or_dash(v) for v in actual_by_month]
+        expected_forecast_rub = [_fmt_rub_or_dash(v) for v in forecast_by_method["two_stage"]]
+        self.assertEqual(self.aggregate_json["check"]["actual_rub"], expected_actual_rub)
+        self.assertEqual(self.aggregate_json["check"]["forecast_rub"]["two_stage"], expected_forecast_rub)
 
     def test_forecast_rule_label_matches_models_list(self) -> None:
         # Независимо от MODEL_LABELS генератора: label каждого отрезка forecast_rule
@@ -289,6 +307,32 @@ class BuildSiteTest(unittest.TestCase):
                 expected = models_by_id.get(segment["model"], segment["model"])
                 self.assertEqual(segment["label"], expected)
 
+    def test_model_roles_match_docstring_rule(self) -> None:
+        """`models` — пять ролей по правилу докстринга модуля (его начало): prophet —
+        reference, naive_last — naive, recommended самого короткого горизонта —
+        recommended, MAE.idxmin() сводки — best_mean, recommended самого длинного
+        горизонта — two_stage; модель в двух ролях сразу — одной строкой, role через
+        «+». Пересчитано здесь по тому же правилу своими выражениями, а не вызовом
+        build_site._build_model_roles: проверяет, что список index.json следует
+        правилу, а не что генератор согласен сам с собой."""
+        recommended = self.forward_cfg["recommended"]
+        shortest, longest = min(recommended), max(recommended)
+        expected_roles: dict[str, list[str]] = {}
+        for model_id, role in [
+            ("prophet", "reference"),
+            ("naive_last", "naive"),
+            (recommended[shortest], "recommended"),
+            (self.summary["MAE"].idxmin(), "best_mean"),
+            (recommended[longest], "two_stage"),
+        ]:
+            expected_roles.setdefault(model_id, []).append(role)
+
+        actual_by_id = {m["id"]: m["role"] for m in self.index_json["models"]}
+        self.assertEqual(set(actual_by_id), set(expected_roles))
+        for model_id, roles in expected_roles.items():
+            with self.subTest(model=model_id):
+                self.assertEqual(actual_by_id[model_id], "+".join(roles))
+
     def test_no_template_placeholders_left(self) -> None:
         self.assertNotIn("${", self.html)
 
@@ -296,9 +340,9 @@ class BuildSiteTest(unittest.TestCase):
 
     def test_headline_stat_matches_summary_csv(self) -> None:
         # stat-number сверяется целиком, а MAE/R² — в связке с горизонтом внутри подписи
-        # ИМЕННО первого пункта (self.stats[0]), а не где угодно в HTML (Important 3
-        # итогового ревью): раньше assertIn(str(horizon), html) проходил на любой «3»
-        # где угодно на странице, а число и подпись разных пунктов не были связаны.
+        # ИМЕННО первого пункта (self.stats[0]), а не где угодно в HTML: раньше
+        # assertIn(str(horizon), html) проходил на любой «3» где угодно на странице,
+        # а число и подпись разных пунктов не были связаны.
         top = self.summary["MAE"].idxmin()
         prophet_mae = self.summary.loc["prophet", "MAE"]
         best_mae = self.summary.loc[top, "MAE"]
@@ -324,10 +368,14 @@ class BuildSiteTest(unittest.TestCase):
         won = [f for f in folds if fold_mae.loc[f, top] < fold_mae.loc[f, "prophet"]]
         lost = [f for f in folds if fold_mae.loc[f, top] > fold_mae.loc[f, "prophet"]]
 
-        self.assertIn(f"{len(won)} {'фолде' if len(won) == 1 else 'фолдах'} из {len(folds)}", self.html)
+        # Оговорка о фолдах — часть подписи ИМЕННО первого пункта (folds_caveat в её
+        # тексте, см. site/index.template.html): сверяем в границах self.stats[0],
+        # а не где угодно на странице.
+        caption = self.stats[0]["caption"]
+        self.assertIn(f"{len(won)} {'фолде' if len(won) == 1 else 'фолдах'} из {len(folds)}", caption)
         for fold in lost:
             with self.subTest(fold=fold):
-                self.assertIn(_ORDINAL.get(fold, str(fold)), self.html)
+                self.assertIn(_ORDINAL.get(fold, str(fold)), caption)
 
     # -- число 2: наукаст (горизонт 1) --------------------------------------
 
@@ -412,9 +460,9 @@ class BuildSiteTest(unittest.TestCase):
             f"{n_months} {_plural(n_months, 'месяц', 'месяца', 'месяцев')}"
         )
         start, end = self.wide.index[0], self.wide.index[-1]
-        # panel_span целиком — с месяцами, а не только годы (Important 3 итогового
-        # ревью): «январь 2023 — декабрь 2024», подменённое на «март 2023 — октябрь
-        # 2024», раньше проходило зелёным — оба года встречались на странице и так.
+        # panel_span целиком — с месяцами, а не только годы: «январь 2023 — декабрь
+        # 2024», подменённое на «март 2023 — октябрь 2024», раньше проходило зелёным —
+        # оба года встречались на странице и так.
         expected_span = f"{_MONTH_NOM[start.month - 1]} {start.year} — {_MONTH_NOM[end.month - 1]} {end.year}"
 
         stat = self.stats[4]
@@ -456,12 +504,12 @@ class BuildSiteTest(unittest.TestCase):
                     self.assertEqual(len(entry["known"]), 12)
 
     def test_selected_mo_data_matches_independent_recomputation(self) -> None:
-        """DEFAULT_MO и один из одноимённых рядов («Михайловский муниципальный район #2»,
-        выбран контролёром) — forecast, known, breaks и mae по фолдам пересчитаны здесь
-        заново по forecast_2025.csv, cp_offline_series.csv и per_series.csv, своими
-        выражениями, а не вызовом build_site._steps_frame/_build_forecast_rule/_load_breaks:
-        тест, зовущий функции генератора, проверял бы только то, что код согласен сам
-        с собой, а не что demo/data/mo/*.json верны (Important 3 итогового ревью)."""
+        """DEFAULT_MO и один из одноимённых рядов («Михайловский муниципальный район #2») —
+        forecast, known, breaks и mae по фолдам пересчитаны здесь заново по
+        forecast_2025.csv, cp_offline_series.csv и per_series.csv, своими выражениями,
+        а не вызовом build_site._steps_frame/_build_forecast_rule/_load_breaks: тест,
+        зовущий функции генератора, проверял бы только то, что код согласен сам с собой,
+        а не что demo/data/mo/*.json верны."""
         targets = [build_site.DEFAULT_MO, "Михайловский муниципальный район #2"]
 
         forecast = read_results(ROOT / "results" / "forecast_2025.csv")
@@ -471,22 +519,33 @@ class BuildSiteTest(unittest.TestCase):
         )
 
         origin = pd.Period(self.forward_cfg["origin"], "M")
-        horizons = sorted(self.forward_cfg["horizons"])
+        # Ключи recommended — тот же источник истины, что у генератора
+        # (build_site.build_demo_data) и у отчёта (report.qmd::_fc_steps), а не
+        # forward_cfg["horizons"] отдельным списком: сейчас они совпадают, но именно
+        # recommended отвечает и за прогноз, и за пунктир.
+        horizons = sorted(self.forward_cfg["recommended"])
         # Шаг → наименьший горизонт, который его покрывает — правило report.qmd::_fc_steps,
         # написанное заново, а не импортом build_site._step_horizon_map.
         step_horizon = {step: min(h for h in horizons if h >= step) for step in range(1, horizons[-1] + 1)}
 
         cp_cfg = yaml.safe_load((ROOT / "configs" / "changepoints.yaml").read_text(encoding="utf-8"))
         protocol = f"v{cp_cfg['protocol_version']}"
-        # PENALTY — константа scripts/news_event_study.py, а не логика генератора; сама
-        # сверка ниже (breaks) не зависит от build_site.
-        penalty = build_site._load_penalty()
+        # PENALTY — константа scripts/news_event_study.py; грузим модуль по пути тем же
+        # способом, что build_site._load_penalty (scripts/ — не пакет), но не вызывая
+        # саму функцию генератора: если она возьмёт не ту константу, тест должен
+        # остаться независимым от этой её ошибки, а не унаследовать её.
+        news_event_study_spec = importlib.util.spec_from_file_location(
+            "news_event_study", ROOT / "scripts" / "news_event_study.py"
+        )
+        news_event_study = importlib.util.module_from_spec(news_event_study_spec)
+        news_event_study_spec.loader.exec_module(news_event_study)
+        penalty = float(news_event_study.PENALTY)
         offline = read_results(ROOT / "results" / "cp_offline_series.csv")
         offline_hits = offline.loc[(offline["protocol"] == protocol) & np.isclose(offline["penalty"], penalty)]
 
         n_folds = int(self.full_cfg["split"]["n_folds"])
-        # Какие именно модели входят в таблицу ошибок — проверяют другие тесты; здесь
-        # берём готовый список id из index.json и сверяем значения MAE по нему.
+        # Список id и ролей моделей сверяет test_model_roles_match_docstring_rule; здесь
+        # он уже готов — берём его из index.json и сверяем только значения MAE по нему.
         model_ids = [m["id"] for m in self.index_json["models"]]
 
         mo_files: dict[str, dict] = {}
