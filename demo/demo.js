@@ -10,7 +10,9 @@
 
 // ---------------------------------------------------------------------------
 // Числа и месяцы — форматирование как в отчёте (report/report.qmd, scripts/build_site.py):
-// неразрывный пробел в разрядах, запятая, минус «−», проценты — с одним знаком.
+// неразрывный пробел в разрядах, запятая, минус «−». Проценты агрегата приходят уже
+// готовой строкой из demo/data/aggregate.json (тем же num(v, 1), что в отчёте) — здесь
+// только достраивается «%», без повторного округления (Important 2 итогового ревью).
 // ---------------------------------------------------------------------------
 
 function groupThousands(digitsStr) {
@@ -21,7 +23,7 @@ function groupThousands(digitsStr) {
     s = s.slice(0, -3);
   }
   groups.unshift(s);
-  return groups.join(" ");
+  return groups.join(" ");
 }
 
 function numFmt(value, digits, opts) {
@@ -41,8 +43,9 @@ function rubFmt(value) {
   return numFmt(value, 0);
 }
 
-function pctFmt(value, opts) {
-  const formatted = numFmt(value, 1, opts);
+/** Достраивает «%» к уже готовой строке процента из aggregate.json — без своего
+ * округления (см. комментарий вверху файла). "—" остаётся "—", без "%" на конце. */
+function withPercent(formatted) {
   return formatted === "—" ? formatted : formatted + "%";
 }
 
@@ -137,7 +140,7 @@ const ROLE_SHORT_LABELS = {
   reference: "эталон (Prophet)",
   naive: "наивная",
   recommended: "рекомендуемая панельная",
-  best_mean: "лучшая в среднем",
+  best_mean: "лучшая в среднем по панели",
   two_stage: "двухэтапная",
 };
 
@@ -170,7 +173,8 @@ function breaksMethodologyText(breaksInfo) {
 
 // ---------------------------------------------------------------------------
 // Поиск МО: без учёта регистра, «ё» = «е», по всем словам запроса в строке
-// «название + регион»; сначала — совпадения с начала названия.
+// «название + регион»; три яруса — с начала названия, с начала какого-то из его
+// слов, внутри слова — и по алфавиту внутри яруса.
 // ---------------------------------------------------------------------------
 
 function normalizeSearchText(s) {
@@ -192,15 +196,19 @@ function searchMunicipalities(query, rows, limit) {
   const words = q.split(/\s+/).filter(Boolean);
   const tierA = [];
   const tierB = [];
+  const tierC = [];
   for (const row of rows) {
     if (!words.every((w) => row.haystack.includes(w))) continue;
-    (row.nameNorm.startsWith(q) ? tierA : tierB).push(row);
+    if (row.nameNorm.startsWith(q)) tierA.push(row);
+    else if (row.nameNorm.split(/\s+/).some((word) => word.startsWith(q))) tierB.push(row);
+    else tierC.push(row);
   }
   const collator = new Intl.Collator("ru");
   const byName = (a, b) => collator.compare(a.seriesId, b.seriesId);
   tierA.sort(byName);
   tierB.sort(byName);
-  const all = tierA.concat(tierB);
+  tierC.sort(byName);
+  const all = tierA.concat(tierB, tierC);
   return { matches: all.slice(0, limit), total: all.length };
 }
 
@@ -220,7 +228,13 @@ const moFileCache = new Map();
 
 async function fetchMoFile(fileNumber) {
   if (!moFileCache.has(fileNumber)) {
-    moFileCache.set(fileNumber, fetchJson(`data/mo/${fileNumber}.json`));
+    // Отклонённый промис не остаётся в кэше (Important 1 итогового ревью): иначе
+    // один сбой сети закрывает весь регион до перезагрузки страницы, а не только
+    // эту попытку — следующий выбор того же региона попробует загрузить заново.
+    moFileCache.set(fileNumber, fetchJson(`data/mo/${fileNumber}.json`).catch((error) => {
+      moFileCache.delete(fileNumber);
+      throw error;
+    }));
   }
   return moFileCache.get(fileNumber);
 }
@@ -257,8 +271,12 @@ function introText(index) {
 function searchHintText(index) {
   const total = index.n_series;
   const noRegion = index.n_no_region;
-  const names = index.n_homonym_names;
-  const series = index.n_homonym_series;
+  // Ряды с суффиксом « #N» в series_id — те самые, о которых говорит последняя фраза
+  // («их различает номер после «#»»), а не любые ряды с неуникальным базовым именем:
+  // у части омонимов вторая копия выпала из панели по пропускам, и счёт по имени
+  // занижал бы число (Minor 11 итогового ревью).
+  const names = index.n_hash_names;
+  const series = index.n_hash_series;
   return "Ищите по любым словам из названия или региона. " +
     `У ${rubFmt(noRegion)} из ${rubFmt(total)} ` +
     `${pluralRu(total, "муниципального образования", "муниципальных образований", "муниципальных образований")} ` +
@@ -273,9 +291,9 @@ function invalidMoMessage(seriesId) {
 
 function noRegionExplanationText(seriesId) {
   let text = "В выгрузке СберИндекса у муниципальных образований нет ни ОКТМО, ни региона — " +
-    "только название. Регион берётся из справочника по названию, а это название носят " +
-    "муниципалитеты нескольких регионов или его в справочнике нет, — приписывать регион " +
-    "наугад мы не стали.";
+    "только название. Регион берётся из справочника по названию. Это название носят " +
+    "муниципалитеты нескольких регионов или его там нет — в обоих случаях мы не стали " +
+    "приписывать регион наугад.";
   const suffix = / #(\d+)$/.exec(seriesId);
   if (suffix) {
     text += ` «#${suffix[1]}» — номер ряда среди одноимённых, по порядку в выгрузке.`;
@@ -311,8 +329,11 @@ function forecastRuleText(index) {
       : `горизонты ${andJoinRu(g.horizons.map(String))} мес.`;
     return `${range} — «${g.label}» (${horizons})`;
   });
-  // Не «одна модель на всё» — сколько их на самом деле, видно по частям ниже.
-  return `Прогноз на каждый месяц — от модели, рекомендуемой для его горизонта: ${parts.join("; ")}. ` +
+  // Месяц берётся с самого короткого горизонта, который его покрывает — не с «отдельного»
+  // горизонта у каждой модели порознь; иначе непонятно, почему у месяца вообще одна модель,
+  // а не несколько сразу (см. итоговое ревью, Minor 16).
+  return "Прогноз на каждый месяц — с самого короткого горизонта, который его покрывает, " +
+    `от рекомендуемой на этом горизонте модели: ${parts.join("; ")}. ` +
     "Пунктир — доли муниципалитета по прошлым месяцам, умноженные на опубликованный федеральный индекс. " +
     `Муниципальный разрез ${forecastYear} года ещё не опубликован, поэтому прогноз по муниципалитету ` +
     "фактом не проверен.";
@@ -341,8 +362,8 @@ function aggregateLeadText(agg) {
   return "Первый этап двухэтапной модели прогнозирует федеральный ряд СберИндекса. " +
     `Его прогноз от ${monthGenYear(agg.origin)} на ${forecastYear} год — единственный в работе, ` +
     "который уже можно сверить с фактом: средняя ошибка за год " +
-    `${pctFmt(Math.abs(agg.mape.two_stage))} против ${pctFmt(Math.abs(agg.mape.naive))} у правила ` +
-    `«${agg.rule_names.naive}» и ${pctFmt(Math.abs(agg.mape.seasonal_naive))} у правила «${agg.rule_names.seasonal_naive}».`;
+    `${withPercent(agg.mape.two_stage)} против ${withPercent(agg.mape.naive)} у правила ` +
+    `«${agg.rule_names.naive}» и ${withPercent(agg.mape.seasonal_naive)} у правила «${agg.rule_names.seasonal_naive}».`;
 }
 
 function aggregateCaptionText(agg) {
@@ -358,6 +379,10 @@ function aggregateCaptionText(agg) {
 // График выбранного МО.
 // ---------------------------------------------------------------------------
 
+// Название столбца «Числа графика» и подпись того же ряда в легенде графика — один
+// и тот же текст, не два разных о том же самом (Minor 16 итогового ревью).
+const KNOWN_SERIES_LABEL = "Если федеральный индекс за месяц уже опубликован";
+
 function buildMoChartSpec(index, seriesId, mo, legendEl) {
   const months = index.panel_months.concat(index.forecast_months);
   const nPanel = index.panel_months.length;
@@ -365,6 +390,11 @@ function buildMoChartSpec(index, seriesId, mo, legendEl) {
   const factValues = new Array(months.length).fill(null);
   mo.fact.forEach((v, i) => { factValues[i] = v; });
 
+  // Точка стыка (nPanel - 1): факт последнего месяца панели, повторённый в начале линий
+  // прогноза и «известного» пунктира, чтобы линии визуально соединялись с фактом, а не
+  // начинались с разрыва. joinAt отмечает её для LineChart — подсказка графика эту точку
+  // не подписывает «Прогноз»/«Если индекс уже опубликован» (Minor 10 итогового ревью):
+  // число там и так факт, а не прогноз ни на йоту.
   const forecastValues = new Array(months.length).fill(null);
   forecastValues[nPanel - 1] = mo.fact[nPanel - 1];
   mo.forecast.forEach((v, i) => { forecastValues[nPanel + i] = v; });
@@ -382,10 +412,13 @@ function buildMoChartSpec(index, seriesId, mo, legendEl) {
     months,
     series: [
       { id: "fact", label: "Факт", color: "var(--chart-fact)", values: factValues },
-      { id: "forecast", label: "Прогноз", color: "var(--chart-forecast)", values: forecastValues },
       {
-        id: "known", label: "Если федеральный индекс за месяц уже опубликован",
-        color: "var(--chart-known)", dash: "dashed", values: knownValues,
+        id: "forecast", label: "Прогноз", color: "var(--chart-forecast)",
+        values: forecastValues, joinAt: nPanel - 1,
+      },
+      {
+        id: "known", label: KNOWN_SERIES_LABEL,
+        color: "var(--chart-known)", dash: "dashed", values: knownValues, joinAt: nPanel - 1,
       },
     ],
     markers,
@@ -416,7 +449,7 @@ function renderMoNumbersTable(index, mo) {
 
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  ["Месяц", "Факт", "Прогноз", "Разнос индекса"].forEach((text) => {
+  ["Месяц", "Факт", "Прогноз", KNOWN_SERIES_LABEL].forEach((text) => {
     const th = document.createElement("th");
     th.textContent = text;
     headRow.appendChild(th);
@@ -476,15 +509,28 @@ function renderErrorsTable(index, mo) {
 
   // Компактные подписи фолдов — общие для широких заголовков (две строки в <th>)
   // и узких карточек (data-label каждой ячейки, см. demo.css): «апр–июн 2024».
+  // В карточке — она же вместе с длиной обучения: на телефоне <thead> скрыт
+  // стилем целиком, и без этого «обучение N мес.» там негде взять (Minor 14
+  // итогового ревью).
   const foldLabels = index.folds.map((fold) => monthRangeAxis(fold.test_from, fold.test_to));
+  const foldCardLabels = index.folds.map(
+    (fold) => `${monthRangeAxis(fold.test_from, fold.test_to)} · обучение ${fold.train_months} мес.`
+  );
 
+  // display: block на телефоне (demo.css) снимает встроенную табличную семантику —
+  // явные role восстанавливают её для скринридера и на широком экране ничего не меняют,
+  // там она и так есть у настоящего <table> (Minor 14 итогового ревью).
   const thead = document.createElement("thead");
+  thead.setAttribute("role", "rowgroup");
   const headRow = document.createElement("tr");
+  headRow.setAttribute("role", "row");
   const thModel = document.createElement("th");
+  thModel.setAttribute("role", "columnheader");
   thModel.textContent = "Модель";
   headRow.appendChild(thModel);
   index.folds.forEach((fold, i) => {
     const th = document.createElement("th");
+    th.setAttribute("role", "columnheader");
     const monthsLine = document.createElement("span");
     monthsLine.className = "fold-head-months";
     monthsLine.textContent = foldLabels[i];
@@ -495,6 +541,7 @@ function renderErrorsTable(index, mo) {
     headRow.appendChild(th);
   });
   const thMean = document.createElement("th");
+  thMean.setAttribute("role", "columnheader");
   thMean.textContent = "Среднее";
   headRow.appendChild(thMean);
   thead.appendChild(headRow);
@@ -504,10 +551,13 @@ function renderErrorsTable(index, mo) {
   const panelMae = index.panel_mae;
 
   const tbody = document.createElement("tbody");
+  tbody.setAttribute("role", "rowgroup");
   index.models.forEach((model) => {
     const tr = document.createElement("tr");
+    tr.setAttribute("role", "row");
     const rowTh = document.createElement("th");
     rowTh.setAttribute("scope", "row");
+    rowTh.setAttribute("role", "rowheader");
     // Короткая роль — первой, жирной строкой; полное название модели — второй,
     // приглушённой (на узком экране скрыта стилем, см. demo.css) — без прежнего
     // дублирования, когда роль повторялась и в названии модели, и в скобках.
@@ -521,12 +571,15 @@ function renderErrorsTable(index, mo) {
     tr.appendChild(rowTh);
 
     const { perFold, mean } = means[model.id];
-    const panelRow = panelMae[model.id] || [null, null, null, null];
+    // Фолдов может быть не три — сколько их, решает конфиг, а не разметка таблицы
+    // (Minor 6 итогового ревью): и длина запасного массива, и индекс столбца «Среднее»
+    // берутся из nFolds, а не зашиты числом.
+    const panelRow = panelMae[model.id] || new Array(nFolds + 1).fill(null);
 
     perFold.forEach((v, col) => {
-      tr.appendChild(errorCell(v, panelRow[col], v !== null && v === best[col], foldLabels[col]));
+      tr.appendChild(errorCell(v, panelRow[col], v !== null && v === best[col], foldCardLabels[col]));
     });
-    tr.appendChild(errorCell(mean, panelRow[3], mean !== null && mean === best[nFolds], "Среднее"));
+    tr.appendChild(errorCell(mean, panelRow[nFolds], mean !== null && mean === best[nFolds], "Среднее"));
     tbody.appendChild(tr);
   });
   table.append(thead, tbody);
@@ -534,6 +587,7 @@ function renderErrorsTable(index, mo) {
 
 function errorCell(value, panelValue, isBest, narrowLabel) {
   const td = document.createElement("td");
+  td.setAttribute("role", "cell");
   const classes = [];
   if (isBest) classes.push("cell-best");
   if (value === null) classes.push("cell-dash");
@@ -571,17 +625,23 @@ function buildAggregateChartSpec(agg, legendEl) {
     return arr;
   }
 
+  // joinAt — та же точка стыка, что и на графике МО (buildMoChartSpec, см. её
+  // комментарий): факт последнего месяца истории, продублированный в начале трёх
+  // линий прогноза ради непрерывности линии, но не прогноз в подсказке.
   const series = [
     { id: "fact", label: "Факт", color: "var(--chart-fact)", values: factLine },
     { id: "fact-check", label: "Факт", color: "var(--chart-fact)", mode: "dots", values: factDots, overlay: true },
-    { id: "two_stage", label: "Прогноз первого этапа", color: "var(--chart-forecast)", values: ruleValues("two_stage") },
+    {
+      id: "two_stage", label: "Прогноз первого этапа", color: "var(--chart-forecast)",
+      values: ruleValues("two_stage"), joinAt: nHist - 1,
+    },
     {
       id: "naive", label: `Правило «${agg.rule_names.naive}»`,
-      color: "var(--chart-known)", dash: "dashed", values: ruleValues("naive"),
+      color: "var(--chart-known)", dash: "dashed", values: ruleValues("naive"), joinAt: nHist - 1,
     },
     {
       id: "seasonal_naive", label: `Правило «${agg.rule_names.seasonal_naive}»`,
-      color: "var(--chart-third)", dash: "dotted", values: ruleValues("seasonal_naive"),
+      color: "var(--chart-third)", dash: "dotted", values: ruleValues("seasonal_naive"), joinAt: nHist - 1,
     },
   ];
   const markers = [{ atMonth: agg.origin, kind: "end", label: "конец панели" }];
@@ -627,9 +687,9 @@ function renderAggregateTable(agg) {
     [
       rubFmt(agg.check.actual[i]),
       rubFmt(agg.check.forecast.two_stage[i]),
-      pctFmt(agg.check.error_pct.two_stage[i], { sign: true }),
-      pctFmt(agg.check.error_pct.naive[i], { sign: true }),
-      pctFmt(agg.check.error_pct.seasonal_naive[i], { sign: true }),
+      withPercent(agg.check.error_pct.two_stage[i]),
+      withPercent(agg.check.error_pct.naive[i]),
+      withPercent(agg.check.error_pct.seasonal_naive[i]),
     ].forEach((text) => appendDataCell(tr, text));
     tbody.appendChild(tr);
   });
@@ -641,7 +701,7 @@ function renderAggregateTable(agg) {
   tr.appendChild(rowTh);
   [
     "—", "—",
-    pctFmt(agg.mape.two_stage), pctFmt(agg.mape.naive), pctFmt(agg.mape.seasonal_naive),
+    withPercent(agg.mape.two_stage), withPercent(agg.mape.naive), withPercent(agg.mape.seasonal_naive),
   ].forEach((text) => appendDataCell(tr, text));
   tbody.appendChild(tr);
 
@@ -665,11 +725,40 @@ async function renderAggregateBlock() {
 // ---------------------------------------------------------------------------
 
 let moChart = null;
+let selectSeq = 0;
 
 async function selectMo(index, requestedSeriesId, { pushUrl }) {
-  const invalidNote = document.getElementById("mo-invalid-note");
+  // Счётчик выбора (Important 1 итогового ревью): выбор МО из ещё не загруженного
+  // региона и следом — другого, уже загруженного, гонит два fetch параллельно, и без
+  // счётчика первый ответ, придя позже, перезаписывает график и таблицы под именем
+  // уже показанного второго МО. seq, захваченный в замыкании, — метка «это ещё я?».
+  const seq = ++selectSeq;
+
   const known = index.seriesById.has(requestedSeriesId);
   const seriesId = known ? requestedSeriesId : index.default_mo;
+  const entry = index.seriesById.get(seriesId);
+
+  let file;
+  try {
+    file = await fetchMoFile(entry.fileNumber);
+  } catch (error) {
+    // Пишем в #mo-invalid-note, только если это ещё наш выбор: устаревший провал (второй
+    // выбор уже сменил seq, пока этот файл падал) не должен затирать уже показанный
+    // результат более свежего запроса сообщением об ошибке (Important 1 итогового ревью).
+    if (seq === selectSeq) {
+      const note = document.getElementById("mo-invalid-note");
+      note.textContent =
+        "Не удалось загрузить данные этого муниципального образования. Обновите страницу или попробуйте другое.";
+      note.hidden = false;
+    }
+    throw error; // console.error — в selectMoSafe, единственном месте, откуда вызывают
+  }
+  if (seq !== selectSeq) return; // выбор сменился, пока грузился файл — наш ответ устарел
+
+  // Всё видимое — шапка, поле поиска, примечания, график, таблицы, адрес — меняется
+  // одним куском и только здесь, после await: до этой строки на экране остаётся
+  // прежний МО целиком, а не смесь нового имени со старым графиком или наоборот.
+  const invalidNote = document.getElementById("mo-invalid-note");
   if (known) {
     invalidNote.hidden = true;
   } else {
@@ -677,9 +766,12 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
     invalidNote.hidden = false;
   }
 
-  const entry = index.seriesById.get(seriesId);
   document.getElementById("mo-search").value = seriesId;
   document.getElementById("mo-name").textContent = seriesId;
+  // Заголовок вкладки — с названием текущего МО: у ссылки с ?mo= иначе был бы всегда
+  // один и тот же заголовок вне зависимости от того, что на ней открыто (Minor 16
+  // итогового ревью).
+  document.title = `${seriesId} — прогноз расходов по муниципалитету`;
 
   const metaEl = document.getElementById("mo-meta");
   const noteEl = document.getElementById("mo-no-region-note");
@@ -692,7 +784,6 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
     noteEl.hidden = false;
   }
 
-  const file = await fetchMoFile(entry.fileNumber);
   const mo = file[seriesId];
 
   const legendEl = document.getElementById("mo-legend");
@@ -711,6 +802,8 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
 }
 
 function selectMoSafe(index, seriesId, opts) {
+  // Текст ошибки — уже внутри selectMo (только если сбой ещё относится к текущему
+  // выбору); здесь — журнал для отладки, второй раз DOM не трогаем.
   selectMo(index, seriesId, opts).catch((error) => {
     console.error("Не удалось показать муниципальное образование", error);
   });
@@ -723,6 +816,7 @@ function selectMoSafe(index, seriesId, opts) {
 function setupCombobox(index) {
   const input = document.getElementById("mo-search");
   const listbox = document.getElementById("mo-listbox");
+  const statusEl = document.getElementById("mo-search-status");
   const RESULT_LIMIT = 8;
   let currentOptions = [];
   let activeIndex = -1;
@@ -757,18 +851,42 @@ function setupCombobox(index) {
     selectMoSafe(index, seriesId, { pushUrl: true });
   }
 
+  // Короткий итог для живой области — не сам список (Minor 14 итогового ревью):
+  // подробности и так на экране в listbox, а на каждую букву запроса произносить
+  // их скринридеру целиком было бы избыточно.
+  function matchesStatusText(total) {
+    if (!total) return "Ничего не нашлось";
+    return `Найдено ${rubFmt(total)} ${pluralRu(total, "совпадение", "совпадения", "совпадений")}`;
+  }
+
+  function noMatchesText() {
+    // Число — то же, что во вступлении к поиску (index.n_series): в панель вошли
+    // только ряды без длинных пропусков, и это стоит сказать здесь тоже, а не
+    // только один раз наверху страницы (Minor 12 итогового ревью).
+    const total = index.n_series;
+    return "Ничего не нашлось — попробуйте часть названия или регион. В стенд вошли " +
+      `${rubFmt(total)} ${pluralRu(total, "муниципальное образование", "муниципальных образования", "муниципальных образований")} ` +
+      "без длинных пропусков в данных — остальные в панель не попали.";
+  }
+
   function renderOptions(query) {
     listbox.innerHTML = "";
-    if (!query.trim()) { closeListbox(); currentOptions = []; return; }
+    if (!query.trim()) { closeListbox(); currentOptions = []; statusEl.textContent = ""; return; }
 
     const { matches, total } = searchMunicipalities(query, index.searchRows, RESULT_LIMIT);
     currentOptions = matches;
     activeIndex = -1;
+    statusEl.textContent = matchesStatusText(total);
 
     if (!matches.length) {
       const li = document.createElement("li");
       li.className = "listbox-status";
-      li.textContent = "Ничего не нашлось — попробуйте часть названия или регион";
+      // role="option" + aria-disabled, а не текст без роли внутри role="listbox" —
+      // так строка остаётся допустимым потомком listbox (Minor 14 итогового ревью).
+      // currentOptions пуст, поэтому ни стрелки, ни Enter её всё равно не выберут.
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-disabled", "true");
+      li.textContent = noMatchesText();
       listbox.appendChild(li);
       openListbox();
       return;
@@ -794,6 +912,8 @@ function setupCombobox(index) {
       const rest = total - matches.length;
       const li = document.createElement("li");
       li.className = "listbox-status";
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-disabled", "true");
       li.textContent = `И ещё ${rubFmt(rest)} ${pluralRu(rest, "совпадение", "совпадения", "совпадений")} — уточните запрос`;
       listbox.appendChild(li);
     }

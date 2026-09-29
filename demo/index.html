@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Прогноз расходов по муниципалитету — стенд</title>
-<meta name="description" content="Потребительские расходы любого муниципального образования из панели СберИндекса по месяцам, их прогноз на следующий год, изломы ряда и ошибки моделей на нём, а также прогноз федерального агрегата, уже сверенный с фактом.">
+<meta name="description" content="Потребительские расходы муниципального образования из панели СберИндекса по месяцам, их прогноз на год вперёд от конца панели, изломы ряда и ошибки моделей на нём, а также прогноз федерального агрегата, уже сверенный с фактом.">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="../site/site.css">
 <link rel="stylesheet" href="demo.css">
@@ -29,6 +29,7 @@
       placeholder="например: Казань или Томская область">
     <ul id="mo-listbox" role="listbox" class="listbox" aria-label="Результаты поиска" hidden></ul>
   </div>
+  <p id="mo-search-status" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
   <p class="section-note" id="search-hint"></p>
   <p class="mo-note" id="mo-invalid-note" role="alert" hidden></p>
 </section>
@@ -58,7 +59,7 @@
   <h2 id="errors-heading">Как модели ошибались на этом муниципалитете</h2>
   <p class="section-note" id="errors-caption"></p>
   <div class="table-scroll">
-    <table class="data-table" id="errors-table"></table>
+    <table class="data-table" id="errors-table" role="table"></table>
   </div>
 </section>
 

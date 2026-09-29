@@ -157,6 +157,11 @@ const LineChart = (() => {
     let margin = { top: 28, right: 18, bottom: 34, left: 64 };
     let scaleX = (i) => i;
     let scaleY = (v) => v;
+    // Ссылка на элемент курсора, а не id (Minor 7 итогового ревью): на странице стенда
+    // два графика создаются этой же функцией, и id="chart-cursor" повторялся бы в обоих
+    // SVG — невалидный HTML, который до сих пор работал только потому, что querySelector
+    // ниже был ограничен своим svg.
+    let cursorEl = null;
 
     container.innerHTML = "";
     const svg = svgEl("svg", { role: "img", "aria-label": spec.ariaLabel || "" });
@@ -187,7 +192,10 @@ const LineChart = (() => {
         const item = document.createElement("li");
         item.className = "chart-legend-item";
         const key = document.createElement("span");
-        key.className = "chart-legend-key" + (s.dash ? " chart-legend-key-dashed" : "");
+        // Класс по значению dash ("dashed"/"dotted"), а не один общий "-dashed" на любой
+        // штрих (Minor 8 итогового ревью): «как год назад» рисуется точками и должна
+        // выглядеть точками и в легенде, а не как ещё одна штриховая линия.
+        key.className = "chart-legend-key" + (s.dash ? ` chart-legend-key-${s.dash}` : "");
         key.style.setProperty("--legend-color", s.color);
         const text = document.createElement("span");
         text.textContent = s.label;
@@ -214,8 +222,11 @@ const LineChart = (() => {
     function showTooltip(index, clientX) {
       const month = currentSpec.months[index];
       const rows = visibleSeries()
+        // joinAt — точка стыка факта с началом линии прогноза (Minor 10 итогового
+        // ревью): число там настоящее, но это факт, а не прогноз, и подсказка его
+        // как прогноз/пунктир не подписывает — только линия проходит через него.
         .map((s) => ({ s, v: s.values[index] }))
-        .filter(({ v }) => isNum(v));
+        .filter(({ s, v }) => isNum(v) && s.joinAt !== index);
       if (!rows.length) { hideTooltip(); return; }
 
       tooltip.innerHTML = "";
@@ -227,7 +238,7 @@ const LineChart = (() => {
         const row = document.createElement("div");
         row.className = "chart-tooltip-row";
         const key = document.createElement("span");
-        key.className = "chart-tooltip-key" + (s.dash ? " chart-tooltip-key-dashed" : "");
+        key.className = "chart-tooltip-key" + (s.dash ? ` chart-tooltip-key-${s.dash}` : "");
         key.style.setProperty("--legend-color", s.color);
         const label = document.createElement("span");
         label.className = "chart-tooltip-label";
@@ -247,18 +258,16 @@ const LineChart = (() => {
       tooltip.style.left = `${Math.max(4, left)}px`;
       tooltip.style.top = `${margin.top}px`;
 
-      const cursor = svg.querySelector("#chart-cursor");
-      if (cursor) {
-        cursor.setAttribute("x1", scaleX(index));
-        cursor.setAttribute("x2", scaleX(index));
-        cursor.setAttribute("visibility", "visible");
+      if (cursorEl) {
+        cursorEl.setAttribute("x1", scaleX(index));
+        cursorEl.setAttribute("x2", scaleX(index));
+        cursorEl.setAttribute("visibility", "visible");
       }
     }
 
     function hideTooltip() {
       tooltip.hidden = true;
-      const cursor = svg.querySelector("#chart-cursor");
-      if (cursor) cursor.setAttribute("visibility", "hidden");
+      if (cursorEl) cursorEl.setAttribute("visibility", "hidden");
     }
 
     function onPointerMove(event) {
@@ -415,12 +424,14 @@ const LineChart = (() => {
       });
       svg.appendChild(seriesGroup);
 
-      // Курсор подсказки — поверх рядов, скрыт до наведения/касания.
-      const cursor = svgEl("line", {
-        id: "chart-cursor", x1: margin.left, x2: margin.left, y1: margin.top, y2: margin.top + ph,
+      // Курсор подсказки — поверх рядов, скрыт до наведения/касания. Ссылка сохраняется
+      // в cursorEl (без id — см. комментарий в create()), draw() пересоздаёт её при
+      // каждой перерисовке (resize, update), поэтому переприсваивание, а не const.
+      cursorEl = svgEl("line", {
+        x1: margin.left, x2: margin.left, y1: margin.top, y2: margin.top + ph,
         class: "chart-cursor", visibility: "hidden",
       });
-      svg.appendChild(cursor);
+      svg.appendChild(cursorEl);
 
       // Прозрачная область поверх графика — единая цель для наведения/касания.
       const hit = svgEl("rect", {
