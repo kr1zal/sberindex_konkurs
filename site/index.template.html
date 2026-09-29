@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Прогнозирование потребительских расходов муниципальных образований</title>
-<meta name="description" content="Конкурс СберИндекса, направление «Прогнозирование»: прогноз потребительских расходов ${n_series_rub} муниципальных образований России и разладки в них — отчёт, код и демонстрационный стенд.">
+<meta name="description" content="Прогноз потребительских расходов ${n_series_rub} муниципальных образований на горизонтах от месяца до года и поиск точек структурных изменений: главные числа, отчёт, слайды, код, прогноз на ${forecast_year} год и стенд с прогнозом по каждому муниципалитету.">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="site/site.css">
 </head>
@@ -12,80 +12,89 @@
 <main class="page">
 
 <header>
-  <p class="eyebrow">Конкурс СберИндекса · направление «Прогнозирование»</p>
+  <p class="eyebrow">Конкурс СберИндекса, направление «Прогнозирование»</p>
   <h1>Прогнозирование потребительских расходов муниципальных образований</h1>
   <p class="lead">
     Мы прогнозируем потребительские расходы ${n_series_rub} муниципальных образований
-    России помесячно на горизонтах от наукаста до года вперёд и ищем в них точки
-    структурных изменений.
+    на горизонтах от месяца до года и ищем в них точки структурных изменений.
+    Главный вывод: задача только выглядит как прогноз каждого муниципалитета
+    по отдельности — на деле это прогноз одного числа по стране и разнос его
+    по территориям.
   </p>
   <p class="lead">
-    Задача только выглядит как прогноз каждого муниципалитета по отдельности:
-    на деле это прогноз одного числа по стране и разнос его по территориям.
+    Всё, что отличает хорошую модель от плохой на этих данных, — попадание в общее
+    движение страны: разброс ошибки между муниципалитетами не сдвинула ни одна
+    из моделей, для которых посчитано разложение. А двухэтапная модель — прогноз
+    федерального ряда, разнесённый по муниципалитетам долями, — на отдельные ряды
+    не смотрит вовсе и выигрывает там, где истории меньше всего.
   </p>
 </header>
 
-<ul class="stats" aria-label="Пять ключевых чисел работы">
+<ul class="stats" aria-label="Ключевые числа работы">
   <li class="stat">
     <p class="stat-number">${best_gain}%</p>
     <p class="stat-caption">
-      точнее эталона конкурса (Prophet) на горизонте ${horizon_main} мес.:
-      ${prophet_mae} ₽ → ${best_mae} ₽ на человека в месяц, R² пул ${r2_prophet} → ${r2_best}
+      точнее эталона конкурса Prophet на горизонте ${horizon_main} мес.:
+      MAE ${prophet_mae} ₽ → ${best_mae} ₽ на человека в месяц,
+      R² по пулу ${r2_prophet} → ${r2_best}. ${folds_caveat}
     </p>
-    <p class="stat-note">${folds_caveat}</p>
   </li>
 
   <li class="stat">
     <p class="stat-number">${h1_gain}%</p>
-    <p class="stat-caption">точнее эталона на наукасте: ${h1_best} против ${h1_prophet} ₽</p>
+    <p class="stat-caption">точнее эталона на наукасте: MAE ${h1_best} против ${h1_prophet} ₽.</p>
   </li>
 
   <li class="stat">
     <p class="stat-number">${h12_gain_prophet}%</p>
-    <p class="stat-caption">точнее эталона на год вперёд (к наивной — ${h12_gain_naive}%)</p>
-    <p class="stat-note">${h12_note}</p>
+    <p class="stat-caption">
+      точнее эталона на год вперёд, наивной — на ${h12_gain_naive}%;
+      здесь лучшая — ${h12_model}${h12_folds_caveat}.
+    </p>
   </li>
 
   <li class="stat">
     <p class="stat-number">${agg_own_pct}%</p>
     <p class="stat-caption">
-      средняя ошибка первого этапа двухэтапной модели на факте ${forecast_year} года
-      (горизонты ${agg_horizon_range} мес.), против ${agg_rules_pct}% у простых правил
+      средняя ошибка первого этапа двухэтапной модели — прогноза федерального ряда
+      от ${agg_origin_label}, сверенного с фактом ${forecast_year} года (горизонты
+      ${agg_horizon_range} мес.); у правил ${agg_rules} — ${agg_rules_pct}%.
+      Муниципальный разрез ${forecast_year} года ещё не опубликован.
     </p>
-    <p class="stat-note">${agg_note}</p>
   </li>
 
   <li class="stat">
     <p class="stat-number">${panel_shape}</p>
-    <p class="stat-caption">панель СберИндекса, ${panel_span}, без длинных пропусков</p>
+    <p class="stat-caption">ряды панели СберИндекса без длинных пропусков, ${panel_span}.</p>
   </li>
 </ul>
 
 <section class="method" aria-label="Схема метода">
-  <h2>Метод на одной странице</h2>
+  <h2>Как устроено решение</h2>
   <div class="method-figure">
     <img src="report/method.svg" width="1113" height="566"
-         alt="Схема метода: от панели СберИндекса и внешних источников через панельный бустинг и двухэтапную модель, а также детекторы разладок, к оценке на скользящем origin">
+         alt="Схема метода. Панель СберИндекса с категориями трат и прогнозом длинного федерального ряда идёт в панельный бустинг и в двухэтапную модель — прогноз федерального ряда, разнесённый долями. Обе вместе с эталоном Prophet, наивной и фундаментальными моделями проверяются на скользящем origin, от наукаста до года вперёд, по MAE, R² по пулу, MASE и sMAPE. Детекторы изломов на темпах роста, со штрафом, выбранным на стенде с врезками известной величины, дают долю территорий с сигналом.">
   </div>
 </section>
 
 <nav class="actions" aria-label="Материалы работы">
   <a class="action action-primary" href="report/report.html">Отчёт</a>
-  <a class="action action-primary" href="demo/">Демонстрационный стенд</a>
+  <a class="action action-primary" href="demo/">Прогноз по муниципалитету</a>
   <a class="action" href="report/slides.html">Слайды</a>
   <a class="action" href="report/report.pdf">Отчёт (PDF)</a>
   <a class="action" href="report/slides.pdf">Слайды (PDF)</a>
-  <a class="action" href="results/forecast_2025.csv.gz">Прогноз на ${forecast_year} год (CSV)</a>
-  <a class="action" href="https://github.com/kr1zal/sberindex_konkurs">Репозиторий</a>
+  <a class="action" href="results/forecast_2025.csv.gz">Прогноз на ${forecast_year} год (csv.gz)</a>
+  <a class="action" href="https://github.com/kr1zal/sberindex_konkurs">Код на GitHub</a>
 </nav>
 
 <footer class="footer">
   <p>
-    Данные — <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>.
-    Лицензия MIT — на код и тексты; данные — на условиях СберИндекса;
+    Данные — <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>
+    о безналичных потребительских расходах муниципальных образований.
+    Код и тексты — под лицензией MIT; данные — на условиях СберИндекса;
     справочник муниципальных образований — CC BY-SA 4.0.
   </p>
-  <p>Собрано ${built}.</p>
+  <p>Числа на странице — из тех же файлов результатов, что и отчёт; собрано ${built}.</p>
 </footer>
 
 </main>

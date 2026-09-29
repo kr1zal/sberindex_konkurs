@@ -59,9 +59,6 @@ const MONTH_NOM = ["январь", "февраль", "март", "апрель",
                     "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
 const MONTH_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня",
                     "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-// Предложный падеж («в январе») — как _MONTH_IN в report/report.qmd.
-const MONTH_PREP = ["январе", "феврале", "марте", "апреле", "мае", "июне",
-                     "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"];
 
 function parseYM(ym) {
   const [y, m] = ym.split("-").map(Number);
@@ -76,11 +73,6 @@ function monthNomYear(ym) {
 function monthGenYear(ym) {
   const { y, m } = parseYM(ym);
   return `${MONTH_GEN[m - 1]} ${y}`;
-}
-
-function monthPrepYear(ym) {
-  const { y, m } = parseYM(ym);
-  return `${MONTH_PREP[m - 1]} ${y}`;
 }
 
 /** «февраль–март 2025» (один год) или «январь 2025» (from===to) — для таблиц и подписей,
@@ -102,6 +94,16 @@ function monthRangeAxis(fromYm, toYm) {
   return a.y === b.y
     ? `${LineChart.formatMonthShort(fromYm, false)}–${LineChart.formatMonthShort(toYm, true)}`
     : `${LineChart.formatMonthShort(fromYm, true)} – ${LineChart.formatMonthShort(toYm, true)}`;
+}
+
+/** «с апреля по декабрь 2024 года» (один год) или «с октября 2023 по март 2024 года»:
+ * «с» берёт родительный падеж, «по» в значении «включительно» — винительный. */
+function monthSpanText(fromYm, toYm) {
+  const a = parseYM(fromYm);
+  const b = parseYM(toYm);
+  return a.y === b.y
+    ? `с ${MONTH_GEN[a.m - 1]} по ${MONTH_NOM[b.m - 1]} ${b.y} года`
+    : `с ${MONTH_GEN[a.m - 1]} ${a.y} по ${MONTH_NOM[b.m - 1]} ${b.y} года`;
 }
 
 /** «1, 3 и 6» — перечень чисел через запятую с «и» перед последним. */
@@ -135,7 +137,7 @@ const ROLE_SHORT_LABELS = {
   reference: "эталон (Prophet)",
   naive: "наивная",
   recommended: "рекомендуемая панельная",
-  best_mean: "лучшая по среднему",
+  best_mean: "лучшая в среднем",
   two_stage: "двухэтапная",
 };
 
@@ -159,11 +161,11 @@ function formatPenalty(p) {
   return numFmt(p, Number.isInteger(p) ? 0 : 1);
 }
 
+/** «детектор PELT на темпах роста, штраф 1» — чем искали изломы; вставляется в скобки. */
 function breaksMethodologyText(breaksInfo) {
   const det = CP_DETECTOR_LABELS[breaksInfo.detector] || breaksInfo.detector;
   const on = CP_MODE_LABELS_ON[breaksInfo.mode] || breaksInfo.mode;
-  return "Изломы найдены задним числом по полному ряду — не сигнал в реальном времени: " +
-    `детектор ${det} ${on}, штраф ${formatPenalty(breaksInfo.penalty)}.`;
+  return `детектор ${det} ${on}, штраф ${formatPenalty(breaksInfo.penalty)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,10 +249,9 @@ function introText(index) {
   const forecastYear = parseYM(index.forecast_months[0]).y;
   const firstFold = index.folds[0];
   const lastFold = index.folds[index.folds.length - 1];
-  const start = monthPrepYear(firstFold.test_from);
-  const end = monthPrepYear(lastFold.test_to);
-  return `Прогноз потребительских расходов выбранного муниципального образования на ${forecastYear} год ` +
-    `и то, как разные модели ошибались на нём в ${start} — ${end}.`;
+  return `Расходы выбранного муниципального образования по месяцам, их прогноз на ${forecastYear} год, ` +
+    "изломы ряда и ошибки моделей на нём в проверке на истории — " +
+    `${monthSpanText(firstFold.test_from, lastFold.test_to)}.`;
 }
 
 function searchHintText(index) {
@@ -258,21 +259,26 @@ function searchHintText(index) {
   const noRegion = index.n_no_region;
   const names = index.n_homonym_names;
   const series = index.n_homonym_series;
-  return `Всего в панели ${rubFmt(total)} ${pluralRu(total, "муниципальное образование", "муниципальных образования", "муниципальных образований")}. ` +
-    `У ${rubFmt(noRegion)} из них регион не определён — среди них ${rubFmt(series)} ${pluralRu(series, "ряд делит", "ряда делят", "рядов делят")} ` +
-    `${rubFmt(names)} повторяющихся ${pluralRu(names, "название", "названия", "названий")}.`;
+  return "Ищите по любым словам из названия или региона. " +
+    `У ${rubFmt(noRegion)} из ${rubFmt(total)} ` +
+    `${pluralRu(total, "муниципального образования", "муниципальных образований", "муниципальных образований")} ` +
+    `регион не определён, в том числе у ${rubFmt(series)} ` +
+    `${pluralRu(series, "одноимённого ряда", "одноимённых рядов", "одноимённых рядов")} ` +
+    `(${rubFmt(names)} ${pluralRu(names, "название", "названия", "названий")}) — их различает номер после «#».`;
 }
 
 function invalidMoMessage(seriesId) {
-  return `Ряда «${seriesId}» нет в данных стенда — показан муниципалитет по умолчанию.`;
+  return `«${seriesId}» в данных стенда нет — показано муниципальное образование по умолчанию.`;
 }
 
 function noRegionExplanationText(seriesId) {
-  let text = "Регион не определён: в выгрузке СберИндекса у этого муниципального образования " +
-    "есть только название, а его носят муниципалитеты нескольких регионов (либо этого названия " +
-    "нет в справочнике СберИндекса) — приписывать регион наугад мы не стали.";
-  if (/ #\d+$/.test(seriesId)) {
-    text += " «#N» в конце названия — порядковый номер одноимённого ряда в выгрузке.";
+  let text = "В выгрузке СберИндекса у муниципальных образований нет ни ОКТМО, ни региона — " +
+    "только название. Регион берётся из справочника по названию, а это название носят " +
+    "муниципалитеты нескольких регионов или его в справочнике нет, — приписывать регион " +
+    "наугад мы не стали.";
+  const suffix = / #(\d+)$/.exec(seriesId);
+  if (suffix) {
+    text += ` «#${suffix[1]}» — номер ряда среди одноимённых, по порядку в выгрузке.`;
   }
   return text;
 }
@@ -306,38 +312,46 @@ function forecastRuleText(index) {
     return `${range} — «${g.label}» (${horizons})`;
   });
   // Не «одна модель на всё» — сколько их на самом деле, видно по частям ниже.
-  return `Прогноз собран по нескольким горизонтам, не всегда одной моделью: ${parts.join("; ")}. ` +
-    `Муниципальный разрез ${forecastYear} года СберИндекс ещё не опубликовал — прогноз по этому МО фактом не проверен.`;
+  return `Прогноз на каждый месяц — от модели, рекомендуемой для его горизонта: ${parts.join("; ")}. ` +
+    "Пунктир — доли муниципалитета по прошлым месяцам, умноженные на опубликованный федеральный индекс. " +
+    `Муниципальный разрез ${forecastYear} года ещё не опубликован, поэтому прогноз по муниципалитету ` +
+    "фактом не проверен.";
 }
 
 function breaksListText(mo, breaksInfo) {
+  const method = breaksMethodologyText(breaksInfo);
   if (!mo.breaks.length) {
-    return `Изломов при этом штрафе не найдено. ${breaksMethodologyText(breaksInfo)}`;
+    return `Изломов в ряду не найдено — искали задним числом по всему ряду (${method}).`;
   }
   const months = mo.breaks.map((ym) => monthNomYear(ym)).join(", ");
-  return `Изломы: ${months}. ${breaksMethodologyText(breaksInfo)}`;
+  return `Штриховые вертикальные линии — изломы ряда: ${months}. Найдены задним числом ` +
+    `по всему ряду (${method}), это не сигнал в реальном времени.`;
 }
 
 function errorsCaptionText(index) {
   const testLen = monthsBetweenInclusive(index.folds[0].test_from, index.folds[0].test_to);
-  return `MAE — средняя абсолютная ошибка за ${testLen} ${pluralRu(testLen, "месяц", "месяца", "месяцев")} теста, ` +
-    `в ${index.unit}. Мельче и бледнее под числом этого МО — то же по всей панели, для масштаба.`;
+  return `Средняя абсолютная ошибка (MAE), ${index.unit}. Столбцы — фолды, проверочные окна ` +
+    `по ${testLen} ${pluralRu(testLen, "месяцу", "месяца", "месяцев")}: модель учится на всех месяцах ` +
+    "до окна и прогнозирует его. Жирным — лучшая модель в столбце; мельче под числом — " +
+    "MAE той же модели в среднем по всей панели.";
 }
 
 function aggregateLeadText(agg) {
   const forecastYear = parseYM(agg.check.months[0]).y;
-  return `Прогноз первого этапа двухэтапной модели от ${monthGenYear(agg.origin)} на ${forecastYear} год — ` +
-    "единственный прогноз этой работы, который уже можно сверить с фактом. Он ошибается в среднем за год " +
-    `на ${pctFmt(Math.abs(agg.mape.two_stage))}, против ${pctFmt(Math.abs(agg.mape.naive))} у правила ` +
+  return "Первый этап двухэтапной модели прогнозирует федеральный ряд СберИндекса. " +
+    `Его прогноз от ${monthGenYear(agg.origin)} на ${forecastYear} год — единственный в работе, ` +
+    "который уже можно сверить с фактом: средняя ошибка за год " +
+    `${pctFmt(Math.abs(agg.mape.two_stage))} против ${pctFmt(Math.abs(agg.mape.naive))} у правила ` +
     `«${agg.rule_names.naive}» и ${pctFmt(Math.abs(agg.mape.seasonal_naive))} у правила «${agg.rule_names.seasonal_naive}».`;
 }
 
 function aggregateCaptionText(agg) {
-  // «по» в значении «включительно по» берёт тот же падеж, что «в» (винительный,
-  // у месяцев он совпадает с именительным) — не родительный, как после «от».
-  return `История федерального ряда по ${monthNomYear(agg.origin)}, факт ${parseYM(agg.check.months[0]).y} года ` +
-    `поверх неё, прогноз первого этапа (модель «${agg.model_label}») от конца панели и два простых правила ` +
-    `для сравнения. Единица — ${agg.unit}.`;
+  const forecastYear = parseYM(agg.check.months[0]).y;
+  return `Совокупные потребительские расходы России по данным СберИндекса, ${agg.unit}. ` +
+    `Точки на линии факта — месяцы ${forecastYear} года, которых модель не видела. ` +
+    `Прогнозы — от ${monthGenYear(agg.origin)}: первый этап (модель «${agg.model_label}»), ` +
+    `правило «${agg.rule_names.naive}», правило «${agg.rule_names.seasonal_naive}». ` +
+    "Ошибка в таблице — (прогноз − факт) / факт: минус — прогноз ниже факта.";
 }
 
 // ---------------------------------------------------------------------------
@@ -368,18 +382,18 @@ function buildMoChartSpec(index, seriesId, mo, legendEl) {
     months,
     series: [
       { id: "fact", label: "Факт", color: "var(--chart-fact)", values: factValues },
-      { id: "forecast", label: "Прогноз (рекомендуемая модель)", color: "var(--chart-forecast)", values: forecastValues },
+      { id: "forecast", label: "Прогноз", color: "var(--chart-forecast)", values: forecastValues },
       {
-        id: "known", label: "Если бы федеральный индекс за месяц уже был опубликован",
+        id: "known", label: "Если федеральный индекс за месяц уже опубликован",
         color: "var(--chart-known)", dash: "dashed", values: knownValues,
       },
     ],
     markers,
     yFormat: rubFmt,
     yUnit: index.unit,
-    ariaLabel: `Линейный график: факт расходов «${seriesId}» за ${monthNomYear(months[0])} — ` +
-      `${monthNomYear(months[nPanel - 1])} и прогноз на ${monthNomYear(months[nPanel])} — ` +
-      `${monthNomYear(months[months.length - 1])}, ${index.unit}.`,
+    ariaLabel: `Линейный график: расходы «${seriesId}» по месяцам — факт ` +
+      `${monthSpanText(months[0], months[nPanel - 1])} и прогноз ` +
+      `${monthSpanText(months[nPanel], months[months.length - 1])}, ${index.unit}.`,
     legendEl,
   };
 }
@@ -402,7 +416,7 @@ function renderMoNumbersTable(index, mo) {
 
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  ["Месяц", "Факт", "Прогноз", "Разнос агрегата"].forEach((text) => {
+  ["Месяц", "Факт", "Прогноз", "Разнос индекса"].forEach((text) => {
     const th = document.createElement("th");
     th.textContent = text;
     headRow.appendChild(th);
@@ -562,11 +576,11 @@ function buildAggregateChartSpec(agg, legendEl) {
     { id: "fact-check", label: "Факт", color: "var(--chart-fact)", mode: "dots", values: factDots, overlay: true },
     { id: "two_stage", label: "Прогноз первого этапа", color: "var(--chart-forecast)", values: ruleValues("two_stage") },
     {
-      id: "naive", label: `Простое правило «${agg.rule_names.naive}»`,
+      id: "naive", label: `Правило «${agg.rule_names.naive}»`,
       color: "var(--chart-known)", dash: "dashed", values: ruleValues("naive"),
     },
     {
-      id: "seasonal_naive", label: `Простое правило «${agg.rule_names.seasonal_naive}»`,
+      id: "seasonal_naive", label: `Правило «${agg.rule_names.seasonal_naive}»`,
       color: "var(--chart-third)", dash: "dotted", values: ruleValues("seasonal_naive"),
     },
   ];
@@ -576,9 +590,10 @@ function buildAggregateChartSpec(agg, legendEl) {
     // На оси и в подсказке — целые (деления и так круглые числа, сотые ни к чему);
     // точные сотые — только в таблице ниже (renderAggregateTable), где это уже число, а не деление.
     months, series, markers, yFormat: rubFmt, yUnit: agg.unit,
-    ariaLabel: `Линейный график: федеральный агрегат потребительских расходов, история по ` +
-      `${monthGenYear(agg.origin)}, факт ${parseYM(agg.check.months[0]).y} года и прогноз первого этапа ` +
-      `двухэтапной модели против двух простых правил, ${agg.unit}.`,
+    ariaLabel: `Линейный график: совокупные потребительские расходы России по месяцам — факт ` +
+      `${monthSpanText(months[0], months[months.length - 1])} и прогнозы от ${monthGenYear(agg.origin)}: ` +
+      `первый этап двухэтапной модели, правила «${agg.rule_names.naive}» и ` +
+      `«${agg.rule_names.seasonal_naive}», ${agg.unit}.`,
     legendEl,
   };
 }
@@ -753,7 +768,7 @@ function setupCombobox(index) {
     if (!matches.length) {
       const li = document.createElement("li");
       li.className = "listbox-status";
-      li.textContent = "Ничего не найдено";
+      li.textContent = "Ничего не нашлось — попробуйте часть названия или регион";
       listbox.appendChild(li);
       openListbox();
       return;
@@ -779,7 +794,7 @@ function setupCombobox(index) {
       const rest = total - matches.length;
       const li = document.createElement("li");
       li.className = "listbox-status";
-      li.textContent = `И ещё ${rubFmt(rest)} ${pluralRu(rest, "совпадение", "совпадения", "совпадений")}`;
+      li.textContent = `И ещё ${rubFmt(rest)} ${pluralRu(rest, "совпадение", "совпадения", "совпадений")} — уточните запрос`;
       listbox.appendChild(li);
     }
     openListbox();
@@ -844,7 +859,7 @@ init().catch((error) => {
   console.error("Не удалось инициализировать стенд", error);
   const note = document.getElementById("mo-invalid-note");
   if (note) {
-    note.textContent = "Не удалось загрузить данные стенда. Проверьте консоль браузера.";
+    note.textContent = "Не удалось загрузить данные стенда. Обновите страницу.";
     note.hidden = false;
   }
 });

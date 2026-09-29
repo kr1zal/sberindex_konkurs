@@ -4,9 +4,8 @@
     .venv/bin/python scripts/build_site.py [--out DIR]
 
 Пишет `<DIR>/index.html` из `site/index.template.html` (`--out` по умолчанию — корень
-репозитория; тесты собирают во временный каталог) и `<DIR>/demo/data/**`. Стенд
-(`demo/index.html`, его JS и графики) собирает следующая задача — здесь только его
-данные и заглушка `demo/index.html`.
+репозитория; тесты собирают во временный каталог) и `<DIR>/demo/data/**`. Сам стенд
+(`demo/index.html`, `demo/demo.js`, графики) — рукописный и читает только эти данные.
 
 ## Пять чисел страницы входа
 
@@ -17,7 +16,7 @@
 и словарь русских названий моделей (`MODEL_LABELS`) — те же самые, что в отчёте
 (`report/report.qmd`, строки 42-102 и 1682-1692), с тем же поведением.
 
-## Формат данных стенда — контракт со следующей задачей
+## Формат данных стенда — контракт с `demo/demo.js`
 
 Все значения — JSON без NaN (пропуск — ``null``), рубли — целыми, проценты и
 млрд руб. — с двумя знаками, месяцы — строки ``"YYYY-MM"``. Файлы компактные
@@ -67,7 +66,7 @@
     mape: {method: …}                       — средняя |ошибка| за check.months
     mape_by_horizon: {"1": {method: …}, …}  — то же на каждом горизонте файла
 
-Роли ``models`` (порядок и правило — из брифа задачи): ``prophet`` — reference;
+Роли ``models`` (в этом порядке): ``prophet`` — reference;
 ``naive_last`` — naive; recommended-модель самого короткого горизонта
 `forecast_forward.yaml` — recommended; ``summary.csv`` ``MAE.idxmin()`` — best_mean;
 recommended-модель самого длинного горизонта — two_stage. Если две роли достаются
@@ -105,7 +104,7 @@ from src.external import load_aggregate  # noqa: E402
 from src.results_guard import read_results, refused  # noqa: E402
 from src.split import rolling_origin  # noqa: E402
 
-# Порог из брифа задачи: суммарный размер demo/data/ не должен превышать это число байт.
+# Порог размера стенда: суммарный размер demo/data/ не должен превышать это число байт.
 MAX_DEMO_BYTES = 2_000_000
 
 # МО стенда по умолчанию — то же, чем отчёт иллюстрирует изломы одного ряда
@@ -249,32 +248,36 @@ def compute_placeholders(
 ) -> dict[str, str]:
     """Считает все подстановки `${имя}` шаблона `site/index.template.html`.
 
-    Список подстановок (страница входа их не хранит нигде, кроме этого шаблона —
-    следующая задача переписывает текст вокруг них, опираясь на этот список):
+    Текст страницы входа живёт в шаблоне, а каждое число в нём — одна из этих
+    подстановок; вписанных руками чисел в шаблоне нет. Пять чисел — те же, что
+    в резюме отчёта: главное число, наукаст, год вперёд, проверка агрегата, панель.
 
     - ``built`` — дата сборки словами, «29 сентября 2026».
     - ``horizon_main`` — горизонт основного протокола, мес. (`configs/full.yaml::split.horizon`).
     - ``forecast_year`` — год прогноза вперёд, `origin.year + 1` (`configs/forecast_forward.yaml::origin`).
     - ``prophet_mae`` / ``best_mae`` — MAE эталона (Prophet) и лучшей модели на этом горизонте, ₽.
-    - ``best_gain`` — выигрыш лучшей модели к эталону, % (число 1 брифа).
+    - ``best_gain`` — выигрыш лучшей модели к эталону, %, без знака (главное число;
+      `_rs["gain"]` отчёта).
     - ``r2_prophet`` / ``r2_best`` — R² пул эталона и лучшей модели там же.
     - ``folds_caveat`` — оговорка о фолдах целиком: «(Но )?выигрыш держится на N
       фолдах из M[: на таком-то эталон точнее]».
-    - ``h1_best`` / ``h1_prophet`` / ``h1_gain`` — то же для наукаста, горизонт 1
-      (число 2 брифа); «—», если лучшая модель основного протокола не входит
-      в `configs/horizons.yaml`.
+    - ``h1_best`` / ``h1_prophet`` / ``h1_gain`` — то же для наукаста, горизонт 1;
+      «—», если лучшая модель основного протокола не входит в `configs/horizons.yaml`.
     - ``h12_gain_naive`` / ``h12_gain_prophet`` — выигрыш лучшей модели года вперёд
-      (горизонт 12, без оракула) к наивной и к эталону, %.
-    - ``h12_note`` — оговорка целиком (число 3 брифа): модель, выигрыш или голые MAE
-      (если модель не бьёт обоих), число зачтённых фолдов, если оно меньше трёх.
+      (горизонт 12, без оракула) к наивной и к эталону, %. Лучшая выбирается минимумом
+      MAE среди моделей, где есть обе, поэтому оба выигрыша не отрицательны.
+    - ``h12_model`` — эта модель: «двухэтапная» или «название» из `MODEL_LABELS`.
+    - ``h12_folds_caveat`` — «, но это один фолд» (число фолдов словом), если у неё
+      зачтено меньше трёх фолдов, иначе пусто: хвост фразы, как в `_rs["h12"]` отчёта.
     - ``agg_own_pct`` / ``agg_rules_pct`` — ошибка первого этапа двухэтапной модели
       и простых правил, % (диапазон по горизонтам проверки, схлопывается в одно
       число, если границы совпадают после округления).
+    - ``agg_rules`` — названия простых правил из файла проверки, в кавычках и через «и»:
+      `«как в декабре» и «как год назад»`.
     - ``agg_horizon_range`` — горизонты проверки, «1–12».
     - ``agg_origin_label`` — месяц и год origin словами, «декабря 2024».
-    - ``agg_note`` — фраза целиком (число 4 брифа).
-    - ``n_series_rub`` / ``n_months`` — рядов и месяцев панели (число 5 брифа), из формы
-      матрицы `build_matrix` (`configs/forecast_forward.yaml::data`).
+    - ``n_series_rub`` / ``n_months`` — рядов и месяцев панели, из формы матрицы
+      `build_matrix` (`configs/forecast_forward.yaml::data`).
     - ``panel_shape`` — «N рядов × M месяцев» целиком, слова — через `plural`.
     - ``panel_span`` — первый и последний месяц панели словами, «январь 2023 — декабрь 2024».
     """
@@ -292,7 +295,10 @@ def compute_placeholders(
         "forecast_year": str(forecast_year),
         "prophet_mae": rub(summary.loc["prophet", "MAE"]),
         "best_mae": rub(summary.loc[top, "MAE"]),
-        "best_gain": num(-summary.loc[top, "к Prophet, %"], 1),
+        # Выигрыш без знака, как `_rs["gain"]` отчёта: на странице число стоит перед словом
+        # «точнее», и минус изменения MAE с ним бы спорил. top — минимум MAE сводки, где есть
+        # и эталон, так что выигрыш не бывает отрицательным.
+        "best_gain": num(summary.loc[top, "к Prophet, %"], 1),
         "r2_prophet": num(summary.loc["prophet", "R² пул"], 3),
         "r2_best": num(summary.loc[top, "R² пул"], 3),
     }
@@ -324,40 +330,32 @@ def compute_placeholders(
     else:
         placeholders["h1_best"] = placeholders["h1_prophet"] = placeholders["h1_gain"] = "—"
 
-    # Год вперёд — горизонт 12, без оракула two_stage_known (report.qmd::_rs["h12"] целиком).
+    # Год вперёд — горизонт 12, без оракула two_stage_known (report.qmd::_rs["h12"]). На странице
+    # у числа одна подпись, и оговорка о фолдах — в ней же, поэтому сюда идут части фразы
+    # отчёта, а не она целиком: модель и хвост «, но это один фолд».
     year = horizons_summary[
         (horizons_summary["horizon"] == 12) & horizons_summary["MAE"].notna()
         & (horizons_summary["model"] != "two_stage_known")
     ].set_index("model")
     if len(year) and {"naive_last", "prophet"} <= set(year.index):
         year_top = year["MAE"].idxmin()
-        panel_year = horizons_summary[
-            (horizons_summary["horizon"] == 12) & horizons_summary["model"].str.startswith("global_gbm")
-        ]
-        no_panel = len(panel_year) > 0 and bool(panel_year["MAE"].isna().all())
-        gain_naive = year.loc[year_top, "к наивной, %"]
-        gain_prophet = year.loc[year_top, "к Prophet, %"]
-        placeholders["h12_gain_naive"] = num(gain_naive, 0)
-        placeholders["h12_gain_prophet"] = num(gain_prophet, 0)
+        placeholders["h12_gain_naive"] = num(year.loc[year_top, "к наивной, %"], 0)
+        placeholders["h12_gain_prophet"] = num(year.loc[year_top, "к Prophet, %"], 0)
+        placeholders["h12_model"] = ("двухэтапная" if year_top == "two_stage"
+                                     else f"«{MODEL_LABELS.get(year_top, year_top)}»")
+        # Столько фолдов, сколько допускают 24 точки: без их числа процент выигрыша
+        # читался бы как устойчивый (та же оговорка, что в резюме отчёта).
         n_folds_top = int(horizons_folds.loc[
             (horizons_folds["horizon"] == 12) & (horizons_folds["model"] == year_top), "MAE"
         ].notna().sum())
-        model_label = "двухэтапная" if year_top == "two_stage" else f"`{year_top}`"
-        if min(gain_naive, gain_prophet) > 0:
-            body = f"точнее наивной и эталона на {num(gain_naive, 0)}% и {num(gain_prophet, 0)}%"
-        else:
-            body = (f"{rub(year.loc[year_top, 'MAE'])} против {rub(year.loc['naive_last', 'MAE'])} "
-                    f"у наивной и {rub(year.loc['prophet', 'MAE'])} у эталона")
-        placeholders["h12_note"] = (
-            f"На год вперёд{', где панельным моделям не на чем учиться,' if no_panel else ''} "
-            f"лучшая — {model_label}: {body}"
-            + (f", но это {in_words_m(n_folds_top)} {plural(n_folds_top, 'фолд', 'фолда', 'фолдов')}"
-               if 0 < n_folds_top < 3 else "")
-            + "."
+        placeholders["h12_folds_caveat"] = (
+            f", но это {in_words_m(n_folds_top)} {plural(n_folds_top, 'фолд', 'фолда', 'фолдов')}"
+            if 0 < n_folds_top < 3 else ""
         )
     else:
         placeholders["h12_gain_naive"] = placeholders["h12_gain_prophet"] = "—"
-        placeholders["h12_note"] = "—"
+        placeholders["h12_model"] = "—"
+        placeholders["h12_folds_caveat"] = ""
 
     # Проверка первого этапа по факту 2025 года (report.qmd::_rs["agg"]).
     agg_mape = agg_check.assign(e=agg_check["error_pct"].abs()).groupby(["method", "horizon"])["e"].mean()
@@ -371,17 +369,11 @@ def compute_placeholders(
 
     placeholders["agg_own_pct"] = _range(agg_own.min(), agg_own.max())
     placeholders["agg_rules_pct"] = _range(agg_rules.min(), agg_rules.max())
+    placeholders["agg_rules"] = and_join(f"«{name}»" for name in agg_names)
     placeholders["agg_horizon_range"] = f"{agg_hs[0]}–{agg_hs[-1]}"
     placeholders["agg_origin_label"] = f"{MONTH_OF[origin.month - 1]} {origin.year}"
-    placeholders["agg_note"] = (
-        "Первый этап двухэтапной модели — прогноз федерального ряда от "
-        f"{placeholders['agg_origin_label']} — ошибается в среднем на "
-        f"{placeholders['agg_own_pct']}% (горизонты {placeholders['agg_horizon_range']} мес.) "
-        f"против {placeholders['agg_rules_pct']}% у правил "
-        + and_join(f"«{name}»" for name in agg_names) + "."
-    )
 
-    # Панель — форма матрицы, а не результат прогона (число 5 брифа).
+    # Панель — форма матрицы, а не результат прогона.
     n_series, n_months = wide.shape[1], wide.shape[0]
     placeholders["n_series_rub"] = rub(n_series)
     placeholders["n_months"] = str(n_months)
@@ -468,7 +460,7 @@ def _build_forecast_rule(recommended: pd.DataFrame, step_horizon: dict[int, int]
 
 
 def _build_model_roles(summary: pd.DataFrame, forward_cfg: dict) -> list[dict]:
-    """Пять ролей таблицы ошибок стенда, в порядке из брифа задачи. `role` — строка;
+    """Пять ролей таблицы ошибок стенда, в порядке докстринга модуля. `role` — строка;
     модель в нескольких ролях сразу входит одной строкой, роли соединены «+»."""
     recommended = forward_cfg["recommended"]
     shortest, longest = min(recommended), max(recommended)
