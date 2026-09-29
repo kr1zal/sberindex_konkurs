@@ -12,7 +12,7 @@
 // Числа и месяцы — форматирование как в отчёте (report/report.qmd, scripts/build_site.py):
 // неразрывный пробел в разрядах, запятая, минус «−». Проценты агрегата приходят уже
 // готовой строкой из demo/data/aggregate.json (тем же num(v, 1), что в отчёте) — здесь
-// только достраивается «%», без повторного округления (Important 2 итогового ревью).
+// только достраивается «%», без повторного округления.
 // ---------------------------------------------------------------------------
 
 function groupThousands(digitsStr) {
@@ -228,9 +228,9 @@ const moFileCache = new Map();
 
 async function fetchMoFile(fileNumber) {
   if (!moFileCache.has(fileNumber)) {
-    // Отклонённый промис не остаётся в кэше (Important 1 итогового ревью): иначе
-    // один сбой сети закрывает весь регион до перезагрузки страницы, а не только
-    // эту попытку — следующий выбор того же региона попробует загрузить заново.
+    // Отклонённый промис не остаётся в кэше: иначе один сбой сети закрывает весь
+    // регион до перезагрузки страницы, а не только эту попытку — следующий выбор
+    // того же региона попробует загрузить заново.
     moFileCache.set(fileNumber, fetchJson(`data/mo/${fileNumber}.json`).catch((error) => {
       moFileCache.delete(fileNumber);
       throw error;
@@ -274,7 +274,7 @@ function searchHintText(index) {
   // Ряды с суффиксом « #N» в series_id — те самые, о которых говорит последняя фраза
   // («их различает номер после «#»»), а не любые ряды с неуникальным базовым именем:
   // у части омонимов вторая копия выпала из панели по пропускам, и счёт по имени
-  // занижал бы число (Minor 11 итогового ревью).
+  // занижал бы число.
   const names = index.n_hash_names;
   const series = index.n_hash_series;
   return "Ищите по любым словам из названия или региона. " +
@@ -331,7 +331,7 @@ function forecastRuleText(index) {
   });
   // Месяц берётся с самого короткого горизонта, который его покрывает — не с «отдельного»
   // горизонта у каждой модели порознь; иначе непонятно, почему у месяца вообще одна модель,
-  // а не несколько сразу (см. итоговое ревью, Minor 16).
+  // а не несколько сразу.
   return "Прогноз на каждый месяц — с самого короткого горизонта, который его покрывает, " +
     `от рекомендуемой на этом горизонте модели: ${parts.join("; ")}. ` +
     "Пунктир — доли муниципалитета по прошлым месяцам, умноженные на опубликованный федеральный индекс. " +
@@ -380,7 +380,7 @@ function aggregateCaptionText(agg) {
 // ---------------------------------------------------------------------------
 
 // Название столбца «Числа графика» и подпись того же ряда в легенде графика — один
-// и тот же текст, не два разных о том же самом (Minor 16 итогового ревью).
+// и тот же текст, не два разных о том же самом.
 const KNOWN_SERIES_LABEL = "Если федеральный индекс за месяц уже опубликован";
 
 function buildMoChartSpec(index, seriesId, mo, legendEl) {
@@ -393,8 +393,8 @@ function buildMoChartSpec(index, seriesId, mo, legendEl) {
   // Точка стыка (nPanel - 1): факт последнего месяца панели, повторённый в начале линий
   // прогноза и «известного» пунктира, чтобы линии визуально соединялись с фактом, а не
   // начинались с разрыва. joinAt отмечает её для LineChart — подсказка графика эту точку
-  // не подписывает «Прогноз»/«Если индекс уже опубликован» (Minor 10 итогового ревью):
-  // число там и так факт, а не прогноз ни на йоту.
+  // не подписывает «Прогноз»/«Если индекс уже опубликован»: число там и так факт,
+  // а не прогноз ни на йоту.
   const forecastValues = new Array(months.length).fill(null);
   forecastValues[nPanel - 1] = mo.fact[nPanel - 1];
   mo.forecast.forEach((v, i) => { forecastValues[nPanel + i] = v; });
@@ -510,16 +510,17 @@ function renderErrorsTable(index, mo) {
   // Компактные подписи фолдов — общие для широких заголовков (две строки в <th>)
   // и узких карточек (data-label каждой ячейки, см. demo.css): «апр–июн 2024».
   // В карточке — она же вместе с длиной обучения: на телефоне <thead> скрыт
-  // стилем целиком, и без этого «обучение N мес.» там негде взять (Minor 14
-  // итогового ревью).
+  // стилем целиком, и без этого «обучение N мес.» там негде взять.
   const foldLabels = index.folds.map((fold) => monthRangeAxis(fold.test_from, fold.test_to));
   const foldCardLabels = index.folds.map(
-    (fold) => `${monthRangeAxis(fold.test_from, fold.test_to)} · обучение ${fold.train_months} мес.`
+    // Неразрывный пробел перед «мес.» — иначе на узкой карточке (390 px) подпись
+    // переносится между числом и словом: «обучение 15 / мес.».
+    (fold) => `${monthRangeAxis(fold.test_from, fold.test_to)} · обучение ${fold.train_months} мес.`
   );
 
   // display: block на телефоне (demo.css) снимает встроенную табличную семантику —
   // явные role восстанавливают её для скринридера и на широком экране ничего не меняют,
-  // там она и так есть у настоящего <table> (Minor 14 итогового ревью).
+  // там она и так есть у настоящего <table>.
   const thead = document.createElement("thead");
   thead.setAttribute("role", "rowgroup");
   const headRow = document.createElement("tr");
@@ -571,9 +572,9 @@ function renderErrorsTable(index, mo) {
     tr.appendChild(rowTh);
 
     const { perFold, mean } = means[model.id];
-    // Фолдов может быть не три — сколько их, решает конфиг, а не разметка таблицы
-    // (Minor 6 итогового ревью): и длина запасного массива, и индекс столбца «Среднее»
-    // берутся из nFolds, а не зашиты числом.
+    // Фолдов может быть не три — сколько их, решает конфиг, а не разметка таблицы:
+    // и длина запасного массива, и индекс столбца «Среднее» берутся из nFolds,
+    // а не зашиты числом.
     const panelRow = panelMae[model.id] || new Array(nFolds + 1).fill(null);
 
     perFold.forEach((v, col) => {
@@ -660,8 +661,10 @@ function buildAggregateChartSpec(agg, legendEl) {
 
 function renderAggregateTable(agg) {
   // Как в таблице отчёта (report/report.qmd, ~2148-2163): факт и прогноз целыми
-  // (rub), ошибка — только в процентах (свой знак у каждой из трёх), без рублёвого
-  // разноса и рублёвой средней ошибки — они здесь ничего не добавляют к процентам.
+  // (agg.check.actual_rub/forecast_rub — готовые строки из Python, см. withPercent
+  // вверху файла про ту же логику у процентов), ошибка — только в процентах (свой
+  // знак у каждой из трёх), без рублёвого разноса и рублёвой средней ошибки — они
+  // здесь ничего не добавляют к процентам.
   const table = document.getElementById("agg-table");
   table.innerHTML = "";
 
@@ -685,8 +688,8 @@ function renderAggregateTable(agg) {
     rowTh.textContent = LineChart.formatMonthShort(ym, true);
     tr.appendChild(rowTh);
     [
-      rubFmt(agg.check.actual[i]),
-      rubFmt(agg.check.forecast.two_stage[i]),
+      agg.check.actual_rub[i],
+      agg.check.forecast_rub.two_stage[i],
       withPercent(agg.check.error_pct.two_stage[i]),
       withPercent(agg.check.error_pct.naive[i]),
       withPercent(agg.check.error_pct.seasonal_naive[i]),
@@ -728,10 +731,10 @@ let moChart = null;
 let selectSeq = 0;
 
 async function selectMo(index, requestedSeriesId, { pushUrl }) {
-  // Счётчик выбора (Important 1 итогового ревью): выбор МО из ещё не загруженного
-  // региона и следом — другого, уже загруженного, гонит два fetch параллельно, и без
-  // счётчика первый ответ, придя позже, перезаписывает график и таблицы под именем
-  // уже показанного второго МО. seq, захваченный в замыкании, — метка «это ещё я?».
+  // Счётчик выбора: выбор МО из ещё не загруженного региона и следом — другого,
+  // уже загруженного, гонит два fetch параллельно, и без счётчика первый ответ,
+  // придя позже, перезаписывает график и таблицы под именем уже показанного
+  // второго МО. seq, захваченный в замыкании, — метка «это ещё я?».
   const seq = ++selectSeq;
 
   const known = index.seriesById.has(requestedSeriesId);
@@ -744,11 +747,11 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
   } catch (error) {
     // Пишем в #mo-invalid-note, только если это ещё наш выбор: устаревший провал (второй
     // выбор уже сменил seq, пока этот файл падал) не должен затирать уже показанный
-    // результат более свежего запроса сообщением об ошибке (Important 1 итогового ревью).
+    // результат более свежего запроса сообщением об ошибке.
     if (seq === selectSeq) {
       const note = document.getElementById("mo-invalid-note");
       note.textContent =
-        "Не удалось загрузить данные этого муниципального образования. Обновите страницу или попробуйте другое.";
+        `Не удалось загрузить данные «${seriesId}». Обновите страницу или попробуйте другое.`;
       note.hidden = false;
     }
     throw error; // console.error — в selectMoSafe, единственном месте, откуда вызывают
@@ -769,8 +772,7 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
   document.getElementById("mo-search").value = seriesId;
   document.getElementById("mo-name").textContent = seriesId;
   // Заголовок вкладки — с названием текущего МО: у ссылки с ?mo= иначе был бы всегда
-  // один и тот же заголовок вне зависимости от того, что на ней открыто (Minor 16
-  // итогового ревью).
+  // один и тот же заголовок вне зависимости от того, что на ней открыто.
   document.title = `${seriesId} — прогноз расходов по муниципалитету`;
 
   const metaEl = document.getElementById("mo-meta");
@@ -851,9 +853,9 @@ function setupCombobox(index) {
     selectMoSafe(index, seriesId, { pushUrl: true });
   }
 
-  // Короткий итог для живой области — не сам список (Minor 14 итогового ревью):
-  // подробности и так на экране в listbox, а на каждую букву запроса произносить
-  // их скринридеру целиком было бы избыточно.
+  // Короткий итог для живой области — не сам список: подробности и так на экране
+  // в listbox, а на каждую букву запроса произносить их скринридеру целиком было бы
+  // избыточно.
   function matchesStatusText(total) {
     if (!total) return "Ничего не нашлось";
     return `Найдено ${rubFmt(total)} ${pluralRu(total, "совпадение", "совпадения", "совпадений")}`;
@@ -862,7 +864,7 @@ function setupCombobox(index) {
   function noMatchesText() {
     // Число — то же, что во вступлении к поиску (index.n_series): в панель вошли
     // только ряды без длинных пропусков, и это стоит сказать здесь тоже, а не
-    // только один раз наверху страницы (Minor 12 итогового ревью).
+    // только один раз наверху страницы.
     const total = index.n_series;
     return "Ничего не нашлось — попробуйте часть названия или регион. В стенд вошли " +
       `${rubFmt(total)} ${pluralRu(total, "муниципальное образование", "муниципальных образования", "муниципальных образований")} ` +
@@ -882,8 +884,8 @@ function setupCombobox(index) {
       const li = document.createElement("li");
       li.className = "listbox-status";
       // role="option" + aria-disabled, а не текст без роли внутри role="listbox" —
-      // так строка остаётся допустимым потомком listbox (Minor 14 итогового ревью).
-      // currentOptions пуст, поэтому ни стрелки, ни Enter её всё равно не выберут.
+      // так строка остаётся допустимым потомком listbox. currentOptions пуст,
+      // поэтому ни стрелки, ни Enter её всё равно не выберут.
       li.setAttribute("role", "option");
       li.setAttribute("aria-disabled", "true");
       li.textContent = noMatchesText();
@@ -969,10 +971,14 @@ async function init() {
     selectMoSafe(index, seriesId, { pushUrl: false });
   });
 
-  await selectMo(index, getMoParam() || index.default_mo, { pushUrl: false });
+  // Агрегат и выбранное МО грузятся каждый своим fetch и не зависят друг от друга:
+  // иначе сбой при загрузке первого МО оставлял бы блок агрегата на «Загрузка
+  // данных…» навсегда — до renderAggregateBlock() код не доходил бы. Первый выбор
+  // МО идёт тем же safe-путём (selectMoSafe), что и последующие — из поиска и popstate.
   renderAggregateBlock().catch((error) => {
     console.error("Не удалось построить блок федерального агрегата", error);
   });
+  selectMoSafe(index, getMoParam() || index.default_mo, { pushUrl: false });
 }
 
 init().catch((error) => {

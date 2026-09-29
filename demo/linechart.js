@@ -157,10 +157,10 @@ const LineChart = (() => {
     let margin = { top: 28, right: 18, bottom: 34, left: 64 };
     let scaleX = (i) => i;
     let scaleY = (v) => v;
-    // Ссылка на элемент курсора, а не id (Minor 7 итогового ревью): на странице стенда
-    // два графика создаются этой же функцией, и id="chart-cursor" повторялся бы в обоих
-    // SVG — невалидный HTML, который до сих пор работал только потому, что querySelector
-    // ниже был ограничен своим svg.
+    // Ссылка на элемент курсора, а не id: на странице стенда два графика создаются
+    // этой же функцией, и id="chart-cursor" повторялся бы в обоих SVG — невалидный
+    // HTML, который до сих пор работал только потому, что querySelector ниже был
+    // ограничен своим svg.
     let cursorEl = null;
 
     container.innerHTML = "";
@@ -193,8 +193,8 @@ const LineChart = (() => {
         item.className = "chart-legend-item";
         const key = document.createElement("span");
         // Класс по значению dash ("dashed"/"dotted"), а не один общий "-dashed" на любой
-        // штрих (Minor 8 итогового ревью): «как год назад» рисуется точками и должна
-        // выглядеть точками и в легенде, а не как ещё одна штриховая линия.
+        // штрих: «как год назад» рисуется точками и должна выглядеть точками и в легенде,
+        // а не как ещё одна штриховая линия.
         key.className = "chart-legend-key" + (s.dash ? ` chart-legend-key-${s.dash}` : "");
         key.style.setProperty("--legend-color", s.color);
         const text = document.createElement("span");
@@ -222,9 +222,9 @@ const LineChart = (() => {
     function showTooltip(index, clientX) {
       const month = currentSpec.months[index];
       const rows = visibleSeries()
-        // joinAt — точка стыка факта с началом линии прогноза (Minor 10 итогового
-        // ревью): число там настоящее, но это факт, а не прогноз, и подсказка его
-        // как прогноз/пунктир не подписывает — только линия проходит через него.
+        // joinAt — точка стыка факта с началом линии прогноза: число там настоящее,
+        // но это факт, а не прогноз, и подсказка его как прогноз/пунктир не подписывает —
+        // только линия проходит через него.
         .map((s) => ({ s, v: s.values[index] }))
         .filter(({ s, v }) => isNum(v) && s.joinAt !== index);
       if (!rows.length) { hideTooltip(); return; }
