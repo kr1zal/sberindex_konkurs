@@ -41,7 +41,7 @@ scripts/export_results.py         снимок .csv.gz пяти крупных r
 scripts/build_site.py   генератор страницы входа и данных демонстрационного стенда → index.html, demo/data/*.json
 site/                   шаблон (index.template.html) и общая тема (site.css) страницы входа и стенда
 index.html              страница входа GitHub Pages — сгенерирована build_site.py, коммитится
-demo/                   демонстрационный стенд «покажите мой город»: index.html (пока заглушка) и данные data/
+demo/                   демонстрационный стенд «покажите мой город»: index.html, demo.js, linechart.js, demo.css и данные data/ (генерирует build_site.py)
 data/raw/               панель СберИндекса (parquet)
 data/news/              агрегаты новостного корпуса (monthly.parquet, national.parquet); headlines.parquet — только локально
 data/reference/         справочник МО, ключевая ставка
