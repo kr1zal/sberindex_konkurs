@@ -14,7 +14,11 @@
   --ink: #0b0b0b;
   --ink-soft: #52514e;
   --rule: #e3e2de;
-  --accent: #2a78d6;
+  /* Акцент текста и кнопок — темнее, чем акцент отчёта (#2a78d6, 4,30:1 к фону, 4,42:1
+     белого текста на нём): оба ниже порога AA для текста 4,5:1. #1f6bc4 — около 5,2:1
+     (Minor 13 итогового ревью). Линия прогноза графика — свой var(--chart-forecast) в
+     demo.css, ей порог графики 3:1, и её можно было оставить исходным синим. */
+  --accent: #1f6bc4;
   --accent-ink: #ffffff;
   --focus: #2a78d6;
 }
@@ -132,6 +136,10 @@ hr.rule {
 .stat-number {
   flex: 0 0 auto;
   max-width: 100%;
+  /* <p> по умолчанию несёт 1em полей сверху и снизу — 30,4px при 1,9rem, больше, чем
+     весь ряд отступов вокруг (gap, padding-bottom). Это и разрежало пятёрку чисел,
+     а не gap (Minor 2 итогового ревью). */
+  margin: 0;
   font-size: 1.9rem;
   font-weight: 600;
   color: var(--ink);
@@ -143,11 +151,13 @@ hr.rule {
   color: var(--ink);
 }
 
-.stat-note {
-  flex-basis: 100%;
-  margin: 0.25rem 0 0;
-  color: var(--ink-soft);
-  font-size: 0.92rem;
+/* На телефоне подпись — всегда на своей строке под числом: без этого короткая подпись
+   («точнее эталона на наукасте…» у «40%») вставала в одну строку с числом, а у
+   остальных четырёх пунктов — нет, вперемешку (Minor 2 итогового ревью). */
+@media (max-width: 479px) {
+  .stat-caption {
+    flex-basis: 100%;
+  }
 }
 
 .method {
@@ -165,6 +175,15 @@ hr.rule {
   display: block;
   width: 100%;
   height: auto;
+}
+
+/* На телефоне схема — 324×165px, подписи в ней около 3px и нечитаемы без увеличения;
+   картинка обёрнута ссылкой на исходный SVG (Minor 4 итогового ревью). */
+.method-figure-caption {
+  margin: 0.6rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  text-align: right;
 }
 
 /* Кнопки-ссылки: только относительные пути (кроме репозитория). Область нажатия —
@@ -209,12 +228,4 @@ hr.rule {
 
 .footer p {
   margin: 0.4rem 0;
-}
-
-/* Заглушка демонстрационного стенда (demo/index.html) — тот же файл темы. */
-.stub {
-  max-width: 32rem;
-  margin: 4rem auto;
-  padding: 0 1rem;
-  text-align: left;
 }
