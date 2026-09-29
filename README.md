@@ -1,5 +1,9 @@
 # Прогнозирование потребительских расходов муниципальных образований
 
+**Обзор работы** — [главные числа и все материалы на одной странице](https://kr1zal.github.io/sberindex_konkurs/)
+· **стенд** — [прогноз по любому муниципалитету](https://kr1zal.github.io/sberindex_konkurs/demo/):
+расходы по месяцам, прогноз на следующий год, изломы ряда и то, как модели ошибались на нём.
+
 **Отчёт** — [на GitHub Pages](https://kr1zal.github.io/sberindex_konkurs/report/report.html)
 и [в PDF](report/report.pdf) · **слайды** —
 [на GitHub Pages](https://kr1zal.github.io/sberindex_konkurs/report/slides.html)

@@ -196,7 +196,8 @@ class BuildSiteTest(unittest.TestCase):
         top = self.summary["MAE"].idxmin()
         prophet_mae = self.summary.loc["prophet", "MAE"]
         best_mae = self.summary.loc[top, "MAE"]
-        best_gain = -self.summary.loc[top, "к Prophet, %"]
+        # Выигрыш без знака: на странице число стоит перед словом «точнее».
+        best_gain = self.summary.loc[top, "к Prophet, %"]
         r2_prophet = self.summary.loc["prophet", "R² пул"]
         r2_best = self.summary.loc[top, "R² пул"]
 
@@ -249,8 +250,13 @@ class BuildSiteTest(unittest.TestCase):
 
         self.assertIn(f"{_fmt(gain_naive, 0)}%", self.html)
         self.assertIn(f"{_fmt(gain_prophet, 0)}%", self.html)
+        if year_top == "two_stage":
+            self.assertIn("двухэтапная", self.html)
         if 0 < n_folds_top < 3:
-            self.assertIn(_plural(n_folds_top, "фолд", "фолда", "фолдов"), self.html)
+            # Оговорка целиком, числом словом: «один фолд» / «два фолда».
+            words = {1: "один", 2: "два"}[n_folds_top]
+            fold = _plural(n_folds_top, "фолд", "фолда", "фолдов")
+            self.assertIn(f"но это {words} {fold}", self.html)
 
     # -- число 4: проверка агрегата по факту 2025 года -----------------------
 
@@ -270,6 +276,9 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIn(f"{_range(rules)}%", self.html)
         self.assertIn(f"{horizons[0]}–{horizons[-1]}", self.html)
         self.assertIn(f"{_MONTH_OF[origin.month - 1]} {origin.year}", self.html)
+        # Названия простых правил — из колонки aggregate_model того же файла.
+        for name in self.agg_check.loc[self.agg_check["method"] != "two_stage", "aggregate_model"].unique():
+            self.assertIn(f"«{name}»", self.html)
 
     def test_forecast_year_is_origin_year_plus_one(self) -> None:
         # «2025» на странице — не хардкод, а origin.year + 1: страница входа ссылается
