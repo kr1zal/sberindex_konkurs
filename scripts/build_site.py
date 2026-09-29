@@ -33,6 +33,12 @@
     n_no_region          рядов без региона (region пуст в forecast_2025.csv)
     n_homonym_names      названий (series_id без " #N"), у которых больше одного ряда
     n_homonym_series     рядов, относящихся к таким названиям
+    n_hash_names         названий среди рядов с суффиксом " #N" в series_id, уникальных
+    n_hash_series        рядов с таким суффиксом — подсказка поиска говорит про них
+                         «их различает номер после «#»», и это не то же самое, что
+                         n_homonym_series: у части омонимов вторая копия выпала из
+                         панели по пропускам, суффикс "#2" остался без пары "#1", и
+                         счёт по имени (n_homonym_*) такой ряд омонимом больше не считает
     default_mo           МО, которое стенд открывает по умолчанию
     forecast_rule        [{from, to, model, horizon, label}, …] — отрезки месяцев
                          прогноза подряд с одной моделью и горизонтом; label — как
@@ -61,10 +67,16 @@
                                                src/charts.py::aggregate_check)
     check: {months, actual,
             forecast: {two_stage, naive, seasonal_naive},
-            error_pct: {…те же ключи}}       — горизонт = max(configs/forecast_forward.yaml::horizons)
+            error_pct: {…те же ключи}}       — горизонт = max(forecast_forward.yaml::recommended)
     rule_names: {naive, seasonal_naive}     — из колонки aggregate_model
     mape: {method: …}                       — средняя |ошибка| за check.months
-    mape_by_horizon: {"1": {method: …}, …}  — то же на каждом горизонте файла
+
+    ``error_pct`` и ``mape`` — уже готовые строки, отформатированные функцией ``num``
+    этого модуля (``num(v, 1, sign=True)`` и ``num(v, 1)``), не числа: стенд показывает
+    их как есть. Округлять на JS ещё раз (`Math.round` после округления питоном) нельзя —
+    у отчёта и стенда тогда может разойтись последний знак (Important 2 итогового
+    ревью). Числа графика (``history``, ``check.actual``, ``check.forecast``) остаются
+    числами — из них ничего не форматируется текстом.
 
 Роли ``models`` (в этом порядке): ``prophet`` — reference;
 ``naive_last`` — naive; recommended-модель самого короткого горизонта
@@ -87,6 +99,7 @@ import argparse
 import datetime as dt
 import importlib.util
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -497,7 +510,12 @@ def build_demo_data(
 ) -> int:
     """Пишет `demo/data/index.json`, `demo/data/mo/<номер>.json` и `demo/data/aggregate.json`
     (формат — докстринг модуля). Возвращает суммарный размер записанного, в байтах."""
-    horizons = sorted(forward_cfg["horizons"])
+    # Горизонты — по ключам recommended, как _fc_steps отчёта (report/report.qmd), а не
+    # forward_cfg["horizons"]: тот список и recommended сейчас совпадают, но recommended —
+    # источник истины (это она отвечает и за прогноз, и за пунктир), а horizons здесь был
+    # бы совпадением, которое зеркалить в точности надёжнее, чем полагаться на то, что оно
+    # не разойдётся (Minor 15 итогового ревью).
+    horizons = sorted(forward_cfg["recommended"])
     origin = pd.Period(forward_cfg["origin"], "M")
     step_horizon = _step_horizon_map(horizons)
 
@@ -536,11 +554,20 @@ def build_demo_data(
         for f in fold_specs
     ]
 
-    # Гомонимы — по " #N" в series_id (src.data.load_panel), не по региону-омониму
-    # (src.regions.attach_regions — это n_no_region, другая причина).
+    # Гомонимы — по совпадению базового имени (без " #N") у нескольких столбцов матрицы,
+    # не по региону-омониму (src.regions.attach_regions — это n_no_region, другая причина).
     base_names = pd.Index(wide.columns).map(lambda s: s.split(" #")[0])
     homonym_counts = pd.Series(base_names).value_counts()
     homonym_counts = homonym_counts[homonym_counts > 1]
+
+    # То же, но строго по факту суффикса " #N" в series_id (Minor 11 итогового ревью):
+    # подсказка поиска говорит «их различает номер после «#»», и это утверждение верно
+    # именно для рядов с таким суффиксом — не для всех рядов с неуникальным базовым
+    # именем. У пяти названий вторая копия выпала из панели по пропускам: суффикс "#2"
+    # остался без пары "#1", homonym_counts выше такой ряд омонимом уже не считает
+    # (группа из одного), а суффикс на его series_id всё ещё есть.
+    hash_series = pd.Index(wide.columns)[pd.Index(wide.columns).str.contains(r" #\d+$", regex=True)]
+    hash_names = hash_series.map(lambda s: re.sub(r" #\d+$", "", s))
 
     if DEFAULT_MO not in wide.columns:
         raise ValueError(f"МО стенда по умолчанию {DEFAULT_MO!r} не найдено среди рядов панели")
@@ -582,6 +609,8 @@ def build_demo_data(
         "n_no_region": int(regions["region"].isna().sum()),
         "n_homonym_names": int(len(homonym_counts)),
         "n_homonym_series": int(homonym_counts.sum()) if len(homonym_counts) else 0,
+        "n_hash_names": int(hash_names.nunique()),
+        "n_hash_series": int(len(hash_series)),
         "default_mo": DEFAULT_MO,
         "forecast_rule": forecast_rule,
         "known_model": forward_cfg["known_aggregate"],
@@ -595,12 +624,32 @@ def build_demo_data(
         "series": series_entries,
     }
 
-    written = _write_json(data_dir / "index.json", index_payload)
+    # Всё сериализуется в память и меряется ДО записи на диск (Minor 15 итогового ревью):
+    # раньше порог проверялся уже после того, как main() записал все файлы, и сборка,
+    # упавшая по размеру, всё равно оставляла их на диске. Теперь либо пишется всё, либо
+    # ничего.
+    files: dict[Path, str] = {data_dir / "index.json": _serialize_json(index_payload)}
     for number, payload in mo_payload.items():
-        written += _write_json(data_dir / "mo" / f"{number}.json", payload)
-    written += _write_json(data_dir / "aggregate.json",
-                            build_aggregate_json(agg_check, forward_cfg))
-    return written
+        files[data_dir / "mo" / f"{number}.json"] = _serialize_json(payload)
+    files[data_dir / "aggregate.json"] = _serialize_json(build_aggregate_json(agg_check, forward_cfg))
+
+    total = sum(len(text.encode("utf-8")) for text in files.values())
+    if total > MAX_DEMO_BYTES:
+        raise ValueError(
+            f"данные стенда {total} байт больше порога {MAX_DEMO_BYTES} — "
+            "сократите состав или точность полей demo/data/, не поднимайте порог не глядя"
+        )
+
+    # Старые demo/data/mo/*.json чистятся перед записью новых (Minor 15 итогового ревью):
+    # без этого при уменьшении числа регионов лишние файлы прежних прогонов оставались бы
+    # в рабочем каталоге (а при коммите — и в репозитории) неограниченно долго.
+    mo_dir = data_dir / "mo"
+    if mo_dir.exists():
+        for old in mo_dir.glob("*.json"):
+            old.unlink()
+    for path, text in files.items():
+        _write_text(path, text)
+    return total
 
 
 def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path = ROOT) -> dict:
@@ -608,7 +657,9 @@ def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path 
     этапа двухэтапной модели по факту 2025 года (формат — докстринг модуля)."""
     origin_str = forward_cfg["origin"]
     origin = pd.Period(origin_str, "M")
-    horizon = max(forward_cfg["horizons"])
+    # Тот же источник истины, что и в build_demo_data (см. её комментарий): ключи
+    # recommended, а не forward_cfg["horizons"] отдельно (Minor 15 итогового ревью).
+    horizon = max(forward_cfg["recommended"])
     methods = ["two_stage", "naive", "seasonal_naive"]
 
     history = load_aggregate(root / "data" / "reference" / "sberindex").loc[AGGREGATE_CHART_START:origin]
@@ -620,11 +671,6 @@ def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path 
 
     abs_error = agg_check.assign(e=agg_check["error_pct"].abs())
     mape = abs_error.loc[abs_error["horizon"] == horizon].groupby("method")["e"].mean()
-    mape_by_horizon = {
-        str(h): {m: _round2(v) for m, v in
-                 abs_error.loc[abs_error["horizon"] == h].groupby("method")["e"].mean().items()}
-        for h in sorted(int(h) for h in agg_check["horizon"].unique())
-    }
 
     model_id = year.loc[year["method"] == "two_stage", "aggregate_model"].iloc[0]
     return {
@@ -641,23 +687,31 @@ def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path 
             "months": months,
             "actual": [_round2(v) for v in year.groupby("month")["actual"].first().reindex(months)],
             "forecast": {m: [_round2(v) for v in forecast_by_method[m]] for m in methods},
-            "error_pct": {m: [_round2(v) for v in error_by_method[m]] for m in methods},
+            # Строки, отформатированные num(v, 1, sign=True) — тем же, что таблица отчёта
+            # (report/report.qmd), а не числа: JS показывает их как есть, без своего
+            # округления (Important 2 итогового ревью — на стенде было «−3,9%» на том
+            # месяце, где в отчёте «−4,0»: JS ещё раз округлял уже округлённые сотые).
+            "error_pct": {m: [num(v, 1, sign=True) for v in error_by_method[m]] for m in methods},
         },
         "rule_names": {
             "naive": agg_check.loc[agg_check["method"] == "naive", "aggregate_model"].iloc[0],
             "seasonal_naive":
                 agg_check.loc[agg_check["method"] == "seasonal_naive", "aggregate_model"].iloc[0],
         },
-        "mape": {m: _round2(mape.get(m, np.nan)) for m in methods},
-        "mape_by_horizon": mape_by_horizon,
+        # Тоже готовая строка num(v, 1), не число — см. error_pct выше. mape_by_horizon
+        # (та же ошибка на каждом горизонте файла, не только check.horizon) убран: стенд
+        # его не показывает (Important 2 итогового ревью).
+        "mape": {m: num(mape.get(m, np.nan), 1) for m in methods},
     }
 
 
-def _write_json(path: Path, payload) -> int:
+def _serialize_json(payload) -> str:
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+
+
+def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     path.write_text(text, encoding="utf-8")
-    return len(text.encode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -720,11 +774,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"написано: {index_path}")
     print(f"данные стенда: {data_dir} — {demo_bytes} байт (порог {MAX_DEMO_BYTES})")
-    if demo_bytes > MAX_DEMO_BYTES:
-        raise ValueError(
-            f"данные стенда {demo_bytes} байт больше порога {MAX_DEMO_BYTES} — "
-            "сократите состав или точность полей demo/data/, не поднимайте порог не глядя"
-        )
+    # Порог проверен внутри build_demo_data, до записи файлов (Minor 15 итогового
+    # ревью) — сюда код доходит уже только с прошедшей проверкой.
     return 0
 
 
