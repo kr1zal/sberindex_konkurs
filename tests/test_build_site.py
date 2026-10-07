@@ -43,7 +43,7 @@ _spec.loader.exec_module(build_site)
 INDEX_JSON_KEYS = {
     "built", "unit", "origin", "panel_months", "forecast_months", "n_series",
     "n_no_region", "n_homonym_names", "n_homonym_series", "n_hash_names", "n_hash_series",
-    "default_mo", "quick", "forecast_rule", "known_model", "breaks", "folds", "models",
+    "default_mo", "mean_unit", "quick", "forecast_rule", "known_model", "breaks", "folds", "models",
     "panel_mae", "series",
 }
 AGGREGATE_JSON_KEYS = {
@@ -468,9 +468,9 @@ class BuildSiteTest(unittest.TestCase):
 
     def test_series_without_region_carry_the_last_year_mean_as_a_distinguisher(self) -> None:
         # Одноимённые ряды без региона («Михайловский … #1 … #4») подсказка поиска иначе отличить не может:
-        # пятый элемент записи — средние расходы за последний год панели, тыс. ₽ на человека в месяц,
-        # готовой строкой формата отчёта (пересчитано здесь по матрице панели); у рядов с регионом
-        # записи остаются из четырёх элементов.
+        # пятый элемент записи — средние расходы за последние двенадцать месяцев панели, тыс. ₽ на человека
+        # в месяц (единица и период — `mean_unit`), готовой строкой формата отчёта (пересчитано здесь по матрице
+        # панели); у рядов с регионом записи остаются из четырёх элементов.
         last_year = self.wide.iloc[-12:].mean()
         without_region = 0
         for row in self.index_json["series"]:
@@ -487,6 +487,36 @@ class BuildSiteTest(unittest.TestCase):
                     if row[0].startswith("Михайловский муниципальный район #")]
         self.assertGreaterEqual(len(homonyms), 2)
         self.assertEqual(len(set(homonyms)), len(homonyms))
+
+    def test_mean_unit_names_the_unit_and_the_period_of_the_distinguisher_from_the_panel(self) -> None:
+        # «24,3» без единицы читалось бы как расходы всего района: единица — «на человека в месяц» — и период стоят
+        # рядом с числом, и обе страницы показывают строку как есть. Период — из панели: последние двенадцать
+        # месяцев — календарный год, иначе подпись называет месяцы (написано здесь заново, не вызовом генератора).
+        last = self.wide.index[-12:]
+        if last[0].month == 1 and last[-1].month == 12 and last[0].year == last[-1].year:
+            period = f"{last[0].year} год"
+        else:
+            period = "последние 12 месяцев панели"
+        self.assertEqual(self.index_json["mean_unit"], f"тыс.\u00a0₽ на человека в\u00a0месяц за\u00a0{period}")
+        # Тот же период называют функции генератора на панелях, где «год» был бы неправдой.
+        for start, expected in (("2023-01-01", "2024 год"), ("2023-03-01", "последние 12 месяцев панели")):
+            with self.subTest(start=start):
+                panel = pd.DataFrame(index=pd.date_range(start, periods=24, freq="MS"))
+                self.assertEqual(build_site.mean_period_label(panel), expected)
+        short = pd.DataFrame(index=pd.date_range("2024-01-01", periods=6, freq="MS"))
+        self.assertEqual(build_site.mean_period_label(short), "последние 12 месяцев панели")
+
+    def test_scripts_do_not_write_the_period_or_the_unit_of_the_distinguisher_by_hand(self) -> None:
+        # Период различителя — «за последний год панели» — стоял в трёх строках скриптов и повторял константу
+        # генератора: при другой панели строки остались бы прежними. Теперь он приходит из данных, и в коде страниц
+        # (вне комментариев) ни его слов, ни единицы нет.
+        for name in ("site/landing.js", "site/landing-lib.js", "demo/demo.js"):
+            code = self._js_without_comments((ROOT / name).read_text(encoding="utf-8"))
+            with self.subTest(file=name):
+                for forbidden in ("последний год", "последнего года", "последние 12", "тыс. ₽", "тыс.\u00a0₽",
+                                  "тыс.\\u00a0₽", "в мес.", "MEAN_HINT"):
+                    self.assertNotIn(forbidden, code)
+                self.assertRegex(code, r"mean_unit|meanUnit")
 
     def test_quick_buttons_point_at_panel_series_with_short_labels(self) -> None:
         # Быстрые кнопки стенда: каждая — ряд панели (иначе кнопка открыла бы МО по умолчанию
@@ -1401,6 +1431,12 @@ class BuildSiteTest(unittest.TestCase):
                 self.assertIn("SIL OPEN FONT LICENSE Version 1.1", text)
 
     @staticmethod
+    def _js_without_comments(code: str) -> str:
+        """Код скрипта без комментариев: блочные, затем «//» до конца строки (адреса «://» не режутся)."""
+        code = re.sub(r"/\*.*?\*/", " ", code, flags=re.S)
+        return "\n".join(line.split("//")[0] if "://" not in line else line for line in code.splitlines())
+
+    @staticmethod
     def _page_scripts() -> list[str]:
         """Все скрипты страниц: файлы `site/*.js` и `demo/*.js` (список не пишется руками — новый
         файл попадает под проверки сам)."""
@@ -1868,9 +1904,7 @@ class BuildSiteTest(unittest.TestCase):
                 self.assertGreaterEqual(len(found), 2)
         # И в строках скриптов — тексты, которые видит читатель: ошибки, подсказки, подписи.
         for name in ("site/landing.js", "demo/demo.js"):
-            code = (ROOT / name).read_text(encoding="utf-8")
-            code = re.sub(r"/\*.*?\*/", " ", code, flags=re.S)
-            code = "\n".join(line.split("//")[0] if "://" not in line else line for line in code.splitlines())
+            code = self._js_without_comments((ROOT / name).read_text(encoding="utf-8"))
             with self.subTest(file=name):
                 self.assertEqual(re.findall(r".{0,40}[Сс]тенд.{0,30}", code), [])
 

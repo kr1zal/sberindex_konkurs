@@ -168,13 +168,15 @@ function normalizeSearchText(s) {
   return s.toLowerCase().replace(/ё/g, "е");
 }
 
-function buildSearchIndex(seriesRows, quick) {
+function buildSearchIndex(seriesRows, quick, meanUnit) {
   // seriesRows — index.json.series: [[series_id, регион|null, ОКТМО|null, файл, средние расходы], ...];
   // пятый элемент есть только у рядов без региона. quick — index.json.quick: [{id, short}, ...].
+  // meanUnit — index.json.mean_unit: единица этого числа вместе с периодом, её пишет генератор.
   const featured = new Set((quick || []).map((item) => item.id));
   return seriesRows.map(([seriesId, region, oktmo, fileNumber, mean]) => ({
     seriesId, region, oktmo, fileNumber,
     mean: mean === undefined ? null : mean,
+    meanUnit: meanUnit || null,
     featured: featured.has(seriesId),
     nameNorm: normalizeSearchText(seriesId),
     haystack: normalizeSearchText(region ? `${seriesId} ${region}` : seriesId),
@@ -182,13 +184,13 @@ function buildSearchIndex(seriesRows, quick) {
 }
 
 const NO_REGION_TEXT = "регион не определён";
-const MEAN_HINT = "Средние расходы на человека в месяц за последний год панели, тыс. ₽";
 
-/** Подпись региона в подсказке. У ряда без региона рядом — различитель из генератора: средние
- * расходы на человека в месяц за последний год панели, тыс. ₽. Тот же текст собирает главная
+/** Подпись региона в подсказке. У ряда без региона рядом — различитель из генератора: средние расходы,
+ * число, единица и период («<число> тыс. ₽ на человека в месяц за <период>»). Число без единицы читалось бы
+ * как расходы всего района, поэтому без единицы различителя нет. Тот же текст собирает главная
  * (site/landing-lib.js::regionLabel). */
 function regionLabel(row) {
-  return row.region || (row.mean ? `${NO_REGION_TEXT} · ${row.mean} тыс. ₽ в мес.` : NO_REGION_TEXT);
+  return row.region || (row.mean && row.meanUnit ? `${NO_REGION_TEXT} · ${row.mean}\u00a0${row.meanUnit}` : NO_REGION_TEXT);
 }
 
 /** Букв сверх набранного в словах названия, которым отвечают слова запроса: для каждого слова —
@@ -296,7 +298,7 @@ function searchHintText(index) {
     `регион не определён, в том числе у ${rubFmt(series)} ` +
     `${pluralRu(series, "одноимённого ряда", "одноимённых рядов", "одноимённых рядов")} ` +
     `(${rubFmt(names)} ${pluralRu(names, "название", "названия", "названий")}) — их различает номер после «#», ` +
-    "а в подсказках рядом — средние расходы на человека в месяц за последний год панели, тыс. ₽.";
+    `а в подсказках рядом — средние расходы, ${index.mean_unit}.`;
 }
 
 function invalidMoMessage(seriesId) {
@@ -992,8 +994,6 @@ function setupCombobox(index) {
       const region = document.createElement("span");
       region.className = "suggestion-region";
       region.textContent = regionLabel(row);
-      // Различитель у рядов без региона объясняется подсказкой при наведении: в строке на него места мало.
-      if (!row.region && row.mean) li.title = MEAN_HINT;
       li.append(name, region);
       li.addEventListener("click", () => commitSelection(row.seriesId));
       listbox.appendChild(li);
@@ -1049,7 +1049,7 @@ function setupCombobox(index) {
 
 async function init() {
   const index = await fetchJson("data/index.json");
-  index.searchRows = buildSearchIndex(index.series, index.quick);
+  index.searchRows = buildSearchIndex(index.series, index.quick, index.mean_unit);
   index.seriesById = new Map(index.searchRows.map((row) => [row.seriesId, row]));
 
   document.getElementById("intro-text").textContent = introText(index);

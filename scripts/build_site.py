@@ -52,6 +52,9 @@
                          без пары, и счёт по имени (n_homonym_*) такой ряд омонимом
                          больше не считает
     default_mo           МО, которое стенд открывает по умолчанию
+    mean_unit            единица различителя рядов без региона вместе с периодом, после числа: «тыс. ₽ на человека
+                         в месяц за 2024 год» (`mean_unit_label`); страницы показывают её как есть, слов о периоде
+                         в их скриптах нет
     quick                [{id, short}, …] — быстрые кнопки под полем поиска: ряд (series_id) и
                          короткая подпись кнопки, порядок как у STAND_QUICK_MO
     forecast_rule        [{from, to, model, horizon, label}, …] — отрезки месяцев
@@ -67,7 +70,7 @@
     panel_mae            {model_id: [fold0, fold1, fold2, среднее]}, руб.
     series               [[series_id, регион|null, ОКТМО|null, номер файла mo/], …]; у рядов без региона
                          пятым элементом — средние расходы за последние MEAN_MONTHS месяцев панели,
-                         тыс. руб. на человека в месяц, готовой строкой ``num(v, 1)``: одноимённые
+                         готовой строкой ``num(v, 1)``, в единицах ``mean_unit``: одноимённые
                          ряды («Михайловский муниципальный район #1 … #4») подсказка поиска иначе
                          отличить не может, а «#N» — лишь порядок в выгрузке
 
@@ -234,7 +237,8 @@ STAND_QUICK_MO = [
 ]
 
 # Различитель рядов без региона в подсказках поиска: средние расходы за столько последних месяцев
-# панели (год), тыс. руб. на человека в месяц. Входит в `index.json::series` пятым элементом.
+# панели (год), тыс. руб. на человека в месяц. Входит в `index.json::series` пятым элементом; единицу
+# вместе с периодом словами пишет `mean_unit_label` — страницы слов о периоде не держат.
 MEAN_MONTHS = 12
 
 # Наукаст на месячных данных — это горизонт 1 (README, отчёт, configs/horizons.yaml): внутри
@@ -1183,6 +1187,7 @@ def build_demo_data(
         "n_hash_names": int(hash_names.nunique()),
         "n_hash_series": int(len(hash_series)),
         "default_mo": DEFAULT_MO,
+        "mean_unit": mean_unit_label(wide),
         "quick": build_quick(wide.columns),
         "forecast_rule": forecast_rule,
         "known_model": forward_cfg["known_aggregate"],
@@ -1309,6 +1314,24 @@ def story_base_label(wide: pd.DataFrame) -> str:
         first, last = start.year, start.year + STORY_BASE_MONTHS // 12 - 1
         return f"{first} год" if first == last else f"{first}–{last} годы"
     return f"первые {STORY_BASE_MONTHS} {plural(STORY_BASE_MONTHS, 'месяц', 'месяца', 'месяцев')} панели"
+
+
+def mean_period_label(wide: pd.DataFrame) -> str:
+    """Период различителя рядов без региона словами, после предлога «за»: «2024 год», если последние
+    `MEAN_MONTHS` месяцев панели — целые календарные годы, иначе «последние 12 месяцев панели». Год берётся из
+    данных, а не пишется в скрипте: панель может кончаться не декабрём, и тогда «год» был бы неправдой."""
+    last = wide.index[-MEAN_MONTHS:]
+    if MEAN_MONTHS % 12 == 0 and len(last) == MEAN_MONTHS and last[0].month == 1 and last[-1].month == 12:
+        first, final = last[0].year, last[-1].year
+        return f"{first} год" if first == final else f"{first}–{final} годы"
+    return f"последние {MEAN_MONTHS} {plural(MEAN_MONTHS, 'месяц', 'месяца', 'месяцев')} панели"
+
+
+def mean_unit_label(wide: pd.DataFrame) -> str:
+    """Единица различителя вместе с периодом — то, что стоит после числа в подсказке поиска: «24,3 тыс. ₽ на человека
+    в месяц за 2024 год». Неразрывные пробелы держат вместе «тыс. ₽», «в месяц» и «за» с началом периода: на узком
+    экране строка переносится между смысловыми частями, а не посреди них."""
+    return f"тыс.\u00a0₽ на человека в\u00a0месяц за\u00a0{mean_period_label(wide)}"
 
 
 def build_story(wide: pd.DataFrame) -> dict:

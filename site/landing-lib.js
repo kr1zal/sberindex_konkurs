@@ -171,15 +171,17 @@ const LandingLib = (() => {
   const normalize = (s) => s.toLowerCase().replace(/ё/g, "е");
 
   // index.json::series — [[series_id, регион|null, ОКТМО|null, файл, средние расходы], …]; пятый
-  // элемент есть только у рядов без региона: он отличает одноимённые ряды друг от друга. quick —
-  // index.json::quick, [{id, short}, …]: города быстрого выбора, их обычно и ищут. Запрос ищется
-  // и в названии, и в регионе.
-  function rowsFromIndex(series, quick) {
+  // элемент есть только у рядов без региона: он отличает одноимённые ряды друг от друга. meanUnit —
+  // index.json::mean_unit, единица этого числа вместе с периодом («тыс. ₽ на человека в месяц за <период>»):
+  // её пишет генератор, слов о периоде здесь нет. quick — index.json::quick, [{id, short}, …]: города
+  // быстрого выбора, их обычно и ищут. Запрос ищется и в названии, и в регионе.
+  function rowsFromIndex(series, quick, meanUnit) {
     const featured = new Set((quick || []).map((item) => item.id));
     return series.map((entry) => ({
       id: entry[0],
       region: entry[1],
       mean: entry[4] === undefined ? null : entry[4],
+      meanUnit: meanUnit || null,
       featured: featured.has(entry[0]),
       name: normalize(entry[0]),
       haystack: normalize(entry[1] ? `${entry[0]} ${entry[1]}` : entry[0]),
@@ -189,10 +191,11 @@ const LandingLib = (() => {
   const NO_REGION = "регион не определён";
 
   // Подпись региона в подсказке и в строке выбора. У ряда без региона рядом — различитель из
-  // генератора: средние расходы на человека в месяц за последний год панели, тыс. ₽. Тот же текст
-  // собирает стенд (demo/demo.js::regionLabel).
+  // генератора: средние расходы — число, единица и период («<число> тыс. ₽ на человека в месяц за <период>»).
+  // Число без единицы читалось бы как расходы всего района, поэтому без единицы различителя нет. Тот же
+  // текст собирает страница прогноза (demo/demo.js::regionLabel).
   function regionLabel(row) {
-    return row.region || (row.mean ? `${NO_REGION} · ${row.mean}${NBSP}тыс.${NBSP}₽ в${NBSP}мес.` : NO_REGION);
+    return row.region || (row.mean && row.meanUnit ? `${NO_REGION} · ${row.mean}${NBSP}${row.meanUnit}` : NO_REGION);
   }
 
   // Букв сверх набранного в словах названия, которым отвечают слова запроса: для каждого слова —

@@ -245,19 +245,25 @@ class SearchRankingTest(unittest.TestCase):
         self.assertEqual(run_lib(script, {"rows": rows, "quick": quick, "query": "казачин"}),
                          ["Казачинский муниципальный район"])
 
-    def test_region_label_distinguishes_rows_without_a_region_by_the_year_mean(self) -> None:
-        got = run_lib(
-            "const rows = lib.rowsFromIndex(input);"
-            "return rows.map((row) => lib.regionLabel(row));",
-            [["городской округ город Орёл", "Орловская область", None, 1],
-             ["Михайловский муниципальный район #1", None, None, 3, "23,7"],
-             ["Ардатовский муниципальный район", None, None, 3]],
-        )
-        self.assertEqual(got, [
+    def test_region_label_distinguishes_rows_without_a_region_by_the_mean_with_its_unit_and_period(self) -> None:
+        # Число стоит с единицей и периодом, которые пишет генератор (`mean_unit`): «24,3» без «на человека»
+        # читалось бы как расходы всего района. Слов о периоде скрипт не держит — что передали, то и показывает.
+        rows = [["городской округ город Орёл", "Орловская область", None, 1],
+                ["Михайловский муниципальный район #1", None, None, 3, "23,7"],
+                ["Ардатовский муниципальный район", None, None, 3]]
+        unit = f"тыс.{NBSP}₽ на человека в{NBSP}месяц за{NBSP}2024 год"
+        script = ("const rows = lib.rowsFromIndex(input.rows, null, input.unit);"
+                  "return rows.map((row) => lib.regionLabel(row));")
+        self.assertEqual(run_lib(script, {"rows": rows, "unit": unit}), [
             "Орловская область",
-            f"регион не определён · 23,7{NBSP}тыс.{NBSP}₽ в{NBSP}мес.",
+            f"регион не определён · 23,7{NBSP}{unit}",
             "регион не определён",
         ])
+        # Другой период в данных — другая подпись: слов скрипт не вписывает.
+        other = f"тыс.{NBSP}₽ на человека в{NBSP}месяц за{NBSP}последние 12 месяцев панели"
+        self.assertEqual(run_lib(script, {"rows": rows, "unit": other})[1], f"регион не определён · 23,7{NBSP}{other}")
+        # Без единицы числа без пояснения не показывают.
+        self.assertEqual(run_lib(script, {"rows": rows, "unit": None})[1], "регион не определён")
 
     def test_ranking_on_the_real_series_list(self) -> None:
         got = run_lib(

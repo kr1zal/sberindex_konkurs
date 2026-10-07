@@ -739,7 +739,6 @@
 
     const LIMIT = 6;
     const STAND = "demo/";
-    const MEAN_HINT = "Средние расходы на человека в месяц за последний год панели, тыс. ₽";
     const defaultNote = note.textContent;
     let rows = null;
     let loading = null;
@@ -758,7 +757,7 @@
             return response.json();
           })
           .then((index) => {
-            rows = rowsFromIndex(index.series, index.quick);
+            rows = rowsFromIndex(index.series, index.quick, index.mean_unit);
             failed = false;
             // Подсказка о сбое устарела: список загрузился при повторной попытке.
             if (failureShown) resetNote();
@@ -908,8 +907,6 @@
         item.setAttribute("aria-selected", "false");
         node("span", "suggestion-name", row.id, item);
         node("span", "suggestion-region", regionLabel(row), item);
-        // Различитель у ряда без региона объясняется подсказкой при наведении: в строке на него места мало.
-        if (!row.region && row.mean) item.title = MEAN_HINT;
         item.addEventListener("click", () => choose(row));
       });
       if (total > matches.length) {

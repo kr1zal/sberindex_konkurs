@@ -41,8 +41,8 @@ def run_both(queries: list[str], limit: int) -> dict:
           fs.readFileSync(demoPath, 'utf8') + '\\n({searchMunicipalities, buildSearchIndex, regionLabel});', page);
         const lib = vm.runInNewContext(fs.readFileSync(libPath, 'utf8') + '\\nLandingLib;', {});
         const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
-        const standRows = stand.buildSearchIndex(index.series, index.quick);
-        const homeRows = lib.rowsFromIndex(index.series, index.quick);
+        const standRows = stand.buildSearchIndex(index.series, index.quick, index.mean_unit);
+        const homeRows = lib.rowsFromIndex(index.series, index.quick, index.mean_unit);
         const out = {};
         input.queries.forEach((query) => {
           const a = stand.searchMunicipalities(query, standRows, input.limit);
@@ -120,17 +120,19 @@ class SearchRankingTest(unittest.TestCase):
         self.assertEqual(self.small["ъъъ"]["stand"], [])
 
     def test_both_pages_label_regions_the_same_way(self) -> None:
-        # Подпись региона в подсказке — одна и та же строка на главной и на стенде; у ряда без региона
-        # рядом различитель из генератора («регион не определён · 24,3 тыс. ₽ в мес.»).
+        # Подпись региона в подсказке — одна и та же строка на главной и на странице прогноза; у ряда без региона
+        # рядом различитель из генератора: число, единица «на человека в месяц» и период — как в `mean_unit`
+        # («регион не определён · <число> тыс. ₽ на человека в месяц за <период>»).
         labels = self.small["labels"]
         self.assertTrue(all(stand == home for stand, home in labels))
         index = json.loads((ROOT / "demo" / "data" / "index.json").read_text(encoding="utf-8"))
+        self.assertIn("на человека в\u00a0месяц за\u00a0", index["mean_unit"])
         for (series_id, region, _oktmo, _file, *mean), (stand, _home) in zip(index["series"], labels):
             if region:
                 self.assertEqual(stand, region)
             else:
                 self.assertEqual(len(mean), 1, f"у ряда без региона {series_id!r} нет различителя")
-                self.assertEqual(stand, f"регион не определён · {mean[0]}\u00a0тыс.\u00a0₽ в\u00a0мес.")
+                self.assertEqual(stand, f"регион не определён · {mean[0]}\u00a0{index['mean_unit']}")
 
     def test_suggestion_list_scrolls_into_view_on_the_stand_like_on_the_cover(self) -> None:
         # На телефоне список подсказок стенда уходил за низ экрана на несколько строк и не докручивался.
