@@ -38,9 +38,10 @@ scripts/build_news_features.py    пересборка data/news/monthly и nati
 scripts/crawl_news.py             выкачка заголовков региональных изданий; сырые заголовки в git не входят
 scripts/forecast_forward.py       прогноз на 2025 год по 2 028 МО и проверка федерального агрегата по факту → results/forecast_2025*.csv
 scripts/export_results.py         снимок .csv.gz пяти крупных results/ для публикации (per_series, horizons_per_series, forecast_2025, cp_bench, cp_v1/cp_bench); --check сверяет снимки с текущими CSV
-scripts/build_site.py   генератор страницы входа и данных демонстрационного стенда → index.html, demo/data/*.json
-site/                   шаблон (index.template.html) и общая тема (site.css) страницы входа и стенда
-index.html              страница входа GitHub Pages — сгенерирована build_site.py, коммитится
+scripts/build_site.py   генератор главной страницы и данных демонстрационного стенда → index.html, demo/data/*.json
+site/                   шаблон главной (index.template.html), общая тема (site.css), раскладка главной (landing.css) и её скрипт landing.js: графики, счёт чисел, поиск; данные берёт из <script id="landing-data"> в index.html
+site/fonts/             шрифты Unbounded, Onest, JetBrains Mono (woff2, кириллица и латиница) и тексты их лицензий OFL — страница не ходит за шрифтами в сеть
+index.html              главная страница GitHub Pages — сгенерирована build_site.py, коммитится
 demo/                   демонстрационный стенд «покажите мой город»: index.html, demo.js, linechart.js, demo.css и данные data/ (генерирует build_site.py)
 data/raw/               панель СберИндекса (parquet)
 data/news/              агрегаты новостного корпуса (monthly.parquet, national.parquet); headlines.parquet — только локально
@@ -136,15 +137,17 @@ python -m venv .venv
 Тяжёлые прогоны запускать в фоне и не пропускать вывод через `grep` или `tail` —
 они буферизуют, и лог остаётся пустым до самого конца.
 
-Страница входа и данные стенда — из закоммиченных `results/*`, без прогона моделей:
+Главная и данные стенда — из закоммиченных `results/*`, без прогона моделей:
 
 ```bash
 .venv/bin/python scripts/build_site.py
 ```
 
 Пишет `index.html` и `demo/data/*.json` в корень репозитория; `--out DIR` — в другой
-каталог (так пишут тесты). Печатает суммарный размер данных стенда и падает, если он
-больше порога модуля (`build_site.MAX_DEMO_BYTES`).
+каталог (так пишут тесты). Печатает суммарный размер данных стенда и данных главной
+и падает, если любой из них больше порога модуля (`build_site.MAX_DEMO_BYTES`,
+`build_site.MAX_LANDING_BYTES`). Числа на главной — только подстановки шаблона или
+данные `landing-data`; в `site/landing.js` и в шаблоне вписанных чисел нет (проверяют тесты).
 
 Перед первым прогоном моделей с длинными рядами:
 

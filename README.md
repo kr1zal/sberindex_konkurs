@@ -213,9 +213,11 @@ QUARTO_PYTHON=$PWD/../.venv/bin/python quarto render report.qmd   # около �
 QUARTO_PYTHON=$PWD/../.venv/bin/python quarto render slides.qmd   # около 25 секунд
 ```
 
-Страница входа (`index.html`) и данные демонстрационного стенда (`demo/data/`) собираются
+Главная страница (`index.html`) и данные демонстрационного стенда (`demo/data/`) собираются
 тем же принципом — из закоммиченных `results/`, без прогона моделей:
-`.venv/bin/python scripts/build_site.py`.
+`.venv/bin/python scripts/build_site.py`. Графики, счёт чисел и поиск главной рисует
+`site/landing.js` по данным, которые генератор кладёт прямо в страницу; шрифты лежат
+в `site/fonts/` — на сайте нет ни внешних шрифтов, ни CDN.
 
 **Проверено на чистом клоне 28.09** (macOS arm64, Python 3.14.0, без кеша pip): `python -m venv .venv`
 и `pip install -r requirements.txt` — около 3,5 мин, окружение 1,5 ГБ (ядро Jupyter для Quarto ставится оттуда же);
@@ -316,6 +318,7 @@ tests/                  тесты на синтетических кадрах
 |---|---|---|
 | панель расходов по МО, длинные ряды и ключевая ставка СберИндекса | `data/raw/`, `data/reference/sberindex/`, `data/reference/key_rate.parquet` | на условиях СберИндекса; источник указан в отчёте |
 | справочник муниципальных образований СберИндекса | `data/reference/t_dict_municipal_districts.xlsx` | CC BY-SA 4.0 |
+| шрифты сайта Unbounded, Onest, JetBrains Mono | `site/fonts/` (woff2), тексты лицензий рядом: `*-OFL.txt` | SIL Open Font License 1.1 |
 | новостной корпус | `data/news/monthly.parquet`, `data/news/national.parquet` | в репозитории только помесячные агрегаты — число публикаций и доли тем по региону и по стране; посчитаны нами, MIT |
 | сырые заголовки новостей | в репозиторий не входят | материалы изданий; собираются заново `scripts/crawl_news.py` |
 | веса фундаментальных моделей | в репозиторий не входят, скачиваются с Hugging Face при первом запуске | Chronos-Bolt small и base (`amazon/chronos-bolt-*`) — Apache-2.0; TimesFM 2.5 200M (`google/timesfm-2.5-200m-pytorch`) — Apache-2.0; Moirai 1.1-R small (`Salesforce/moirai-1.1-R-small`) — CC BY-NC 4.0, только некоммерческое использование |
