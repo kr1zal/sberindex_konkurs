@@ -5,102 +5,410 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Прогнозирование потребительских расходов муниципальных образований</title>
 <meta name="description" content="Прогноз потребительских расходов ${n_series_rub} муниципальных образований на горизонтах от месяца до года и поиск точек структурных изменений: главные числа, отчёт, слайды, код, прогноз на ${forecast_year} год и стенд с прогнозом по каждому муниципалитету.">
+<meta name="theme-color" content="#0b1020">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="site/site.css">
+<link rel="stylesheet" href="site/landing.css">
 </head>
 <body>
-<main class="page">
+<a class="skip-link" href="#main">К содержанию</a>
 
-<header>
-  <p class="eyebrow">Конкурс СберИндекса, направление «Прогнозирование»</p>
-  <h1>Прогнозирование потребительских расходов муниципальных образований</h1>
-  <p class="lead">
-    Мы прогнозируем потребительские расходы ${n_series_rub} муниципальных образований
-    на горизонтах от месяца до года и ищем в них точки структурных изменений.
-    Главный вывод: задача только выглядит как прогноз каждого муниципалитета
-    по отдельности — на деле это прогноз одного числа по стране и разнос его
-    по территориям.
-  </p>
-  <p class="lead">
-    Всё, что отличает хорошую модель от плохой на этих данных, — попадание в общее
-    движение страны: разброс ошибки между муниципалитетами не сдвинула ни одна
-    из моделей, для которых посчитано разложение. А двухэтапная модель — прогноз
-    федерального ряда, разнесённый по муниципалитетам долями, — на отдельные ряды
-    не смотрит вовсе и выигрывает там, где истории меньше всего.
-  </p>
+<header class="site-header night">
+  <div class="wrap site-header-inner">
+    <a class="brand" href="./">
+      <svg class="brand-mark" width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true" focusable="false">
+        <path class="mark-a" d="M2 18 C7 14 10 20 14 13 S21 9 24 5"/>
+        <path class="mark-b" d="M2 22 C8 19 11 23 15 18 S21 15 24 12"/>
+      </svg>
+      <span>Одно число</span>
+    </a>
+    <details class="nav-menu" id="nav-menu" open>
+      <summary class="nav-toggle" aria-label="Меню">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+          <path class="mark-menu" d="M4 7h16M4 12h16M4 17h16"/>
+        </svg>
+      </summary>
+      <nav class="site-nav" aria-label="Разделы сайта">
+        <a class="nav-link" href="report/report.html">Отчёт</a>
+        <a class="nav-link" href="report/slides.html">Слайды</a>
+        <a class="nav-link" href="demo/">Стенд</a>
+        <a class="nav-link nav-link-solid" href="https://github.com/kr1zal/sberindex_konkurs">Код на GitHub</a>
+      </nav>
+    </details>
+  </div>
 </header>
 
-<ul class="stats" aria-label="Ключевые числа работы">
-  <li class="stat">
-    <p class="stat-number">${best_gain}%</p>
-    <p class="stat-caption">
-      точнее эталона конкурса Prophet на горизонте ${horizon_main} мес.:
-      MAE ${prophet_mae} ₽ → ${best_mae} ₽ на человека в месяц,
-      R² по пулу ${r2_prophet} → ${r2_best}. ${folds_caveat}
-    </p>
-  </li>
+<main id="main">
 
-  <li class="stat">
-    <p class="stat-number">${h1_gain}%</p>
-    <p class="stat-caption">точнее эталона на наукасте: MAE ${h1_best} против ${h1_prophet} ₽.</p>
-  </li>
+<section class="hero night" aria-labelledby="hero-title">
+  <div class="wrap hero-grid">
+    <div class="hero-left">
+      <div class="hero-text">
+        <p class="eyebrow hero-eyebrow rise d1">Конкурс СберИндекса · Прогнозирование</p>
+        <h1 class="hero-title rise d2" id="hero-title">Прогноз <span class="amber">одного числа</span></h1>
+        <p class="hero-sub rise d3">и его разнос по ${n_series_rub} муниципалитетам</p>
+        <p class="hero-lead rise d4">
+          Потребительские расходы муниципальных образований по данным СберИндекса:
+          от наукаста до года вперёд, с проверкой на истории и на факте ${forecast_year} года.
+        </p>
+      </div>
 
-  <li class="stat">
-    <p class="stat-number">${h12_gain_prophet}%</p>
-    <p class="stat-caption">
-      точнее эталона на год вперёд, наивной — на ${h12_gain_naive}%;
-      здесь лучшая — ${h12_model}${h12_folds_caveat}.
-    </p>
-  </li>
+      <div class="search hero-search rise d5" role="search">
+        <label class="search-label" for="mo-q">Покажите мой город</label>
+        <div class="field">
+          <input id="mo-q" type="text" role="combobox" aria-expanded="false" aria-controls="mo-list"
+                 aria-autocomplete="list" aria-haspopup="listbox" autocomplete="off" autocapitalize="none"
+                 spellcheck="false" enterkeyhint="go" placeholder="Название муниципалитета или региона">
+          <a class="btn btn-primary" id="mo-go" href="demo/">Открыть прогноз →</a>
+        </div>
+        <ul class="suggestions" id="mo-list" role="listbox" aria-label="Подсказки муниципальных образований" hidden></ul>
+        <p class="visually-hidden" id="mo-status" aria-live="polite" aria-atomic="true"></p>
+        <p class="search-note" id="mo-note" aria-live="polite">Например: казань, новосибирск, михайловский</p>
+      </div>
+    </div>
 
-  <li class="stat">
-    <p class="stat-number">${agg_own_pct}%</p>
-    <p class="stat-caption">
-      средняя ошибка первого этапа двухэтапной модели — прогноза федерального ряда
-      от ${agg_origin_label}, сверенного с фактом ${forecast_year} года (горизонты
-      ${agg_horizon_range} мес.); у правил ${agg_rules} — ${agg_rules_pct}%.
-      Муниципальный разрез ${forecast_year} года ещё не опубликован.
-    </p>
-  </li>
-
-  <li class="stat">
-    <p class="stat-number">${panel_shape}</p>
-    <p class="stat-caption">ряды панели СберИндекса без длинных пропусков, ${panel_span}.</p>
-  </li>
-</ul>
-
-<section class="method" aria-label="Схема метода">
-  <h2>Как устроено решение</h2>
-  <div class="method-figure">
-    <a href="report/method.svg">
-      <img src="report/method.svg" width="1113" height="566"
-           alt="Схема метода. Панель СберИндекса с категориями трат и прогнозом длинного федерального ряда идёт в панельный бустинг и в двухэтапную модель — прогноз федерального ряда, разнесённый долями. Обе вместе с эталоном Prophet, наивной и фундаментальными моделями проверяются на скользящем origin, от наукаста до года вперёд, по MAE, R² по пулу, MASE и sMAPE. Детекторы изломов на темпах роста, со штрафом, выбранным на стенде с врезками известной величины, дают долю территорий с сигналом.">
-    </a>
-    <p class="method-figure-caption"><a href="report/method.svg">Открыть схему крупно</a></p>
+    <figure class="hero-figure">
+      <div class="hero-plot" aria-hidden="true">
+        <svg class="hero-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+          <g id="hero-lines"></g>
+        </svg>
+        <svg class="hero-svg hero-svg-glow" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+          <path class="hero-median" id="hero-median"/>
+        </svg>
+      </div>
+      <div class="hero-axis" id="hero-axis" aria-hidden="true"></div>
+      <figcaption class="hero-caption">
+        ${sample_label} · расходы к среднему за первый год панели ·
+        <span class="amber">жёлтая — общее движение</span>
+      </figcaption>
+      <noscript>
+        <p class="hero-noscript">Графики и поиск на странице работают с включённым JavaScript; числа и ссылки доступны и без него.</p>
+      </noscript>
+    </figure>
   </div>
 </section>
 
-<nav class="actions" aria-label="Материалы работы">
-  <a class="action action-primary" href="report/report.html">Отчёт</a>
-  <a class="action action-primary" href="demo/">Прогноз по муниципалитету</a>
-  <a class="action" href="report/slides.html">Слайды</a>
-  <a class="action" href="report/report.pdf">Отчёт (PDF)</a>
-  <a class="action" href="report/slides.pdf">Слайды (PDF)</a>
-  <a class="action" href="results/forecast_2025.csv.gz">Прогноз на ${forecast_year} год (csv.gz)</a>
-  <a class="action" href="https://github.com/kr1zal/sberindex_konkurs">Код на GitHub</a>
-</nav>
+<div class="wrap stats-wrap">
+  <ul class="stats" aria-label="Ключевые числа работы">
+    <li class="stat">
+      <p class="stat-number">${best_gain}%</p>
+      <p class="stat-caption">
+        <span class="stat-label">точнее эталона конкурса Prophet на горизонте ${horizon_main} мес.</span>
+        <span class="stat-note stat-note-full">
+          MAE ${prophet_mae} ₽ → ${best_mae} ₽ на человека в месяц,
+          R² по пулу ${r2_prophet} → ${r2_best}. ${folds_caveat}
+        </span>
+        <span class="stat-note stat-note-short">${folds_short}</span>
+      </p>
+    </li>
 
-<footer class="footer">
-  <p>
-    Данные — <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>
-    о безналичных потребительских расходах муниципальных образований.
-    Код и тексты — под лицензией MIT; данные — на условиях СберИндекса;
-    справочник муниципальных образований — CC BY-SA 4.0.
-  </p>
-  <p>Числа на странице — из тех же файлов результатов, что и отчёт; собрано ${built}.</p>
-</footer>
+    <li class="stat">
+      <p class="stat-number">${h1_gain}%</p>
+      <p class="stat-caption">
+        <span class="stat-label">точнее эталона на наукасте</span>
+        <span class="stat-note stat-note-full">MAE ${h1_best} против ${h1_prophet} ₽ на человека в месяц.</span>
+        <span class="stat-note stat-note-short">${h1_best} против ${h1_prophet} ₽</span>
+      </p>
+    </li>
+
+    <li class="stat">
+      <p class="stat-number">${h12_gain_prophet}%</p>
+      <p class="stat-caption">
+        <span class="stat-label">точнее эталона на год вперёд</span>
+        <span class="stat-note stat-note-full">
+          наивной — на ${h12_gain_naive}%; здесь лучшая — ${h12_model}${h12_folds_caveat}.
+        </span>
+        <span class="stat-note stat-note-short">${h12_model}${h12_folds_caveat}</span>
+      </p>
+    </li>
+
+    <li class="stat">
+      <p class="stat-number">${agg_own_pct}%</p>
+      <p class="stat-caption">
+        <span class="stat-label">средняя ошибка первого этапа двухэтапной модели на факте ${forecast_year} года</span>
+        <span class="stat-note stat-note-full">
+          Прогноз федерального ряда от ${agg_origin_label}, горизонты ${agg_horizon_range} мес.;
+          у правил ${agg_rules} — ${agg_rules_pct}%.
+          Муниципальный разрез ${forecast_year} года ещё не опубликован.
+        </span>
+        <span class="stat-note stat-note-short">у правил ${agg_rules_pct}%</span>
+      </p>
+    </li>
+
+    <li class="stat stat-panel">
+      <p class="stat-number">${panel_shape}</p>
+      <p class="stat-caption">
+        ряды панели СберИндекса без длинных пропусков, ${panel_span} ·
+        MAE — средняя абсолютная ошибка, ₽ на человека в месяц
+      </p>
+    </li>
+  </ul>
+</div>
+
+<section class="section section-first" id="why" aria-labelledby="why-title">
+  <div class="wrap">
+    <p class="eyebrow">01 · Главный вывод</p>
+    <h2 class="section-title" id="why-title">Почему это прогноз одного числа</h2>
+
+    <div class="story">
+      <div class="steps" role="group" aria-label="Шаги рассуждения">
+        <button class="step" type="button" aria-pressed="true"
+                data-caption="Каждая линия — один муниципалитет; расходы показаны в процентах от его среднего за первый год панели.">
+          <span class="step-num">Шаг 01</span>
+          <span class="step-title">Ряды идут вместе</span>
+          <span class="step-text">
+            ${sample_label} из ${n_series_rub}: расходы к среднему за первый год панели.
+            Сезон, декабрьский скачок и рост — общие.
+          </span>
+          <span class="step-short">ряды</span>
+        </button>
+        <button class="step" type="button" aria-pressed="false"
+                data-caption="Жёлтая линия — медиана по всем рядам панели, общее движение страны.">
+          <span class="step-num">Шаг 02</span>
+          <span class="step-title">Общее движение</span>
+          <span class="step-text">
+            Медиана по рядам повторяет почти всю динамику.
+            Её прогнозируют по длинному федеральному ряду СберИндекса.
+          </span>
+          <span class="step-short">общее движение</span>
+        </button>
+        <button class="step" type="button" aria-pressed="false"
+                data-caption="Те же ряды, делённые на общее движение: у девяти значений из десяти по всей панели отклонение от него не больше ±${spread_pct}%.">
+          <span class="step-num">Шаг 03</span>
+          <span class="step-title">Что остаётся</span>
+          <span class="step-text">
+            Если разделить каждый ряд на общее движение, остаётся узкий разброс —
+            его и разносит двухэтапная модель долями.
+          </span>
+          <span class="step-short">остаток</span>
+        </button>
+      </div>
+
+      <div class="plot-card story-card">
+        <div class="plot story-plot" id="story-plot" role="img" aria-label="График рядов расходов">
+          <div class="ticks" id="story-ticks"></div>
+          <svg class="plot-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+            <g class="story-lines" id="story-lines"></g>
+            <g class="story-median-layer" id="story-median-layer"><path class="story-median" id="story-median"/></g>
+          </svg>
+        </div>
+        <div class="plot-axis" id="story-axis" aria-hidden="true"></div>
+        <p class="plot-caption" id="story-caption" aria-live="polite"></p>
+        <p class="story-text" id="story-text"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="horizons" aria-labelledby="horizons-title">
+  <div class="wrap">
+    <div class="section-bar">
+      <div>
+        <p class="eyebrow">02 · Пять горизонтов</p>
+        <h2 class="section-title" id="horizons-title">Какая модель точнее — зависит от горизонта</h2>
+      </div>
+      <div class="segmented" id="h-seg" role="group" aria-label="Горизонт прогноза"></div>
+    </div>
+
+    <div class="bars-card">
+      <ol class="bars" id="h-bars" aria-label="Средняя абсолютная ошибка моделей на выбранном горизонте, рублей на человека в месяц"></ol>
+      <p class="bars-note" id="h-note" aria-live="polite"></p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="fact" aria-labelledby="fact-title">
+  <div class="wrap">
+    <p class="eyebrow">03 · Проверка фактом</p>
+    <h2 class="section-title" id="fact-title">Прогноз от ${agg_origin_label} против факта ${forecast_year} года</h2>
+    <p class="section-lead">
+      Федеральный ряд СберИндекс уже опубликовал за весь ${forecast_year} год, а муниципальный разрез — ещё нет.
+      Поэтому первый этап двухэтапной модели — единственный прогноз работы, который можно сверить с фактом.
+    </p>
+
+    <div class="fact">
+      <div class="plot-card fact-card">
+        <p class="chart-unit" id="fact-unit"></p>
+        <ul class="legend" aria-label="Обозначения линий">
+          <li><span class="key key-fact"></span>факт</li>
+          <li><span class="key key-fc"></span>прогноз первого этапа</li>
+        </ul>
+        <div class="plot fact-plot" id="fact-plot" role="img" aria-label="График федерального агрегата">
+          <div class="ticks" id="fact-ticks"></div>
+          <div class="vline vline-end" id="fact-end"><span>конец панели</span></div>
+          <div class="vline vline-cursor" id="fact-cursor"></div>
+          <svg class="plot-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+            <path class="fact-line fact-hist" id="fact-hist"/>
+            <path class="fact-line fact-r1" id="fact-r1-line"/>
+            <path class="fact-line fact-r2" id="fact-r2-line"/>
+            <path class="fact-line fact-fc" id="fact-fc"/>
+          </svg>
+          <div class="dots" id="fact-dots"></div>
+        </div>
+        <div class="plot-axis plot-axis-years" id="fact-years" aria-hidden="true"></div>
+
+        <div class="slider-row">
+          <label class="mono-label" for="fact-k">Месяц ${forecast_year}</label>
+          <input id="fact-k" type="range">
+        </div>
+        <div class="toggles">
+          <label class="toggle"><input type="checkbox" id="fact-r1" checked>
+            <span class="key key-r1" aria-hidden="true"></span><span id="fact-r1-text"></span></label>
+          <label class="toggle"><input type="checkbox" id="fact-r2" checked>
+            <span class="key key-r2" aria-hidden="true"></span><span id="fact-r2-text"></span></label>
+        </div>
+      </div>
+
+      <div class="fact-side">
+        <div class="readout night">
+          <p class="readout-month" id="ro-month"></p>
+          <dl class="readout-rows">
+            <div><dt>прогноз</dt><dd id="ro-fc"></dd></div>
+            <div><dt>факт</dt><dd id="ro-act"></dd></div>
+          </dl>
+          <p class="readout-err" id="ro-err"></p>
+          <p class="readout-note">ошибка месяца; минус — прогноз ниже факта</p>
+        </div>
+
+        <div class="card mean-card">
+          <p class="mono-label">Средняя ошибка за год</p>
+          <dl class="mean-rows">
+            <div><dt>первый этап модели</dt><dd class="mean-own" id="mean-own"></dd></div>
+            <div><dt id="mean-r1-name"></dt><dd class="mean-r1" id="mean-r1"></dd></div>
+            <div><dt id="mean-r2-name"></dt><dd class="mean-r2" id="mean-r2"></dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="city" aria-labelledby="city-title">
+  <div class="wrap">
+    <div class="stand night">
+      <div class="stand-copy">
+        <p class="eyebrow">04 · Стенд</p>
+        <h2 class="section-title" id="city-title">Покажите мой город</h2>
+        <p class="stand-lead">
+          Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год,
+          изломы ряда и то, как ошибались модели.
+        </p>
+        <div class="chips" id="t-chips" role="group" aria-label="Примеры муниципальных образований"></div>
+        <a class="btn btn-primary stand-cta" id="t-go" href="demo/">Открыть стенд →</a>
+      </div>
+
+      <div class="stand-chart">
+        <div class="stand-chart-head">
+          <span class="stand-chart-name" id="t-name"></span>
+          <span class="stand-chart-region" id="t-region"></span>
+        </div>
+        <div class="plot stand-plot" id="t-plot" role="img" aria-label="График расходов муниципалитета">
+          <div class="vline vline-panel" id="t-panel-end"></div>
+          <div id="t-breaks"></div>
+          <svg class="plot-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+            <path class="stand-line stand-fact" id="t-fact"/>
+            <path class="stand-line stand-known" id="t-known"/>
+            <path class="stand-line stand-fc" id="t-fc"/>
+          </svg>
+        </div>
+        <ul class="legend legend-night" id="t-legend"></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="method" aria-labelledby="method-title">
+  <div class="wrap">
+    <p class="eyebrow">05 · Метод</p>
+    <h2 class="section-title" id="method-title">Как устроено решение</h2>
+
+    <ul class="method-cards">
+      <li class="card">
+        <p class="mono-label">Данные</p>
+        <p>Панель СберИндекса по муниципалитетам, категории трат и длинные федеральные ряды — обрезанные по origin, чтобы модель не видела будущего.</p>
+      </li>
+      <li class="card">
+        <p class="mono-label">Модели</p>
+        <p>Панельный бустинг с внешними источниками и двухэтапная модель: прогноз федерального ряда и разнос его по территориям долями.</p>
+      </li>
+      <li class="card">
+        <p class="mono-label">Проверка</p>
+        <p>Скользящий origin, пять горизонтов, MAE и R² по пулу; эталон — Prophet с настройками по умолчанию.</p>
+      </li>
+    </ul>
+
+    <figure class="method-figure">
+      <a href="report/method.svg">
+        <img src="report/method.svg" width="1113" height="566" loading="lazy"
+             alt="Схема метода. Панель СберИндекса с категориями трат и прогнозом длинного федерального ряда идёт в панельный бустинг и в двухэтапную модель — прогноз федерального ряда, разнесённый долями. Обе вместе с эталоном Prophet, наивной и фундаментальными моделями проверяются на скользящем origin, от наукаста до года вперёд, по MAE, R² по пулу, MASE и sMAPE. Детекторы изломов на темпах роста, со штрафом, выбранным на стенде с врезками известной величины, дают долю территорий с сигналом.">
+      </a>
+      <figcaption><a href="report/method.svg">Открыть схему крупно</a></figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section" id="report" aria-labelledby="report-title">
+  <div class="wrap">
+    <p class="eyebrow">06 · Материалы</p>
+    <h2 class="section-title" id="report-title">Отчёт, слайды, код и данные</h2>
+
+    <ul class="materials">
+      <li class="card card-link material">
+        <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+          <path d="M6 3h8l4 4v14H6z M14 3v4h4 M9 12h6 M9 16h6"/>
+        </svg>
+        <h3 class="material-title"><a class="material-link" href="report/report.html">Отчёт</a></h3>
+        <p class="material-note">полный текст · HTML и <a class="material-extra" href="report/report.pdf">PDF</a></p>
+      </li>
+      <li class="card card-link material">
+        <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+          <path d="M3 5h18v11H3z M12 16v4 M8 20h8 M7 12l3-3 3 2 4-4"/>
+        </svg>
+        <h3 class="material-title"><a class="material-link" href="report/slides.html">Слайды</a></h3>
+        <p class="material-note">коротко о главном · HTML и <a class="material-extra" href="report/slides.pdf">PDF</a></p>
+      </li>
+      <li class="card card-link material">
+        <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+          <path d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z M16 16l5 5"/>
+        </svg>
+        <h3 class="material-title"><a class="material-link" href="demo/">Стенд</a></h3>
+        <p class="material-note">прогноз по муниципалитету</p>
+      </li>
+      <li class="card card-link material">
+        <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+          <path d="M8 7l-5 5 5 5 M16 7l5 5-5 5 M14 4l-4 16"/>
+        </svg>
+        <h3 class="material-title"><a class="material-link" href="https://github.com/kr1zal/sberindex_konkurs">Код</a></h3>
+        <p class="material-note">GitHub · воспроизводимые прогоны</p>
+      </li>
+      <li class="card card-link material">
+        <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+          <path d="M4 4h16v16H4z M4 9h16 M9 9v11 M12 13l2 2 3-4"/>
+        </svg>
+        <h3 class="material-title"><a class="material-link" href="results/forecast_2025.csv.gz">Прогноз на ${forecast_year} год</a></h3>
+        <p class="material-note">все ряды панели · csv.gz</p>
+      </li>
+    </ul>
+  </div>
+</section>
 
 </main>
+
+<footer class="site-footer night">
+  <div class="wrap site-footer-inner">
+    <p>
+      Данные — <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>
+      о безналичных потребительских расходах муниципальных образований. Числа на странице — из тех же
+      файлов результатов, что и отчёт. Код и тексты — MIT; данные — на условиях СберИндекса;
+      справочник муниципальных образований — CC BY-SA 4.0; шрифты
+      <a href="site/fonts/unbounded-OFL.txt">Unbounded</a>, <a href="site/fonts/onest-OFL.txt">Onest</a>
+      и <a href="site/fonts/jetbrains-mono-OFL.txt">JetBrains Mono</a> — SIL OFL.
+    </p>
+    <p class="built">собрано ${built}</p>
+  </div>
+</footer>
+
 <script type="application/json" id="landing-data">${landing_json}</script>
+<script src="site/landing.js" defer></script>
 </body>
 </html>

@@ -112,10 +112,10 @@ class _LinkCollector(HTMLParser):
 
 
 class _ResourceCollector(HTMLParser):
-    """Ресурсы, которые браузер грузит сам (скрипты и стили) — не обычные ссылки
-    `<a href>`: те вправе вести куда угодно (репозиторий, дашборд СберИндекса)."""
+    """Ресурсы, которые браузер грузит сам (скрипты, стили, картинки, фреймы) — не обычные
+    ссылки `<a href>`: те вправе вести куда угодно (репозиторий, дашборд СберИндекса)."""
 
-    RESOURCE_ATTR = {"script": "src", "link": "href"}
+    RESOURCE_ATTR = {"script": "src", "link": "href", "img": "src", "iframe": "src", "source": "src"}
 
     def __init__(self) -> None:
         super().__init__()
@@ -131,10 +131,11 @@ class _ResourceCollector(HTMLParser):
 
 
 class _StatsParser(HTMLParser):
-    """Пять пунктов `<li class="stat">` страницы входа, по порядку — текст
-    `.stat-number` и `.stat-caption` каждого, не текст «где-то в HTML»: связь
-    «число ↔ его подпись» проверяется, только если число и текст сверяются
-    в границах одного и того же пункта."""
+    """Пять пунктов `<li class="stat">` главной, по порядку — текст `.stat-number` и
+    `.stat-caption` каждого, не текст «где-то в HTML»: связь «число ↔ его подпись»
+    проверяется, только если число и текст сверяются в границах одного и того же пункта.
+    `short` — сокращённая подпись для телефона (`span.stat-note-short`): она входит и в
+    `caption` (подпись целиком — всё, что внутри `p.stat-caption`), и отдельно."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -142,11 +143,12 @@ class _StatsParser(HTMLParser):
         self._depth_in_li = 0
         self._current: dict[str, str] | None = None
         self._capture: str | None = None  # "number" | "caption" | None
+        self._in_short = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         classes = (dict(attrs).get("class") or "").split()
         if tag == "li" and "stat" in classes:
-            self._current = {"number": "", "caption": ""}
+            self._current = {"number": "", "caption": "", "short": ""}
             self.stats.append(self._current)
             self._depth_in_li = 1
             return
@@ -158,10 +160,14 @@ class _StatsParser(HTMLParser):
             self._capture = "number"
         elif tag == "p" and "stat-caption" in classes:
             self._capture = "caption"
+        elif tag == "span" and "stat-note-short" in classes:
+            self._in_short = True
 
     def handle_endtag(self, tag: str) -> None:
         if self._current is None:
             return
+        if tag == "span":
+            self._in_short = False
         if tag == "p" and self._capture:
             self._capture = None
         if tag == "li":
@@ -172,6 +178,52 @@ class _StatsParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._current is not None and self._capture:
             self._current[self._capture] += data
+            if self._in_short:
+                self._current["short"] += data
+
+
+class _TextCollector(HTMLParser):
+    """Видимый читателю текст шаблона и тексты атрибутов, которые читают программы чтения
+    с экрана и поисковики (`alt`, `aria-label`, `title`, `content` у description), — без
+    содержимого `<script>` и `<style>`. Нужен проверке «вписанных руками чисел нет»."""
+
+    TEXT_ATTRS = ("alt", "aria-label", "title", "data-caption")
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.chunks: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("script", "style"):
+            self._skip += 1
+        values = dict(attrs)
+        for name in self.TEXT_ATTRS:
+            if values.get(name):
+                self.chunks.append(values[name])
+        if tag == "meta" and values.get("name") == "description" and values.get("content"):
+            self.chunks.append(values["content"])
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip:
+            self.chunks.append(data)
+
+
+class _IdCollector(HTMLParser):
+    """Все `id` страницы и их теги — для проверки якорей и обязательных узлов разметки."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: dict[str, dict[str, str | None]] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        if values.get("id"):
+            self.ids[values["id"]] = {"tag": tag, **values}
 
 
 class BuildSiteTest(unittest.TestCase):
@@ -208,8 +260,9 @@ class BuildSiteTest(unittest.TestCase):
         # и не входит в этот класс символов, а str.split() без аргументов его тоже считает
         # пробелом и тем самым стёр бы разряды («1 581» → «1 581» уже с обычным пробелом,
         # не совпадающим с тем, что пишет _fmt ниже).
+        collapse = lambda text: re.sub(r"[ \t\n\r\f\v]+", " ", text).strip()  # noqa: E731
         cls.stats = [
-            {"number": s["number"].strip(), "caption": re.sub(r"[ \t\n\r\f\v]+", " ", s["caption"]).strip()}
+            {"number": s["number"].strip(), "caption": collapse(s["caption"]), "short": collapse(s["short"])}
             for s in stats_parser.stats
         ]
 
@@ -368,8 +421,10 @@ class BuildSiteTest(unittest.TestCase):
 
         stat = self.stats[0]
         self.assertEqual(stat["number"], f"{_fmt(best_gain, 1)}%")
+        # Горизонт — в названии числа, MAE — в первой строке пояснения: они идут подряд,
+        # и «3 мес.» с MAE другого пункта связать нельзя.
         self.assertIn(
-            f"на горизонте {horizon_main} мес.: MAE {_fmt(prophet_mae, 0)} ₽ → {_fmt(best_mae, 0)} ₽",
+            f"на горизонте {horizon_main} мес. MAE {_fmt(prophet_mae, 0)} ₽ → {_fmt(best_mae, 0)} ₽",
             stat["caption"],
         )
         self.assertIn(f"R² по пулу {_fmt(r2_prophet, 3)} → {_fmt(r2_best, 3)}", stat["caption"])
@@ -386,10 +441,13 @@ class BuildSiteTest(unittest.TestCase):
         # тексте, см. site/index.template.html): сверяем в границах self.stats[0],
         # а не где угодно на странице.
         caption = self.stats[0]["caption"]
-        self.assertIn(f"{len(won)} {'фолде' if len(won) == 1 else 'фолдах'} из {len(folds)}", caption)
+        won_phrase = f"{len(won)} {'фолде' if len(won) == 1 else 'фолдах'} из {len(folds)}"
+        self.assertIn(won_phrase, caption)
         for fold in lost:
             with self.subTest(fold=fold):
                 self.assertIn(_ORDINAL.get(fold, str(fold)), caption)
+        # На телефоне подпись сокращена до одного оборота — это то же число фолдов.
+        self.assertEqual(self.stats[0]["short"], f"на {won_phrase}")
 
     # -- число 2: наукаст (горизонт 1) --------------------------------------
 
@@ -404,6 +462,7 @@ class BuildSiteTest(unittest.TestCase):
         stat = self.stats[1]
         self.assertEqual(stat["number"], f"{_fmt(h1_gain, 1)}%")
         self.assertIn(f"MAE {_fmt(h1_best, 0)} против {_fmt(h1_prophet, 0)} ₽", stat["caption"])
+        self.assertEqual(stat["short"], f"{_fmt(h1_best, 0)} против {_fmt(h1_prophet, 0)} ₽")
 
     # -- число 3: год вперёд (горизонт 12, без оракула) ---------------------
 
@@ -436,6 +495,7 @@ class BuildSiteTest(unittest.TestCase):
             words = {1: "один", 2: "два"}[n_folds_top]
             fold = _plural(n_folds_top, "фолд", "фолда", "фолдов")
             self.assertIn(f"но это {words} {fold}", stat["caption"])
+            self.assertIn(f"но это {words} {fold}", stat["short"])
 
     # -- число 4: проверка агрегата по факту 2025 года -----------------------
 
@@ -458,7 +518,8 @@ class BuildSiteTest(unittest.TestCase):
         stat = self.stats[3]
         self.assertEqual(stat["number"], f"{_range(own)}%")
         self.assertIn(f"— {_range(rules)}%.", stat["caption"])
-        self.assertIn(f"с фактом {forecast_year} года", stat["caption"])
+        self.assertEqual(stat["short"], f"у правил {_range(rules)}%")
+        self.assertIn(f"на факте {forecast_year} года", stat["caption"])
         self.assertIn(f"горизонты {horizons[0]}–{horizons[-1]} мес.", stat["caption"])
         self.assertIn(f"{_MONTH_OF[origin.month - 1]} {origin.year}", stat["caption"])
         # Названия простых правил — из колонки aggregate_model того же файла.
@@ -618,10 +679,16 @@ class BuildSiteTest(unittest.TestCase):
         collector.feed(self.html)
         self.assertTrue(collector.links, "в index.html не нашлось ни одной ссылки")
 
+        ids = _IdCollector()
+        ids.feed(self.html)
         for link in collector.links:
             if link.startswith(("http://", "https://", "mailto:", "data:")):
                 continue
             with self.subTest(link=link):
+                if link.startswith("#"):
+                    # Якорь внутри страницы — это не файл: ищем элемент с таким id.
+                    self.assertIn(link[1:], ids.ids, f"{link}: на странице нет такого id")
+                    continue
                 target = (ROOT / link).resolve()
                 if target.is_dir():
                     self.assertTrue((target / "index.html").exists(), f"{link}: нет index.html внутри")
@@ -663,6 +730,8 @@ class BuildSiteTest(unittest.TestCase):
                     )
 
 
+    # -- данные главной: <script id="landing-data"> --------------------------------------
+
     def test_landing_data_is_one_parsable_json_script(self) -> None:
         self.assertIsNotNone(self.landing_raw, "в index.html нет ровно одного <script id=landing-data>")
         # «<» экранирован: иначе «</script» внутри строки данных закрыл бы тег.
@@ -686,6 +755,8 @@ class BuildSiteTest(unittest.TestCase):
         too_big = {"x": "я" * build_site.MAX_LANDING_BYTES}
         with self.assertRaises(ValueError):
             build_site.landing_json(too_big)
+
+    # -- story: ряды выборки и медиана по ВСЕМ рядам -----------------------------------------
 
     def _story_norm(self) -> pd.DataFrame:
         """Ряды матрицы, делённые на среднее своих первых 12 месяцев — написано здесь заново."""
@@ -733,6 +804,15 @@ class BuildSiteTest(unittest.TestCase):
             self.wide.shape[1], size=build_site.LANDING_SAMPLE_SIZE, replace=False
         )
         self.assertNotEqual([str(self.wide.columns[i]) for i in other], self.landing["story"]["ids"])
+
+    def test_story_spread_in_template_is_recomputed_from_all_series(self) -> None:
+        # Третий шаг: «у девяти значений из десяти … не больше ±N%» — N по всей панели.
+        norm = self._story_norm()
+        deviation = norm.div(norm.median(axis=1), axis=0).sub(1).abs().to_numpy()
+        expected = _fmt(float(np.percentile(deviation, 90)) * 100, 0)
+        self.assertIn(f"не больше ±{expected}%", self.html)
+
+    # -- horizons: MAE четырёх моделей на горизонтах конфига --------------------------------
 
     def test_horizons_match_horizons_summary_csv(self) -> None:
         horizons = self.landing["horizons"]
@@ -794,6 +874,8 @@ class BuildSiteTest(unittest.TestCase):
         has_gap = any(pd.isna(year.get(model_id, np.nan)) for model_id in shown)
         self.assertEqual("не удалось обучить" in notes[12], has_gap)
 
+    # -- fact и teaser: те же значения, что в файлах стенда --------------------------------------
+
     def test_fact_equals_demo_aggregate_json(self) -> None:
         self.assertEqual(self.landing["fact"], self.aggregate_json)
 
@@ -836,6 +918,8 @@ class BuildSiteTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_site.build_teaser(gappy, self.wide, self.forward_cfg)
 
+    # -- шрифты, стили, скрипт: файлы на месте, внешнего нет -------------------------------------
+
     def test_fonts_are_self_hosted_with_licences(self) -> None:
         css = (ROOT / "site" / "site.css").read_text(encoding="utf-8")
         faces = re.findall(r"@font-face\s*\{(.*?)\}", css, re.S)
@@ -857,6 +941,117 @@ class BuildSiteTest(unittest.TestCase):
             with self.subTest(licence=licence):
                 text = (ROOT / "site" / "fonts" / licence).read_text(encoding="utf-8")
                 self.assertIn("SIL OPEN FONT LICENSE Version 1.1", text)
+
+    def test_stylesheets_and_script_load_nothing_external(self) -> None:
+        for name in ("site/site.css", "site/landing.css", "demo/demo.css"):
+            css = (ROOT / name).read_text(encoding="utf-8")
+            with self.subTest(file=name):
+                self.assertNotRegex(css, r"url\(\s*['\"]?(?:https?:)?//", "внешний url() в стилях")
+                self.assertNotIn("@import", css)
+        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        # Единственный «http» в скрипте — пространство имён SVG, это не ресурс.
+        urls = [u for u in re.findall(r"https?://[^\s\"'`)]+", js) if u != "http://www.w3.org/2000/svg"]
+        self.assertEqual(urls, [], "landing.js не должен ходить за пределы сайта")
+        for forbidden in ("XMLHttpRequest", "WebSocket", "sendBeacon", "import("):
+            self.assertNotIn(forbidden, js)
+
+    def test_local_assets_referenced_by_stylesheets_exist(self) -> None:
+        for name in ("site/site.css", "site/landing.css"):
+            css_path = ROOT / name
+            for url in re.findall(r"url\(\s*['\"]?([^'\")\s]+)", css_path.read_text(encoding="utf-8")):
+                with self.subTest(file=name, url=url):
+                    self.assertTrue((css_path.parent / url).resolve().exists(), f"{url}: файла нет")
+
+    def test_landing_script_has_no_hand_typed_data_numbers(self) -> None:
+        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+
+        # Числа страницы: всё, что стоит в пунктах «пяти чисел», средние ошибки года и MAE
+        # горизонтов. Нужны «данные-подобные» значения: с десятичной запятой, с неразрывным
+        # пробелом разрядов или из четырёх и более цифр — короткие целые («24», «3») совпали бы
+        # с константами кода, и проверка шумела бы.
+        tokens: set[str] = set()
+        number = r"\d+(?:\u00a0\d{3})*(?:,\d+)?"
+        for stat in self.stats:
+            tokens.update(re.findall(number, stat["number"] + " " + stat["caption"]))
+        tokens.update(self.aggregate_json["mape"].values())
+        for model in self.landing["horizons"]["models"]:
+            tokens.update(str(v) for v in model["mae"] if v is not None)
+        tokens.add(str(self.wide.shape[1]))
+
+        def data_like(token: str) -> bool:
+            return "," in token or "\u00a0" in token or len(re.sub(r"\D", "", token)) >= 4
+
+        forbidden = sorted(t for t in tokens if data_like(t))
+        self.assertGreater(len(forbidden), 10, "проверка потеряла числа страницы")
+        for token in forbidden:
+            variants = {token, token.replace("\u00a0", " "), token.replace("\u00a0", ""),
+                        token.replace("\u00a0", "").replace(",", ".")}
+            for variant in variants:
+                with self.subTest(number=variant):
+                    self.assertIsNone(
+                        re.search(r"(?<![\w.,])" + re.escape(variant) + r"(?![\w.,])", js),
+                        f"в landing.js вписано число данных {variant!r}",
+                    )
+
+        # И сами ряды: массив из шести и более чисел подряд — вписанные данные.
+        self.assertIsNone(
+            re.search(r"\[\s*-?\d+(?:\.\d+)?\s*(?:,\s*-?\d+(?:\.\d+)?\s*){5,}\]", js),
+            "в landing.js есть числовой массив — данные должны приходить из landing-data",
+        )
+
+    def test_template_has_no_hand_typed_numbers(self) -> None:
+        # В шаблоне число — только подстановка `${…}`; вне подстановок цифр в видимом тексте
+        # и в подписях нет. Исключения — номера разделов и шагов («01 · Главный вывод»,
+        # «Шаг 02») и названия лицензий («CC BY-SA 4.0»): это метки, а не данные.
+        template = (ROOT / "site" / "index.template.html").read_text(encoding="utf-8")
+        collector = _TextCollector()
+        collector.feed(template)
+        text = " ".join(collector.chunks)
+        text = re.sub(r"\$\{[a-z_0-9]+\}", " ", text)
+        text = re.sub(r"\b0[1-6]\b", " ", text)
+        text = text.replace("CC BY-SA 4.0", " ")
+        leftovers = re.findall(r".{0,20}\d.{0,20}", text)
+        self.assertEqual(leftovers, [], "в шаблоне вписаны числа; вынесите их в подстановки генератора")
+
+    # -- разметка главной ---------------------------------------------------------------------------
+
+    def test_page_has_landmarks_sections_and_accessible_controls(self) -> None:
+        ids = _IdCollector()
+        ids.feed(self.html)
+        for section in ("why", "horizons", "fact", "city", "method", "report"):
+            with self.subTest(section=section):
+                self.assertEqual(ids.ids[section]["tag"], "section")
+                self.assertEqual(ids.ids[section]["aria-labelledby"], f"{section}-title")
+                self.assertIn(f"{section}-title", ids.ids)
+        # Поиск — ARIA-комбобокс со списком и живой областью; подписи под графиками — живые.
+        combo = ids.ids["mo-q"]
+        self.assertEqual(combo["role"], "combobox")
+        self.assertEqual(combo["aria-controls"], "mo-list")
+        self.assertEqual(ids.ids["mo-list"]["role"], "listbox")
+        for live in ("mo-status", "story-caption", "h-note"):
+            with self.subTest(live=live):
+                self.assertEqual(ids.ids[live]["aria-live"], "polite")
+        # Графики с данными — картинки с названием; декоративный график обложки скрыт.
+        for chart in ("story-plot", "fact-plot", "t-plot"):
+            with self.subTest(chart=chart):
+                self.assertEqual(ids.ids[chart]["role"], "img")
+                self.assertTrue(ids.ids[chart]["aria-label"])
+        self.assertIn('class="hero-plot" aria-hidden="true"', self.html)
+        # Шаги и переключатели — кнопки с состоянием.
+        self.assertEqual(self.html.count('class="step" type="button" aria-pressed='), 3)
+        self.assertIn('lang="ru"', self.html)
+        self.assertIn('<link rel="icon" href="data:,">', self.html)
+        self.assertIn('name="viewport"', self.html)
+        self.assertIn('name="description"', self.html)
+
+    def test_page_links_to_the_expected_materials(self) -> None:
+        collector = _LinkCollector()
+        collector.feed(self.html)
+        for link in ("report/report.html", "report/slides.html", "report/report.pdf", "report/slides.pdf",
+                     "demo/", "report/method.svg", "results/forecast_2025.csv.gz",
+                     "https://github.com/kr1zal/sberindex_konkurs"):
+            with self.subTest(link=link):
+                self.assertIn(link, collector.links)
 
 
 if __name__ == "__main__":

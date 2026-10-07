@@ -1,0 +1,1514 @@
+/* Главная: раскладка разделов и графики. Шрифты, токены и общие компоненты (шапка, кнопки,
+   чипы, поле поиска, карточки, подвал) — в site.css, здесь только то, что нужно одной этой
+   странице.
+
+   Графики — SVG с viewBox 1000×1000 и preserveAspectRatio="none": линии растягиваются
+   по блоку любого размера, а толщина штриха не искажается из-за vector-effect.
+   Подписи осей, точки и вертикальные линии — обычные элементы, расставленные в процентах
+   блока: на них текст не растягивается. Всё положение задаёт landing.js по данным. */
+
+/* -- движение ------------------------------------------------------------------ */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: 2400;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes breathe {
+  0%, 100% {
+    opacity: 0.75;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* fill-mode both: до старта и по окончании анимация держит крайние кадры, поэтому без
+   неё (печать, отключённые анимации) элементы остаются на своих местах и видны. */
+.rise {
+  animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.d1 { animation-delay: 0.1s; }
+.d2 { animation-delay: 0.2s; }
+.d3 { animation-delay: 0.35s; }
+.d4 { animation-delay: 0.5s; }
+.d5 { animation-delay: 0.65s; }
+
+/* -- обложка --------------------------------------------------------------------- */
+
+/* Без overflow: hidden: список подсказок поиска выходит за нижний край обложки. */
+.hero {
+  position: relative;
+  overflow-x: clip;
+  padding-bottom: 96px;
+  --hero-line: #5b8cff;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 48px;
+  align-items: center;
+  padding-top: 24px;
+}
+
+.hero-left {
+  position: relative;
+  z-index: 5;
+  min-width: 0;
+}
+
+.hero-eyebrow {
+  margin: 0 0 22px;
+  color: var(--night-soft);
+}
+
+.hero-title {
+  margin: 0;
+  font-size: clamp(2.375rem, 5.6vw, 5rem);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+}
+
+.hero-sub {
+  margin: 14px 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.1875rem, 2.4vw, 2rem);
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--night-ink-2);
+}
+
+.hero-lead {
+  max-width: 560px;
+  margin: 26px 0 0;
+  font-size: 1.1875rem;
+  line-height: 1.6;
+  color: var(--night-ink-3);
+}
+
+.hero-search {
+  position: relative;
+  z-index: 5;
+  max-width: 560px;
+  margin-top: 34px;
+}
+
+.search-note {
+  margin: 12px 0 0;
+  color: var(--night-dim);
+  font-size: 0.8125rem;
+}
+
+.search-note a {
+  color: var(--amber);
+}
+
+.search-note .picked {
+  color: var(--night-ink);
+}
+
+.hero-figure {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+}
+
+.hero-plot {
+  position: relative;
+  height: 440px;
+}
+
+.hero-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Свечение — на самом <svg>: фильтр на дочернем элементе SVG Safari не применяет. */
+.hero-svg-glow {
+  filter: drop-shadow(0 0 8px rgba(255, 181, 71, 0.55));
+}
+
+.hero-line {
+  fill: none;
+  stroke: var(--hero-line);
+  stroke-width: 1.3;
+  stroke-opacity: 0.42;
+  stroke-dasharray: 2400;
+  vector-effect: non-scaling-stroke;
+  animation: draw 2.2s cubic-bezier(0.22, 0.7, 0.16, 1) both;
+  animation-delay: calc(0.25s + var(--i, 0) * 0.045s);
+}
+
+.hero-median {
+  fill: none;
+  stroke: var(--amber);
+  stroke-width: 3.6;
+  stroke-linecap: round;
+  stroke-dasharray: 2400;
+  vector-effect: non-scaling-stroke;
+  animation: draw 1.6s cubic-bezier(0.3, 0.6, 0.1, 1) 1.5s both, breathe 3.2s ease-in-out 3.2s infinite;
+}
+
+.hero-axis {
+  position: relative;
+  height: 18px;
+  margin-top: 10px;
+  color: var(--night-dim);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.hero-axis span {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+.hero-caption {
+  margin: 8px 0 0;
+  color: var(--night-dim);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-align: right;
+}
+
+@media (max-width: 959px) {
+  .hero-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding-top: 8px;
+  }
+
+  /* Обёртка исчезает из раскладки, и заголовок, график и поиск встают в одну колонку
+     в этом порядке: поиск — после графика, как на макете телефона. */
+  .hero-left {
+    display: contents;
+  }
+
+  .hero-text {
+    order: 1;
+  }
+
+  .hero-figure {
+    order: 2;
+    margin-top: 22px;
+  }
+
+  .hero-search {
+    order: 3;
+    width: 100%;
+    margin-top: 24px;
+  }
+
+  .hero-plot {
+    height: 240px;
+  }
+
+  .hero-caption, .hero-noscript {
+    text-align: left;
+  }
+}
+
+@media (max-width: 639px) {
+  .hero {
+    padding-bottom: 72px;
+  }
+
+  .hero-eyebrow {
+    margin-bottom: 14px;
+    font-size: 0.72rem;
+  }
+
+  .hero-lead {
+    margin-top: 16px;
+    font-size: 1rem;
+  }
+
+  .hero-plot {
+    height: 200px;
+  }
+
+  .hero-line {
+    stroke-width: 1;
+  }
+
+  .hero-median {
+    stroke-width: 3;
+  }
+
+  /* На телефоне поле и кнопка — два блока друг под другом, поле — отдельной плашкой. */
+  .hero-search .field {
+    flex-direction: column;
+    gap: 10px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+  }
+
+  .hero-search .field input {
+    min-height: 52px;
+    padding: 0 16px;
+    background: var(--surface);
+    border: 1px solid var(--field-line);
+    border-radius: 14px;
+    font-size: 1rem;
+  }
+
+  .hero-search .field input:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .hero-search .field .btn {
+    min-height: 52px;
+    font-size: 1rem;
+  }
+}
+
+.hero-noscript {
+  margin: 12px 0 0;
+  color: var(--night-ink-3);
+  font-size: 0.875rem;
+  text-align: right;
+}
+
+/* -- пять чисел ------------------------------------------------------------------ */
+
+.stats-wrap {
+  position: relative;
+  z-index: 3;
+  margin-top: -48px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stat {
+  padding: 24px 24px 22px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 18px;
+  /* Размер числа задан шириной самой карточки (cqw ниже): диапазон «3,8–4,5%» длиннее
+     «40%» и на узкой карточке иначе вылез бы за край. */
+  container-type: inline-size;
+}
+
+.stat-number {
+  font-size: 1.75rem;
+}
+
+/* 17cqw — по самому длинному из чисел: «3,8–4,5%» в Unbounded занимает около 5,5 кегля. */
+@supports (width: 1cqw) {
+  .stat-number {
+    font-size: clamp(1.25rem, 17cqw, 2.75rem);
+  }
+}
+
+.stat-caption {
+  margin: 12px 0 0;
+}
+
+.stat-label {
+  display: block;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.stat-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.stat-note-short {
+  display: none;
+}
+
+/* Пятый пункт — строка панели во всю ширину, без карточки. */
+.stat-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 0 2px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  container-type: normal;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.stat-panel .stat-number {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+.stat-panel .stat-caption {
+  margin: 0;
+}
+
+@media (max-width: 999px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  .stats-wrap {
+    margin-top: -36px;
+  }
+
+  .stats {
+    gap: 10px;
+  }
+
+  .stat {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .stat-label {
+    margin-top: 2px;
+    font-size: 0.84rem;
+    line-height: 1.4;
+  }
+
+  /* Телефон: длинные оговорки заменены короткими — карточка в полторы строки, а не в десять. */
+  .stat-note-full {
+    display: none;
+  }
+
+  .stat-note-short {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+
+  .stat-panel {
+    padding: 0 2px;
+  }
+}
+
+/* -- разделы ------------------------------------------------------------------- */
+
+.section {
+  padding-top: 90px;
+}
+
+.section-first {
+  padding-top: 110px;
+}
+
+.section-lead {
+  max-width: 760px;
+  margin: 16px 0 0;
+  color: var(--ink-soft);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+.section-title {
+  max-width: 960px;
+}
+
+.section-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+/* Заголовок не растягивается на всю строку — иначе переключатель уходит под него. */
+.section-bar .section-title {
+  max-width: 720px;
+}
+
+@media (max-width: 639px) {
+  .section {
+    padding-top: 56px;
+  }
+
+  .section-first {
+    padding-top: 54px;
+  }
+}
+
+/* -- общее для графиков ------------------------------------------------------------ */
+
+.plot-card {
+  position: relative;
+  min-width: 0;
+  padding: 28px 28px 22px 64px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+}
+
+.plot {
+  position: relative;
+  height: 340px;
+}
+
+.plot-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Два набора подписей оси меняются местами: новый проявляется, прежний гаснет. */
+.tick-set {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.4s ease;
+}
+
+.tick-set.is-entering, .tick-set.is-leaving {
+  opacity: 0;
+}
+
+.tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--chart-grid);
+}
+
+.tick > span {
+  position: absolute;
+  top: -9px;
+  left: -52px;
+  width: 44px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 18px;
+  text-align: right;
+}
+
+.plot-axis {
+  position: relative;
+  height: 18px;
+  margin-top: 10px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.plot-axis > span {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+.plot-caption {
+  margin: 16px 0 0;
+  min-height: 3em;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.vline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.key {
+  display: inline-block;
+  flex: none;
+  width: 22px;
+  height: 0;
+  border-top: 3px solid;
+}
+
+.key-fact {
+  border-color: var(--chart-fact);
+  border-top-width: 2.2px;
+}
+
+.key-fc {
+  border-color: var(--chart-forecast);
+}
+
+.key-r1 {
+  border-color: var(--chart-known);
+  border-top-style: dashed;
+  border-top-width: 2px;
+}
+
+.key-r2 {
+  border-color: var(--chart-third);
+  border-top-style: dotted;
+  border-top-width: 2px;
+}
+
+.key-break {
+  border-color: var(--amber);
+  border-top-style: dashed;
+  border-top-width: 2px;
+}
+
+@media (max-width: 639px) {
+  .plot-card {
+    padding: 18px 16px 18px 48px;
+    border-radius: 18px;
+  }
+
+  .plot {
+    height: 190px;
+  }
+
+  .tick > span {
+    left: -44px;
+    width: 36px;
+    font-size: 0.6875rem;
+  }
+
+  .plot-caption {
+    min-height: 0;
+  }
+}
+
+/* -- 01 · главный вывод ------------------------------------------------------------- */
+
+.story {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 40px;
+  align-items: start;
+  margin-top: 40px;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.step {
+  padding: 18px 20px;
+  background: transparent;
+  border: 1.5px solid var(--step-line);
+  border-radius: 16px;
+  color: var(--ink-soft);
+  font-family: var(--font-text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.2s, border-color 0.2s;
+}
+
+.step:hover {
+  transform: translateY(-1px);
+}
+
+.step[aria-pressed="true"] {
+  background: var(--surface);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.step > span {
+  display: block;
+}
+
+.step-num {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.step-title {
+  margin-top: 6px;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 500;
+}
+
+.step-text {
+  margin-top: 8px;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.step > .step-short {
+  display: none;
+}
+
+.story-lines {
+  stroke-opacity: 0.55;
+  transition: stroke-opacity 0.6s ease;
+}
+
+.story-lines.is-faded {
+  stroke-opacity: 0.16;
+}
+
+.story-lines path {
+  fill: none;
+  stroke: var(--chart-line);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.story-median-layer {
+  transition: opacity 0.6s ease;
+}
+
+.story-median {
+  fill: none;
+  stroke: var(--chart-median);
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Текст шага под графиком нужен только там, где шаги сжаты до вкладок. */
+.story-text {
+  display: none;
+  margin: 10px 0 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 959px) {
+  .story {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .steps {
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .step {
+    flex: 1 1 0;
+    min-height: 44px;
+    padding: 10px 6px;
+    border-radius: 12px;
+    font-size: 0.8125rem;
+    text-align: center;
+  }
+
+  .step .step-num, .step .step-title, .step .step-text {
+    display: none;
+  }
+
+  .step > .step-short {
+    display: block;
+  }
+
+  .step[aria-pressed="true"] .step-short {
+    font-weight: 500;
+  }
+
+  .story-text {
+    display: block;
+  }
+}
+
+/* -- 02 · горизонты ------------------------------------------------------------------ */
+
+.bars-card {
+  margin-top: 34px;
+  padding: 30px 32px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+}
+
+.bars {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr) 120px;
+  gap: 20px;
+  align-items: center;
+  padding: 12px 0;
+}
+
+.bar-label {
+  display: block;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.bar-sub {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+}
+
+.bar-track {
+  height: 16px;
+  overflow: hidden;
+  background: var(--bar-track);
+  border-radius: 8px;
+}
+
+.bar-fill {
+  width: 0;
+  height: 100%;
+  background: var(--bar-rest);
+  border-radius: 8px;
+  transition: width 0.7s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.3s;
+}
+
+.bar-row.is-best .bar-fill {
+  background: var(--bar-best);
+}
+
+.bar-value {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.bar-row.is-best .bar-value {
+  font-weight: 500;
+}
+
+.bar-row.is-empty .bar-value {
+  color: var(--ink-soft);
+}
+
+.bars-note {
+  margin: 16px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule-soft);
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+@media (max-width: 639px) {
+  .section-bar > .segmented {
+    display: flex;
+    width: 100%;
+  }
+
+  .section-bar > .segmented button {
+    flex: 1 1 0;
+    padding: 0 4px;
+    font-size: 0.875rem;
+  }
+
+  .bars-card {
+    margin-top: 22px;
+    padding: 12px 16px 18px;
+    border-radius: 18px;
+  }
+
+  .bar-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    padding: 10px 0;
+  }
+
+  .bar-name {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .bar-value {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .bar-track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* -- 03 · проверка фактом ------------------------------------------------------------ */
+
+.fact {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: stretch;
+  margin-top: 30px;
+}
+
+.fact-card {
+  padding: 26px 26px 20px 74px;
+}
+
+.fact-card .tick > span {
+  left: -64px;
+  width: 54px;
+}
+
+.chart-unit {
+  margin: 0 0 6px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.fact-plot {
+  height: 360px;
+}
+
+.vline-end {
+  border-left: 1px dashed var(--chart-mark);
+}
+
+.vline-end > span {
+  position: absolute;
+  top: -2px;
+  right: 8px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.vline-cursor {
+  border-left: 1.5px solid var(--ink);
+  opacity: 0.18;
+  transition: left 0.3s ease;
+}
+
+.fact-line {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.fact-hist {
+  stroke: var(--chart-fact);
+  stroke-width: 2.2;
+}
+
+.fact-fc {
+  stroke: var(--chart-forecast);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.fact-r1 {
+  stroke: var(--chart-known);
+  stroke-width: 1.8;
+  stroke-dasharray: 7 5;
+  transition: opacity 0.6s ease;
+}
+
+.fact-r2 {
+  stroke: var(--chart-third);
+  stroke-width: 1.8;
+  stroke-dasharray: 2 4;
+  transition: opacity 0.6s ease;
+}
+
+.dots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dot {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  background: var(--chart-fact);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+
+.dot.is-off {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.3);
+}
+
+.slider-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-top: 18px;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  min-width: 200px;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 18px;
+  margin-top: 4px;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.toggle input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+
+#fact-r1 {
+  accent-color: var(--chart-known);
+}
+
+#fact-r2 {
+  accent-color: var(--chart-third);
+}
+
+.fact-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.readout {
+  padding: 26px;
+  border: 1px solid var(--night-rule);
+  border-radius: 20px;
+}
+
+.readout-month {
+  margin: 0;
+  color: var(--night-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.readout-rows {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  font-size: 0.9375rem;
+}
+
+.readout-rows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.readout-rows dt {
+  color: var(--night-ink-3);
+}
+
+.readout-rows dd {
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.readout-err {
+  margin: 18px 0 0;
+  color: var(--amber);
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.readout-note {
+  margin: 4px 0 0;
+  color: var(--night-soft);
+  font-size: 0.8125rem;
+}
+
+.mean-card {
+  padding: 22px 24px;
+}
+
+.mean-rows {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 0;
+}
+
+.mean-rows > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mean-rows dt {
+  color: var(--ink-soft);
+}
+
+.mean-rows > div:first-child dt {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.mean-rows dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+/* Крупный текст (от 24 px): цвет линии на белом даёт у оранжевого 3,2:1 и у зелёного 4,05:1 —
+   для крупного шрифта порог 3:1, для мелкого было бы мало. */
+.mean-own, .mean-r1, .mean-r2 {
+  font-size: 1.5rem;
+}
+
+.mean-own {
+  color: var(--chart-forecast);
+}
+
+.mean-r1 {
+  color: var(--chart-known);
+}
+
+.mean-r2 {
+  color: var(--chart-third);
+}
+
+@media (max-width: 959px) {
+  .fact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 639px) {
+  .fact-card {
+    padding: 18px 16px 12px 52px;
+  }
+
+  .fact-card .tick > span {
+    left: -48px;
+    width: 40px;
+  }
+
+  .fact-plot {
+    height: 240px;
+  }
+
+  .slider-row input[type="range"] {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+
+  .readout {
+    padding: 20px;
+  }
+
+  .readout-err {
+    font-size: 2rem;
+  }
+}
+
+/* -- 04 · стенд ---------------------------------------------------------------------- */
+
+.stand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 40px;
+  padding: 44px 44px 36px;
+  border: 1px solid var(--night-rule);
+  border-radius: 28px;
+}
+
+.stand-copy {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+
+.stand .section-title {
+  font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.5rem);
+}
+
+.stand-lead {
+  margin: 16px 0 0;
+  color: var(--night-ink-3);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.stand-cta {
+  min-height: 52px;
+  margin-top: 26px;
+  padding: 0 22px;
+  font-size: 1rem;
+}
+
+.stand-chart {
+  flex: 1.4 1 460px;
+  min-width: 0;
+  padding: 22px 22px 18px;
+  background: var(--night-surface);
+  border: 1px solid var(--night-rule);
+  border-radius: 20px;
+}
+
+.stand-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.stand-chart-name {
+  font-size: 1.0625rem;
+  font-weight: 500;
+}
+
+.stand-chart-region {
+  color: var(--night-soft);
+  font-size: 0.8125rem;
+}
+
+.stand-plot {
+  height: 230px;
+  margin-top: 18px;
+}
+
+.vline-panel {
+  border-left: 1px dashed #3a4566;
+}
+
+.vline-break {
+  border-left: 1px dashed rgba(255, 181, 71, 0.7);
+}
+
+.vline-break > span {
+  position: absolute;
+  left: 4px;
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.stand-line {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.stand-fact {
+  stroke: var(--chart-fact);
+  stroke-width: 2;
+}
+
+.stand-known {
+  stroke: var(--chart-known);
+  stroke-width: 1.8;
+  stroke-dasharray: 6 5;
+}
+
+.stand-fc {
+  stroke: var(--chart-forecast);
+  stroke-width: 2.8;
+}
+
+.legend-night {
+  margin: 14px 0 0;
+  color: var(--night-soft);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 639px) {
+  .stand {
+    gap: 24px;
+    padding: 24px 20px;
+    border-radius: 22px;
+  }
+
+  .stand-cta {
+    display: flex;
+  }
+
+  .stand-chart {
+    padding: 16px 16px 14px;
+  }
+
+  .stand-plot {
+    height: 190px;
+  }
+}
+
+/* -- 05 · метод -------------------------------------------------------------------- */
+
+.method-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin: 30px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.method-cards .card {
+  padding: 22px 24px;
+}
+
+.method-cards .mono-label {
+  color: var(--accent);
+}
+
+.method-cards p:last-child {
+  margin: 10px 0 0;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.method-figure {
+  margin: 14px 0 0;
+  padding: 28px;
+  background: var(--surface-card);
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+}
+
+.method-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.method-figure figcaption {
+  margin-top: 12px;
+  color: #535c6b;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.method-figure figcaption a {
+  color: #1f6bc4;
+}
+
+@media (max-width: 639px) {
+  .method-figure {
+    padding: 14px;
+  }
+}
+
+/* -- 06 · материалы ---------------------------------------------------------------- */
+
+.materials {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 30px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.material-icon {
+  display: block;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.material-title {
+  margin: 16px 0 0;
+  font-size: 1.1875rem;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* Вся карточка — одна ссылка: растянутый ::after перекрывает её целиком, а вторая ссылка
+   карточки («PDF») лежит над ним. */
+.material-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.material-link:hover {
+  color: var(--ink);
+}
+
+.material-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+}
+
+/* Кольцо фокуса — вокруг всей карточки: рисуется на растянутом ::after, а не на тексте ссылки. */
+.material-link:focus-visible {
+  outline: none;
+}
+
+.material-link:focus-visible::after {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.material-note {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+/* Область нажатия «PDF» — не меньше 44 px в обе стороны, а раскладка не сдвигается: отступы
+   добавлены внутрь ссылки и сразу вычтены отрицательными полями. */
+.material-extra {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  margin: -12px -10px;
+  padding: 12px 10px;
+}
+
+@media (max-width: 639px) {
+  .materials {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .material {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 64px;
+    padding: 12px 18px;
+    border-radius: 16px;
+  }
+
+  .material-icon {
+    display: none;
+  }
+
+  .material-link::after {
+    border-radius: 16px;
+  }
+
+  .material-title {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .material-note {
+    margin: 0;
+    font-size: 0.8125rem;
+    text-align: right;
+  }
+}
+
+/* -- без анимаций -------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .hero-line, .hero-median {
+    animation: none;
+  }
+
+  .hero-line, .hero-median {
+    stroke-dashoffset: 0;
+  }
+
+  .step, .bar-fill, .dot, .vline-cursor, .tick-set, .story-lines, .story-median-layer,
+  .fact-r1, .fact-r2 {
+    transition: none;
+  }
+
+  .step:hover {
+    transform: none;
+  }
+}
