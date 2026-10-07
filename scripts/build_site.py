@@ -327,6 +327,17 @@ def _date_words(value: dt.date) -> str:
     return f"{value.day} {MONTH_OF[value.month - 1]} {value.year}"
 
 
+def file_size_label(path: Path) -> str:
+    """Размер файла для подписи ссылки: «2,4 МБ» — мегабайты по 1 048 576 байт, как их показывает файловый
+    менеджер, с неразрывным пробелом перед единицей; файл меньше 0,05 МБ (при округлении до десятых он
+    стал бы «0,0 МБ») — в килобайтах. Читатель видит размер до того, как нажмёт: PDF и архив с прогнозом
+    скачиваются целиком."""
+    size = path.stat().st_size
+    if size >= 0.05 * 1024 ** 2:
+        return f"{num(size / 1024 ** 2, 1)}\u00a0МБ"
+    return f"{num(size / 1024, 0)}\u00a0КБ"
+
+
 def _ruble(value: float) -> int | None:
     """Рубль как в формате данных стенда — целым; пропуск (NaN, отказ модели) — null."""
     return None if not np.isfinite(value) else int(round(float(value)))
@@ -381,6 +392,8 @@ def compute_placeholders(
     - ``built`` — дата сборки словами, «29 сентября 2026».
     - ``default_mo`` — МО, на котором открывается страница прогноза по муниципалитету без выбора:
       пустой запрос в поле обложки ведёт именно на него (`DEFAULT_MO`).
+    - ``report_pdf_size`` / ``slides_pdf_size`` / ``forecast_size`` — размеры PDF отчёта, PDF слайдов
+      и архива `results/forecast_2025.csv.gz` в подписях карточек материалов, «2,4 МБ» (`file_size_label`).
     - ``horizon_main`` — горизонт основного протокола, мес. (`configs/full.yaml::split.horizon`).
     - ``forecast_year`` — год прогноза вперёд, `origin.year + 1` (`configs/forecast_forward.yaml::origin`).
     - ``prophet_mae`` / ``best_mae`` — MAE эталона (Prophet) и лучшей модели на этом горизонте, ₽.
@@ -437,6 +450,9 @@ def compute_placeholders(
     placeholders: dict[str, str] = {
         "built": _date_words(today),
         "default_mo": DEFAULT_MO,
+        "report_pdf_size": file_size_label(ROOT / "report" / "report.pdf"),
+        "slides_pdf_size": file_size_label(ROOT / "report" / "slides.pdf"),
+        "forecast_size": file_size_label(ROOT / "results" / "forecast_2025.csv.gz"),
         "horizon_main": str(horizon_main),
         "forecast_year": str(forecast_year),
         "prophet_mae": rub(summary.loc["prophet", "MAE"]),

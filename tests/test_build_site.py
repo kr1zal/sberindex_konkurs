@@ -196,6 +196,38 @@ class _StatsParser(HTMLParser):
                 self._current["short"] += data
 
 
+class _AnchorCollector(HTMLParser):
+    """Ссылки `<a>` страницы: адрес, target, rel и весь текст внутри — с вложенными знаками и скрытыми подписями."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.anchors: list[dict[str, str | None]] = []
+        self._open: dict[str, str | None] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "a":
+            values = dict(attrs)
+            self._open = {"href": values.get("href"), "target": values.get("target"),
+                          "rel": values.get("rel"), "text": ""}
+            self.anchors.append(self._open)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a":
+            self._open = None
+
+    def handle_data(self, data: str) -> None:
+        if self._open is not None:
+            self._open["text"] += data
+
+    def handle_entityref(self, name: str) -> None:
+        if self._open is not None:
+            self._open["text"] += {"nbsp": "\u00a0"}.get(name, f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self._open is not None:
+            self._open["text"] += chr(int(name[1:], 16) if name[:1] in "xX" else int(name))
+
+
 class _TextCollector(HTMLParser):
     """Видимый читателю текст шаблона и тексты атрибутов, которые читают программы чтения
     с экрана и поисковики (`alt`, `aria-label`, `title`, `content` у description), — без
@@ -288,6 +320,13 @@ class _IdsOf:
 
     def attr(self, node_id: str, name: str) -> str:
         return self._attrs[node_id][name]
+
+
+def _anchors(html: str) -> list[dict[str, str | None]]:
+    """Все ссылки страницы с адресом, target, rel и текстом (см. `_AnchorCollector`)."""
+    collector = _AnchorCollector()
+    collector.feed(html)
+    return collector.anchors
 
 
 def _collapse(text: str) -> str:
@@ -1498,7 +1537,7 @@ class BuildSiteTest(unittest.TestCase):
         # В строке нет числа ни цифрой, ни словом: «ни одной из шести моделей» пишет отчёт, страница — без числа.
         self.assertEqual(re.findall(r"\d", text), [])
         self.assertEqual(_number_words_in(text), [])
-        link = re.search(r'<a href="(report/report\.html#[^"]+)">', self.html[self.html.index('id="story-proof"'):])
+        link = re.search(r'<a href="(report/report\.html#[^"]+)"[^>]*>', self.html[self.html.index('id="story-proof"'):])
         self.assertIsNotNone(link)
         # Якорь — раздел отчёта о механизме: в отрендеренном отчёте такой id есть.
         anchor = unquote(link.group(1).split("#", 1)[1])
@@ -1585,6 +1624,118 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual([number for number, _ in labels], [f"{n:02d}" for n in range(1, len(labels) + 1)])
         self.assertEqual(len(labels), 7)
         self.assertEqual(labels[3][1], "Изломы")
+
+    # -- названия и ссылки ------------------------------------------------------------------------------
+
+    GITHUB = "https://github.com/kr1zal/sberindex_konkurs"
+
+    def test_documents_and_code_open_in_a_new_tab_and_the_site_pages_in_the_same(self) -> None:
+        # Отчёт, слайды, их PDF, схема метода крупно и GitHub — в новой вкладке со знаком «↗» в подписи: у
+        # отчёта и слайдов нет пути обратно на сайт, и читатель, открыв отчёт на много экранов, терял бы
+        # сайт из виду. Переходы внутри сайта — в той же вкладке.
+        for name, page in (("главная", self.html), ("страница прогноза", self.demo_html)):
+            collector = _AnchorCollector()
+            collector.feed(page)
+            with self.subTest(page=name):
+                self.assertGreater(len(collector.anchors), 8)
+                documents = 0
+                for anchor in collector.anchors:
+                    href = anchor["href"]
+                    if href.startswith(("report/", "../report/")) or href == self.GITHUB:
+                        documents += 1
+                        self.assertEqual(anchor["target"], "_blank", href)
+                        self.assertEqual(anchor["rel"], "noopener", href)
+                        if anchor["text"].strip():  # у ссылки-картинки текста нет
+                            self.assertIn("↗", anchor["text"], href)
+                            self.assertIn("(откроется в новой вкладке)", anchor["text"], href)
+                    elif not href.startswith(("http://", "https://")):
+                        self.assertIsNone(anchor["target"], f"переход внутри сайта в новой вкладке: {href}")
+                self.assertGreaterEqual(documents, 3)
+        # В меню главной и страницы прогноза: отчёт, слайды и код — в новой вкладке; сами страницы сайта — нет.
+        landing_nav = {a["href"]: a for a in _anchors(self.html)}
+        self.assertIsNone(landing_nav["demo/"]["target"])
+        self.assertEqual(landing_nav["report/slides.html"]["target"], "_blank")
+
+    def test_the_word_stand_names_only_the_protocol_with_injections(self) -> None:
+        # Страница прогноза по муниципалитету на сайте нигде не «стенд»: слово зарезервировано за стендом с
+        # врезками известной величины, которым отчёт и схема метода проверяют детекторы изломов.
+        for name, path in (("шаблон главной", ROOT / "site" / "index.template.html"), ("страница", self.demo_html_path)):
+            collector = _TextCollector()
+            collector.feed(path.read_text(encoding="utf-8"))
+            text = " ".join(collector.chunks)
+            found = list(re.finditer(r"[Сс]тенд\w*", text))
+            for match in found:
+                with self.subTest(page=name, at=text[max(0, match.start() - 30): match.end() + 40]):
+                    self.assertIn("врезк", text[match.start(): match.end() + 40])
+            if name == "шаблон главной":  # раздел «Изломы» и схема метода говорят о стенде с врезками — проверка их видит
+                self.assertGreaterEqual(len(found), 2)
+        # И в строках скриптов — тексты, которые видит читатель: ошибки, подсказки, подписи.
+        for name in ("site/landing.js", "demo/demo.js"):
+            code = (ROOT / name).read_text(encoding="utf-8")
+            code = re.sub(r"/\*.*?\*/", " ", code, flags=re.S)
+            code = "\n".join(line.split("//")[0] if "://" not in line else line for line in code.splitlines())
+            with self.subTest(file=name):
+                self.assertEqual(re.findall(r".{0,40}[Сс]тенд.{0,30}", code), [])
+
+    def test_demo_page_is_named_forecast_by_municipality_on_both_pages(self) -> None:
+        # Одно имя: «Прогноз по муниципалитету» — в меню, метке раздела и кнопках главной, в карточке материалов,
+        # в метке и заголовке страницы. Приглашение «Покажите мой город» остаётся: поле обложки, H1 страницы.
+        self.assertIn('<a class="nav-link" href="demo/">Прогноз по муниципалитету</a>', self.html)
+        self.assertIn('<p class="eyebrow">05 · Прогноз по муниципалитету</p>', self.html)
+        self.assertIn('<a class="material-link" href="demo/">Прогноз по муниципалитету</a>', self.html)
+        self.assertEqual(self.html.count(">Открыть прогноз →</a>"), 2, "кнопки обложки и блока ведут на страницу прогноза")
+        self.assertIn('<label class="search-label" for="mo-q">Покажите мой город</label>', self.html)
+        self.assertIn('<h2 class="section-title" id="city-title">Покажите мой город</h2>', self.html)
+        self.assertIn("<title>Прогноз по муниципалитету — покажите мой город</title>", self.demo_html)
+        self.assertIn('<p class="eyebrow">Прогноз по муниципалитету</p>', self.demo_html)
+        self.assertIn('<h1 class="stand-title" id="stand-title">Покажите мой город</h1>', self.demo_html)
+        demo_js = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
+        self.assertIn("document.title = `${seriesId} — прогноз по муниципалитету`;", demo_js)
+        landing_js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        self.assertIn('"открыть прогноз →"', landing_js)
+
+    def test_demo_page_names_the_landing_page_one_way_and_has_the_slides_link(self) -> None:
+        # Главная названа в навигации «Обзор работы» — так же и в кнопке агрегата, а не «на главной»; в меню
+        # страницы прогноза есть «Слайды», как в меню главной (сайт навигирует одинаково).
+        self.assertIn("← Обзор работы", self.demo_html)
+        self.assertIn("Интерактивная версия — в обзоре работы →", self.demo_html)
+        self.assertNotIn("на главной", self.demo_html)
+        links = _LinkCollector()
+        links.feed(self.demo_html)
+        self.assertIn("../report/slides.html", links.links)
+        landing_links = _LinkCollector()
+        landing_links.feed(self.html)
+        for href in ("report/report.html", "report/slides.html", self.GITHUB):
+            self.assertIn(href, landing_links.links)
+        # Те же пункты меню, что на главной, в том же порядке: отчёт, слайды, код.
+        demo_nav = [a["href"] for a in _anchors(self.demo_html) if a["href"].startswith(("../report/", self.GITHUB))]
+        self.assertEqual(demo_nav, ["../report/report.html", "../report/slides.html", self.GITHUB])
+
+    def test_materials_cards_show_the_sizes_of_the_files_they_give(self) -> None:
+        # PDF (по два с лишним и по полмегабайта) и архив с прогнозом скачиваются целиком: размер — в подписи
+        # карточки. Считается заново по самим файлам, мегабайтами по 1 048 576 байт.
+        def size(path: str) -> str:
+            return f"{_fmt((ROOT / path).stat().st_size / 1024 ** 2, 1)}\u00a0МБ"
+
+        by_href = {a["href"]: a for a in _anchors(self.html)}
+        for href in ("report/report.pdf", "report/slides.pdf"):
+            with self.subTest(href=href):
+                self.assertTrue(by_href[href]["text"].startswith(f"PDF · {size(href)}"), by_href[href]["text"])
+        note = re.search(r'<p class="material-note">(все ряды панели[^<]*)</p>', self.html).group(1)
+        self.assertEqual(note, f"все ряды панели · csv.gz · {size('results/forecast_2025.csv.gz')}, архив gzip")
+
+    def test_file_size_label_uses_megabytes_and_falls_back_to_kilobytes(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            def made(size_bytes: int) -> Path:
+                path = Path(folder) / f"f{size_bytes}"
+                path.write_bytes(b"x" * size_bytes)
+                return path
+
+            self.assertEqual(build_site.file_size_label(made(2 * 1024 ** 2 + 400_000)), "2,4\u00a0МБ")
+            self.assertEqual(build_site.file_size_label(made(600_000)), "0,6\u00a0МБ")
+            self.assertEqual(build_site.file_size_label(made(53_000)), "0,1\u00a0МБ")
+            # Меньше 0,05 МБ при округлении до десятых стал бы «0,0 МБ»: показывается в килобайтах.
+            self.assertEqual(build_site.file_size_label(made(8_416)), "8\u00a0КБ")
 
     # -- разметка главной ---------------------------------------------------------------------------
 

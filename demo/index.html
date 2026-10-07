@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Прогноз расходов по муниципалитету — стенд</title>
+<title>Прогноз по муниципалитету — покажите мой город</title>
 <meta name="description" content="Потребительские расходы муниципального образования из панели СберИндекса по месяцам, их прогноз на год вперёд от конца панели, изломы ряда и ошибки моделей на нём, а также прогноз федерального агрегата, уже сверенный с фактом.">
 <meta name="theme-color" content="#0b1020">
 <link rel="icon" href="data:,">
@@ -30,8 +30,9 @@
       </summary>
       <nav class="site-nav" aria-label="Разделы сайта">
         <a class="nav-link" href="../">← Обзор работы</a>
-        <a class="nav-link" href="../report/report.html">Отчёт</a>
-        <a class="nav-link nav-link-solid" href="https://github.com/kr1zal/sberindex_konkurs">Код на GitHub</a>
+        <a class="nav-link" href="../report/report.html" target="_blank" rel="noopener">Отчёт<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
+        <a class="nav-link" href="../report/slides.html" target="_blank" rel="noopener">Слайды<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
+        <a class="nav-link nav-link-solid" href="https://github.com/kr1zal/sberindex_konkurs" target="_blank" rel="noopener">Код на GitHub<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
       </nav>
     </details>
   </div>
@@ -41,7 +42,7 @@
 
 <section class="stand-hero night" aria-labelledby="stand-title">
   <div class="wrap">
-    <p class="eyebrow">Стенд · прогноз по муниципалитету</p>
+    <p class="eyebrow">Прогноз по муниципалитету</p>
     <h1 class="stand-title" id="stand-title">Покажите мой город</h1>
     <p class="stand-intro" id="intro-text">Загрузка данных…</p>
 
@@ -63,7 +64,7 @@
       <p class="search-hint" id="search-hint"></p>
       <p class="stand-alert" id="mo-invalid-note" role="alert" hidden></p>
       <noscript>
-        <p class="stand-alert">Стенд работает с включённым JavaScript: данные и графики строит скрипт страницы.</p>
+        <p class="stand-alert">Страница работает с включённым JavaScript: данные и графики строит скрипт.</p>
       </noscript>
     </div>
   </div>
@@ -122,7 +123,7 @@
         <table class="data-table" id="agg-table"></table>
       </div>
 
-      <a class="btn btn-primary agg-link" href="../#fact">Интерактивная версия на главной →</a>
+      <a class="btn btn-primary agg-link" href="../#fact">Интерактивная версия — в обзоре работы →</a>
     </div>
   </div>
 </section>

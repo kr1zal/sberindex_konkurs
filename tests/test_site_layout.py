@@ -210,15 +210,36 @@ class MaterialsTemplateTest(unittest.TestCase):
     def test_pdf_link_does_not_wrap_away_from_its_conjunction(self) -> None:
         # «HTML и» на конце строки и одинокий «PDF» на следующей. Неразрывный пробел не
         # помогает: ссылка «PDF» — inline-block со своими отступами, и браузер переносит
-        # строку перед ней. «HTML и PDF» — в одном nowrap-блоке.
+        # строку перед ней. «HTML и PDF» — в одном nowrap-блоке; размер файла и знак новой вкладки — внутри
+        # ссылки, чтобы они не оторвались от «PDF».
         template = _read("site/index.template.html")
         notes = re.findall(r'<p class="material-note">([^<]*<span class="material-pair">.*?)</p>', template)
         self.assertEqual(len(notes), 2, "ожидаются карточки отчёта и слайдов")
         for note in notes:
             with self.subTest(note=note):
-                self.assertRegex(note, r'<span class="material-pair">HTML и <a [^>]*>PDF</a></span>$')
+                self.assertRegex(
+                    note,
+                    r'<span class="material-pair">HTML и <a [^>]*>PDF · \$\{\w+\}'
+                    r'<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden">[^<]*</span></a></span>$')
         rule = re.search(r"\.material-pair \{([^}]*)\}", _read("site/landing.css")).group(1)
         self.assertRegex(rule, r"white-space:\s*nowrap")
+
+
+class MenuBreakpointTest(unittest.TestCase):
+    def test_menu_collapses_at_the_same_width_in_styles_and_both_page_scripts(self) -> None:
+        # Ширину, с которой меню прячется в кнопку, задаёт стиль, а раскрывают и закрывают его скрипты главной и
+        # страницы прогноза: три числа расходятся — и меню на каких-то ширинах окажется открытым без кнопки или
+        # закрытым без возможности открыть. Самая длинная подпись меню — «Прогноз по муниципалитету» — требует
+        # порога выше планшетного портрета: ниже строка меню не помещалась рядом с названием сайта.
+        css = _read("site/site.css")
+        found = re.search(r"@media \(max-width: (\d+)px\) \{\s*\.nav-toggle \{\s*display: inline-flex;", css)
+        self.assertIsNotNone(found, "в стилях нет правила кнопки меню")
+        width = found.group(1)
+        self.assertGreaterEqual(int(width), 820)
+        for name in ("site/landing.js", "demo/demo.js"):
+            with self.subTest(file=name):
+                self.assertIn(f'window.matchMedia("(max-width: {width}px)")', _read(name))
+        self.assertRegex(css, r"\.nav-link \{[^}]*white-space:\s*nowrap")
 
 
 class TeaserBreakLabelsTest(unittest.TestCase):

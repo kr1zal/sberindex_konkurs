@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Прогнозирование потребительских расходов муниципальных образований</title>
-<meta name="description" content="Прогноз потребительских расходов ${n_series_rub} муниципальных образований на горизонтах от месяца до года и поиск точек структурных изменений: главные числа, отчёт, слайды, код, прогноз на ${forecast_year} год и стенд с прогнозом по каждому муниципалитету.">
+<meta name="description" content="Прогноз потребительских расходов ${n_series_rub} муниципальных образований на горизонтах от месяца до года и поиск точек структурных изменений: главные числа, отчёт, слайды, код, прогноз на ${forecast_year} год и страница с прогнозом по каждому муниципалитету.">
 <meta name="theme-color" content="#0b1020">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="site/site.css">
@@ -29,10 +29,10 @@
         </svg>
       </summary>
       <nav class="site-nav" aria-label="Разделы сайта">
-        <a class="nav-link" href="report/report.html">Отчёт</a>
-        <a class="nav-link" href="report/slides.html">Слайды</a>
-        <a class="nav-link" href="demo/">Стенд</a>
-        <a class="nav-link nav-link-solid" href="https://github.com/kr1zal/sberindex_konkurs">Код на GitHub</a>
+        <a class="nav-link" href="report/report.html" target="_blank" rel="noopener">Отчёт<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
+        <a class="nav-link" href="report/slides.html" target="_blank" rel="noopener">Слайды<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
+        <a class="nav-link" href="demo/">Прогноз по муниципалитету</a>
+        <a class="nav-link nav-link-solid" href="https://github.com/kr1zal/sberindex_konkurs" target="_blank" rel="noopener">Код на GitHub<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
       </nav>
     </details>
   </div>
@@ -211,7 +211,7 @@
     <p class="story-proof" id="story-proof">
       Не только на картинке: межрядовая составляющая ошибки не двигается ни одной из моделей,
       для которых посчитано разложение.
-      <a href="report/report.html#механизм-ошибка-состоит-из-двух-частей-и-двигается-только-одна">Разложение ошибки — в отчёте</a>
+      <a href="report/report.html#механизм-ошибка-состоит-из-двух-частей-и-двигается-только-одна" target="_blank" rel="noopener">Разложение ошибки — в отчёте<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
     </p>
   </div>
 </section>
@@ -333,7 +333,7 @@
   <div class="wrap">
     <div class="stand night">
       <div class="stand-copy">
-        <p class="eyebrow">05 · Стенд</p>
+        <p class="eyebrow">05 · Прогноз по муниципалитету</p>
         <h2 class="section-title" id="city-title">Покажите мой город</h2>
         <p class="stand-lead" id="stand-lead">
           Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год,
@@ -341,7 +341,7 @@
           Пунктир — доли муниципалитета по прошлым месяцам, умноженные на опубликованный федеральный индекс.
         </p>
         <div class="chips" id="t-chips" role="group" aria-label="Примеры муниципальных образований"></div>
-        <a class="btn btn-primary stand-cta" id="t-go" href="demo/">Открыть стенд →</a>
+        <a class="btn btn-primary stand-cta" id="t-go" href="demo/">Открыть прогноз →</a>
       </div>
 
       <div class="stand-chart">
@@ -385,11 +385,11 @@
     </ul>
 
     <figure class="method-figure">
-      <a href="report/method.svg">
+      <a href="report/method.svg" target="_blank" rel="noopener">
         <img src="report/method.svg" width="1113" height="566" loading="lazy"
              alt="Схема метода. Панель СберИндекса с категориями трат и прогнозом длинного федерального ряда идёт в панельный бустинг и в двухэтапную модель — прогноз федерального ряда, разнесённый долями. Обе вместе с эталоном Prophet, наивной и фундаментальными моделями проверяются на скользящем origin, от наукаста до года вперёд, по MAE, R² по пулу, MASE и sMAPE. Детекторы изломов на темпах роста, со штрафом, выбранным на стенде с врезками известной величины, дают долю территорий с сигналом.">
       </a>
-      <figcaption><a href="report/method.svg">Открыть схему крупно</a></figcaption>
+      <figcaption><a href="report/method.svg" target="_blank" rel="noopener">Открыть схему крупно<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></figcaption>
     </figure>
   </div>
 </section>
@@ -404,28 +404,28 @@
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M6 3h8l4 4v14H6z M14 3v4h4 M9 12h6 M9 16h6"/>
         </svg>
-        <h3 class="material-title"><a class="material-link" href="report/report.html">Отчёт</a></h3>
-        <p class="material-note">полный текст · <span class="material-pair">HTML и <a class="material-extra" href="report/report.pdf">PDF</a></span></p>
+        <h3 class="material-title"><a class="material-link" href="report/report.html" target="_blank" rel="noopener">Отчёт<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></h3>
+        <p class="material-note">полный текст · <span class="material-pair">HTML и <a class="material-extra" href="report/report.pdf" target="_blank" rel="noopener">PDF · ${report_pdf_size}<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></span></p>
       </li>
       <li class="card card-link material">
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M3 5h18v11H3z M12 16v4 M8 20h8 M7 12l3-3 3 2 4-4"/>
         </svg>
-        <h3 class="material-title"><a class="material-link" href="report/slides.html">Слайды</a></h3>
-        <p class="material-note">коротко о главном · <span class="material-pair">HTML и <a class="material-extra" href="report/slides.pdf">PDF</a></span></p>
+        <h3 class="material-title"><a class="material-link" href="report/slides.html" target="_blank" rel="noopener">Слайды<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></h3>
+        <p class="material-note">коротко о главном · <span class="material-pair">HTML и <a class="material-extra" href="report/slides.pdf" target="_blank" rel="noopener">PDF · ${slides_pdf_size}<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></span></p>
       </li>
       <li class="card card-link material">
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z M16 16l5 5"/>
         </svg>
-        <h3 class="material-title"><a class="material-link" href="demo/">Стенд</a></h3>
-        <p class="material-note">прогноз по муниципалитету</p>
+        <h3 class="material-title"><a class="material-link" href="demo/">Прогноз по муниципалитету</a></h3>
+        <p class="material-note">расходы, прогноз и изломы</p>
       </li>
       <li class="card card-link material">
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M8 7l-5 5 5 5 M16 7l5 5-5 5 M14 4l-4 16"/>
         </svg>
-        <h3 class="material-title"><a class="material-link" href="https://github.com/kr1zal/sberindex_konkurs">Код</a></h3>
+        <h3 class="material-title"><a class="material-link" href="https://github.com/kr1zal/sberindex_konkurs" target="_blank" rel="noopener">Код<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></h3>
         <p class="material-note">GitHub · воспроизводимые прогоны</p>
       </li>
       <li class="card card-link material">
@@ -433,7 +433,7 @@
           <path d="M4 4h16v16H4z M4 9h16 M9 9v11 M12 13l2 2 3-4"/>
         </svg>
         <h3 class="material-title"><a class="material-link" id="material-forecast" href="results/forecast_2025.csv.gz">Прогноз на ${forecast_year} год</a></h3>
-        <p class="material-note">все ряды панели · csv.gz</p>
+        <p class="material-note">все ряды панели · csv.gz · ${forecast_size}, архив gzip</p>
       </li>
     </ul>
   </div>

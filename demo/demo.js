@@ -293,7 +293,7 @@ function introText(index) {
   const total = index.n_series;
   return `Любой из ${rubFmt(total)} ` +
     `${pluralRu(total, "муниципалитета", "муниципалитетов", "муниципалитетов")} панели: ` +
-    `расходы по месяцам, прогноз на ${forecastYear} год, изломы ряда и то, как модели ошибались ` +
+    `расходы по месяцам, прогноз на ${forecastYear} год, изломы ряда (точки структурных изменений) и то, как модели ошибались ` +
     `на нём при проверке на истории — ${monthSpanText(firstFold.test_from, lastFold.test_to)}.`;
 }
 
@@ -316,7 +316,7 @@ function searchHintText(index) {
 }
 
 function invalidMoMessage(seriesId) {
-  return `«${seriesId}» в данных стенда нет — показано муниципальное образование по умолчанию.`;
+  return `«${seriesId}» нет в списке муниципальных образований — показано муниципальное образование по умолчанию.`;
 }
 
 function noRegionExplanationText(seriesId) {
@@ -805,7 +805,7 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
   markQuickChip(seriesId);
   // Заголовок вкладки — с названием текущего МО: у ссылки с ?mo= иначе был бы всегда
   // один и тот же заголовок вне зависимости от того, что на ней открыто.
-  document.title = `${seriesId} — прогноз расходов по муниципалитету`;
+  document.title = `${seriesId} — прогноз по муниципалитету`;
 
   const metaEl = document.getElementById("mo-meta");
   const noteEl = document.getElementById("mo-no-region-note");
@@ -895,7 +895,7 @@ function markQuickChip(seriesId) {
 function setupNav() {
   const menu = document.getElementById("nav-menu");
   if (!menu || !window.matchMedia) return;
-  const narrow = window.matchMedia("(max-width: 719px)");
+  const narrow = window.matchMedia("(max-width: 839px)");
   const sync = () => { menu.open = !narrow.matches; };
   sync();
   if (narrow.addEventListener) narrow.addEventListener("change", sync);
@@ -969,7 +969,7 @@ function setupCombobox(index) {
     // только ряды без длинных пропусков, и это стоит сказать здесь тоже, а не
     // только один раз наверху страницы.
     const total = index.n_series;
-    return "Ничего не нашлось — попробуйте часть названия или регион. В стенд вошли " +
+    return "Ничего не нашлось — попробуйте часть названия или регион. В список вошли " +
       `${rubFmt(total)} ${pluralRu(total, "муниципальное образование", "муниципальных образования", "муниципальных образований")} ` +
       "без длинных пропусков в данных — остальные в панель не попали.";
   }
@@ -1095,10 +1095,10 @@ async function init() {
 setupNav();
 
 init().catch((error) => {
-  console.error("Не удалось инициализировать стенд", error);
+  console.error("Не удалось инициализировать страницу", error);
   const note = document.getElementById("mo-invalid-note");
   if (note) {
-    note.textContent = "Не удалось загрузить данные стенда. Обновите страницу.";
+    note.textContent = "Не удалось загрузить данные. Обновите страницу.";
     note.hidden = false;
   }
 });

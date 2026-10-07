@@ -174,7 +174,7 @@
   function initNav() {
     const menu = byId("nav-menu");
     if (!menu || !window.matchMedia) return;
-    const narrow = window.matchMedia("(max-width: 719px)");
+    const narrow = window.matchMedia("(max-width: 839px)");
     const sync = () => { menu.open = !narrow.matches; };
     sync();
     if (narrow.addEventListener) narrow.addEventListener("change", sync);
@@ -818,7 +818,7 @@
       failureShown = true;
       note.textContent = "";
       note.appendChild(document.createTextNode("Список муниципалитетов не загрузился. Найти свой город можно "));
-      const link = node("a", null, "на стенде", note);
+      const link = node("a", null, "на странице прогноза", note);
       link.href = STAND;
       note.appendChild(document.createTextNode("."));
     }
@@ -874,7 +874,7 @@
       note.appendChild(document.createTextNode("Выбран: "));
       node("span", "picked", row.id, note);
       note.appendChild(document.createTextNode(` · ${regionLabel(row)} · `));
-      const link = node("a", null, "открыть на стенде →", note);
+      const link = node("a", null, "открыть прогноз →", note);
       link.href = standUrl(row.id);
     }
 
@@ -1014,7 +1014,7 @@
     ["горизонты", () => initHorizons(data.horizons)],
     ["факт", () => initFact(data.fact)],
     ["изломы", () => initBreaks(data.breaks)],
-    ["стенд", () => initTeaser(data.teaser)],
+    ["прогноз по муниципалитету", () => initTeaser(data.teaser)],
     ["поиск", initSearch],
   ].forEach((block) => {
     try {

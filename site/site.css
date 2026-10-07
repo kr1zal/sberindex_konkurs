@@ -254,6 +254,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline-offset: 2px;
 }
 
+/* Знак «откроется в новой вкладке» после подписи ссылки. Его нет в имени ссылки для программ чтения с экрана:
+   там то же сказано скрытым текстом. */
+.ext {
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
 /* Цифры в подписях не «прыгают» по ширине. */
 .num {
   font-variant-numeric: tabular-nums;
@@ -403,9 +410,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   position: relative;
 }
 
-/* На телефоне меню прячется в <details>; на широком экране ссылки в строку, а кнопку
+/* На узком окне меню прячется в <details>; на широком ссылки в строку, а кнопку
    меню не видно — details при этом открыт (атрибут open в разметке), поэтому без
-   скрипта ссылки доступны на любой ширине. */
+   скрипта ссылки доступны на любой ширине. Порог — ширина, в которую строка меню целиком
+   не помещается рядом с названием сайта (самая длинная подпись — «Прогноз по муниципалитету»);
+   тот же порог — в скриптах обеих страниц (initNav, setupNav), тест их сверяет. */
 .nav-toggle {
   display: none;
   align-items: center;
@@ -432,6 +441,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   color: var(--night-ink-2);
   font-size: 0.9375rem;
   text-decoration: none;
+  white-space: nowrap;
   transition: background-color 0.2s, color 0.2s;
 }
 
@@ -457,7 +467,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   gap: 6px;
 }
 
-@media (max-width: 719px) {
+@media (max-width: 839px) {
   .nav-toggle {
     display: inline-flex;
   }
@@ -467,7 +477,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     right: 0;
     top: calc(100% + 8px);
     z-index: 20;
-    min-width: 220px;
+    min-width: 264px;
     flex-direction: column;
     gap: 2px;
     padding: 6px;

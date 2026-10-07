@@ -718,8 +718,11 @@ table.data-table tbody tr:last-child th, table.data-table tbody tr:last-child td
     border-radius: 22px;
   }
 
+  /* Подпись кнопки длиннее узкого окна (320 px): переносится на вторую строку, а не выпирает за карточку. */
   .agg-link {
     display: flex;
+    padding-block: 10px;
+    white-space: normal;
   }
 }
 
