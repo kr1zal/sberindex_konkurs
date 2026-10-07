@@ -52,9 +52,13 @@
           от наукаста до года вперёд. Проверено на истории, а прогноз федерального ряда —
           ещё и на факте ${forecast_year} года.
         </p>
+        <p class="hero-proof rise d5" id="hero-proof">
+          <span class="hero-proof-number">${best_gain}%</span>
+          <span class="hero-proof-text">точнее эталона конкурса на горизонте ${horizon_main} мес. — ${folds_short}</span>
+        </p>
       </div>
 
-      <div class="search hero-search rise d5" role="search">
+      <div class="search hero-search rise d6" role="search">
         <label class="search-label" for="mo-q">Покажите мой город</label>
         <div class="field">
           <input id="mo-q" type="text" role="combobox" aria-expanded="false" aria-controls="mo-list"
@@ -80,7 +84,7 @@
       <div class="hero-axis" id="hero-axis" aria-hidden="true"></div>
       <figcaption class="hero-caption" id="hero-caption">
         ${sample_label}&nbsp;· расходы к среднему за ${story_base}&nbsp;·
-        <span class="amber">жёлтая — общее движение</span>
+        <span class="amber">толстая линия — общее движение (медиана)</span>
       </figcaption>
       <noscript>
         <p class="hero-noscript">Графики и поиск на странице работают с включённым JavaScript; числа и ссылки доступны и без него.</p>
@@ -144,6 +148,11 @@
       </p>
     </li>
   </ul>
+  <dl class="glossary" id="glossary">
+    <div><dt>фолд</dt> <dd>— проверочное окно в ${fold_months} мес.: модель учится на месяцах до него и прогнозирует его</dd></div>
+    <div><dt>наукаст</dt> <dd>— прогноз текущего месяца до выхода его данных</dd></div>
+    <div><dt>origin</dt> <dd>— месяц, от которого строится прогноз</dd></div>
+  </dl>
 </div>
 
 <section class="section section-first" id="why" aria-labelledby="why-title">
@@ -164,7 +173,7 @@
           <span class="step-short">ряды</span>
         </button>
         <button class="step" id="step-2" type="button" aria-pressed="false"
-                data-caption="Жёлтая линия — медиана по всем рядам панели, общее движение страны.">
+                data-caption="Толстая линия — медиана по всем рядам панели, общее движение страны.">
           <span class="step-num">Шаг 02</span>
           <span class="step-title">Общее движение</span>
           <span class="step-text">
@@ -298,7 +307,8 @@
         <h2 class="section-title" id="city-title">Покажите мой город</h2>
         <p class="stand-lead" id="stand-lead">
           Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год,
-          изломы ряда и то, как ошибались модели.
+          изломы ряда (точки структурных изменений) и то, как ошибались модели.
+          Пунктир — доли муниципалитета по прошлым месяцам, умноженные на опубликованный федеральный индекс.
         </p>
         <div class="chips" id="t-chips" role="group" aria-label="Примеры муниципальных образований"></div>
         <a class="btn btn-primary stand-cta" id="t-go" href="demo/">Открыть стенд →</a>

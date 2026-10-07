@@ -223,11 +223,14 @@
   // Четыре числа в карточках: при появлении в окне — счёт от нуля, в конце — исходный текст
   // ---------------------------------------------------------------------------
 
+  // Счёт короткий: на полпути число — не то, что в итоге, и беглый взгляд не должен успеть его прочесть.
+  const COUNT_MS = 600;
+
   function countUp(element) {
     const original = element.textContent;
     const tokens = numberTokens(original);
     if (!tokens.length) return;
-    animate(1500, (progress) => {
+    animate(COUNT_MS, (progress) => {
       element.textContent = countedText(original, tokens, easeOut(progress, 3));
     }, () => {
       element.textContent = original;
@@ -541,7 +544,8 @@
   // 04 · Стенд: три муниципалитета, мини-график, ссылка на стенд с выбранным
   // ---------------------------------------------------------------------------
 
-  const KNOWN_LABEL = "если федеральный индекс за месяц уже опубликован";
+  // Подпись пунктира короткая: что это за линия, объясняет лид блока; полное название — заголовок столбца стенда.
+  const KNOWN_LABEL = "доли × известный федеральный индекс";
 
   function standUrl(seriesId) {
     return `demo/?mo=${encodeURIComponent(seriesId)}`;

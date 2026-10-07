@@ -47,14 +47,17 @@
 /* fill-mode both: до старта и по окончании анимация держит крайние кадры, поэтому без
    неё (печать, отключённые анимации) элементы остаются на своих местах и видны. */
 .rise {
-  animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
-.d1 { animation-delay: 0.1s; }
-.d2 { animation-delay: 0.2s; }
-.d3 { animation-delay: 0.35s; }
-.d4 { animation-delay: 0.5s; }
-.d5 { animation-delay: 0.65s; }
+/* Весь текст обложки, вместе с полем поиска, проявляется меньше чем за секунду: у читателя на первую
+   секунду страницы — заголовок, число и поле, а не пустой тёмный экран. */
+.d1 { animation-delay: 0.05s; }
+.d2 { animation-delay: 0.1s; }
+.d3 { animation-delay: 0.15s; }
+.d4 { animation-delay: 0.2s; }
+.d5 { animation-delay: 0.25s; }
+.d6 { animation-delay: 0.3s; }
 
 /* -- обложка --------------------------------------------------------------------- */
 
@@ -62,7 +65,7 @@
 .hero {
   position: relative;
   overflow-x: clip;
-  padding-bottom: 96px;
+  padding-bottom: 72px;
   --hero-line: #5b8cff;
 }
 
@@ -71,7 +74,7 @@
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
   gap: 48px;
   align-items: center;
-  padding-top: 24px;
+  padding-top: 12px;
 }
 
 .hero-left {
@@ -81,7 +84,7 @@
 }
 
 .hero-eyebrow {
-  margin: 0 0 22px;
+  margin: 0 0 16px;
   color: var(--night-soft);
 }
 
@@ -108,32 +111,68 @@
   }
 }
 
+/* Ноутбуки невысокие: на экране с невысоким окном заголовок крупного кегля оставлял бы главное число
+   за первым экраном, поэтому он здесь поменьше (в колонку влезает с запасом: кегль только уменьшился). */
+@media (min-width: 960px) and (max-height: 820px) {
+  .hero-title {
+    font-size: clamp(2.75rem, calc(5vw - 8px), 3.625rem);
+  }
+}
+
 .hero-sub {
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   font-family: var(--font-display);
-  font-size: clamp(1.1875rem, 2.4vw, 2rem);
+  font-size: clamp(1.1875rem, 1.9vw, 1.5rem);
   font-weight: 400;
   line-height: 1.2;
   color: var(--night-ink-2);
 }
 
 .hero-lead {
-  max-width: 560px;
-  margin: 26px 0 0;
-  font-size: 1.1875rem;
-  line-height: 1.6;
+  max-width: 580px;
+  margin: 16px 0 0;
+  font-size: 1.0625rem;
+  line-height: 1.55;
   color: var(--night-ink-3);
+}
+
+/* Главное число работы — на первом экране, а не за карточками ниже: те же подстановки генератора и та же
+   оговорка о фолдах, что в первой карточке. Проверка фактом ему не приписана: фактом проверен только
+   прогноз федерального ряда. */
+.hero-proof {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  max-width: 580px;
+  margin: 14px 0 0;
+}
+
+.hero-proof-number {
+  color: var(--amber);
+  font-family: var(--font-display);
+  font-size: 1.625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-proof-text {
+  color: var(--night-ink-2);
+  font-size: 0.9375rem;
+  line-height: 1.4;
 }
 
 .hero-search {
   position: relative;
   z-index: 5;
   max-width: 560px;
-  margin-top: 34px;
+  margin-top: 22px;
 }
 
 .search-note {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   color: var(--night-dim);
   font-size: 0.8125rem;
 }
@@ -154,7 +193,7 @@
 
 .hero-plot {
   position: relative;
-  height: 440px;
+  height: 400px;
 }
 
 .hero-svg {
@@ -177,8 +216,8 @@
   stroke-opacity: 0.42;
   stroke-dasharray: 2400;
   vector-effect: non-scaling-stroke;
-  animation: draw 2.2s cubic-bezier(0.22, 0.7, 0.16, 1) both;
-  animation-delay: calc(0.25s + var(--i, 0) * 0.045s);
+  animation: draw 1.6s cubic-bezier(0.22, 0.7, 0.16, 1) both;
+  animation-delay: calc(0.15s + var(--i, 0) * 0.03s);
 }
 
 .hero-median {
@@ -188,7 +227,7 @@
   stroke-linecap: round;
   stroke-dasharray: 2400;
   vector-effect: non-scaling-stroke;
-  animation: draw 1.6s cubic-bezier(0.3, 0.6, 0.1, 1) 1.5s both, breathe 3.2s ease-in-out 3.2s 3;
+  animation: draw 1.2s cubic-bezier(0.3, 0.6, 0.1, 1) 0.9s both, breathe 3.2s ease-in-out 2.1s 3;
 }
 
 .hero-axis {
@@ -409,6 +448,30 @@
 }
 
 .stat-panel .stat-caption {
+  margin: 0;
+}
+
+/* Словарь под карточками: слова, которые дальше в тексте не объясняются. Набор тот же, что у строки
+   панели выше. */
+.glossary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 6px 28px;
+  margin: 14px 2px 0;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.glossary dt {
+  display: inline;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.glossary dd {
+  display: inline;
   margin: 0;
 }
 

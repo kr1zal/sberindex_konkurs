@@ -396,7 +396,9 @@ def compute_placeholders(
     - ``panel_shape`` — «N рядов × M месяцев» целиком, слова — через `plural`.
     - ``panel_span`` — первый и последний месяц панели словами, «январь 2023 — декабрь 2024».
     - ``folds_short`` — та же оговорка о фолдах одним оборотом, «на 2 фолдах из 3»: для узких
-      экранов, где подпись числа сокращена.
+      экранов, где подпись числа сокращена, и для строки с главным числом на обложке.
+    - ``fold_months`` — длина проверочного окна одного фолда основного протокола, мес.
+      (`index.json::folds`): словарь под карточками объясняет «фолд» этим числом.
     - ``sample_label`` — «30 случайных муниципалитетов»: выборка обложки с согласованными формами.
     - ``spread_share`` / ``spread_pct`` — не менее чем у `spread_share`% значений по всей панели
       отклонение от общего движения (медианы по рядам) не больше `spread_pct`%: подпись третьего
@@ -441,6 +443,9 @@ def compute_placeholders(
     vs_lost = [f for f in r2_folds if fold_mae.loc[f, top] > fold_mae.loc[f, "prophet"]]
     vs_first = len(vs_lost) == 1 and vs_lost[0] == min(r2_folds)
     lead = "Но выигрыш держится " if vs_lost else "Выигрыш держится "
+    # Окно проверки фолда — те же границы, что в index.json::folds (`src.split.rolling_origin`).
+    first_fold = rolling_origin(len(wide), horizon_main, int(full_cfg["split"]["n_folds"]))[0]
+    placeholders["fold_months"] = str(first_fold.test_end - first_fold.test_start)
     placeholders["folds_short"] = on_folds(len(won_mae), len(r2_folds))
     placeholders["folds_caveat"] = (
         lead + on_folds(len(won_mae), len(r2_folds))
@@ -1016,8 +1021,18 @@ def build_horizons(
             sentences.append("Наукаст — прогноз текущего месяца, пока его данных ещё нет.")
         elif any(m["mae"][i] is None for m in models):
             sentences.append("Где полосы нет, модель не удалось обучить: на этом горизонте истории не хватает.")
+        elif horizon == horizon_main:
+            sentences.append("Средняя абсолютная ошибка по фолдам, ₽ на человека в месяц.")
         else:
             sentences.append("Средняя абсолютная ошибка по фолдам скользящего origin, ₽ на человека в месяц.")
+        # Основной горизонт открыт по умолчанию: его подпись читатель видит первой, и в ней — слова, которых
+        # дальше не объясняют: фолд (проверочное окно) и скользящий origin.
+        if horizon == horizon_main and horizon != NOWCAST_HORIZON:
+            sentences.append(
+                f"Фолд — проверочное окно в {horizon} мес.: модель учится на месяцах до него и прогнозирует его. "
+                "Origin — месяц, от которого строится прогноз; от фолда к фолду он сдвигается вперёд "
+                "(скользящий origin)."
+            )
         # Число фолдов — сразу за описанием горизонта: полоса «лучшая» по среднему, а на горизонтах
         # с двумя фолдами и одним порядок моделей по фолдам может быть другим.
         sentences.append(f"Фолдов: {folds[horizon]}.")

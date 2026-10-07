@@ -108,6 +108,18 @@ class HeroTitleTest(unittest.TestCase):
         # кегль заметно крупнее подзаголовка (32 px).
         self.assertGreaterEqual(self._font(1440), 60)
 
+    def test_short_viewport_title_is_never_larger_than_the_usual_one(self) -> None:
+        # На невысоких окнах (ноутбуки) заголовок мельче, чтобы главное число не уходило за первый экран;
+        # правило только уменьшает кегль, поэтому «одного числа» в колонку по-прежнему влезает.
+        found = re.search(
+            r"@media \(min-width: 960px\) and \(max-height: (\d+)px\) \{\s*\.hero-title \{\s*font-size:\s*([^;]+);",
+            self.landing_css)
+        self.assertIsNotNone(found, "нет правила заголовка для невысоких окон")
+        for viewport in range(960, 2561, 20):
+            with self.subTest(viewport=viewport):
+                self.assertLessEqual(_css_length(found.group(2), viewport), self._font(viewport))
+                self.assertLessEqual(_css_length(found.group(2), viewport) * AMBER_PHRASE_EM, self._column(viewport))
+
     def test_hero_columns_share_the_left_edge_below_desktop(self) -> None:
         # Без align-items: stretch сетка обложки центрирует блоки по ширине содержимого,
         # и на планшете у заголовка, графика и поиска разные левые края.
@@ -140,6 +152,20 @@ class HeroMotionTest(unittest.TestCase):
         frames = re.search(r"@keyframes breathe \{(.*?)\n\}", self.css, re.S).group(1)
         edge = re.search(r"0%, 100% \{\s*opacity:\s*([\d.]+);", frames).group(1)
         self.assertEqual(float(edge), 1.0)
+
+    def test_cover_text_and_search_appear_in_under_a_second(self) -> None:
+        # На 250 мс после загрузки заголовок был почти прозрачным, а поле поиска — невидимым: первая секунда
+        # страницы не показывала ни числа, ни поля. Проявление текста обложки, вместе с полем, — короче секунды.
+        delays = {name: float(value)
+                  for name, value in re.findall(r"\.(d\d) \{ animation-delay: ([\d.]+)s; \}", self.css)}
+        self.assertGreaterEqual(len(delays), 6)
+        duration = float(re.search(r"\.rise \{\s*animation: rise ([\d.]+)s", self.css).group(1))
+        self.assertLessEqual(max(delays.values()), 0.3)
+        self.assertLess(max(delays.values()) + duration, 1.0)
+        template = _read("site/index.template.html")
+        used = re.findall(r'class="[^"]*\brise (d\d)\b', template)
+        self.assertGreaterEqual(len(used), 6)
+        self.assertTrue(set(used) <= set(delays), "у блока обложки задержка, которой нет в стилях")
 
     def test_reduced_motion_still_switches_the_animation_off(self) -> None:
         block = re.search(r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}\n", self.css, re.S).group(1)

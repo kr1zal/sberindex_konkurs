@@ -610,6 +610,42 @@ class BuildSiteTest(unittest.TestCase):
         # На телефоне подпись сокращена до одного оборота — это то же число фолдов.
         self.assertEqual(self.stats[0]["short"], f"на {won_phrase}")
 
+    def test_cover_proof_line_repeats_the_headline_number_with_its_caveat(self) -> None:
+        # На обложке — главное число из тех же подстановок, что первая карточка, и та же оговорка о фолдах;
+        # «проверено на факте» к нему не приписано: фактом проверен только прогноз федерального ряда.
+        top = self.summary["MAE"].idxmin()
+        best_gain = self.summary.loc[top, "к Prophet, %"]
+        fold_mae = (self.ok[self.ok["model"].isin([top, "prophet"])]
+                    .groupby(["fold", "model"])["mae"].mean().unstack())
+        folds = list(fold_mae.index)
+        won = [f for f in folds if fold_mae.loc[f, top] < fold_mae.loc[f, "prophet"]]
+        won_phrase = f"{len(won)} {'фолде' if len(won) == 1 else 'фолдах'} из {len(folds)}"
+        horizon_main = int(self.full_cfg["split"]["horizon"])
+        proof = _IdsOf(self.html).text("hero-proof")
+        self.assertEqual(
+            proof, f"{_fmt(best_gain, 1)}% точнее эталона конкурса на горизонте {horizon_main} мес. — на {won_phrase}")
+        self.assertNotIn("факт", proof)
+        # То же число, что в первой карточке, — не второе, посчитанное отдельно.
+        self.assertTrue(proof.startswith(self.stats[0]["number"]))
+        self.assertIn(self.stats[0]["short"], proof)
+        # Строка стоит в тексте обложки, до поля поиска и графика: на первом экране ноутбука она видна.
+        self.assertLess(self.html.index('id="hero-lead"'), self.html.index('id="hero-proof"'))
+        self.assertLess(self.html.index('id="hero-proof"'), self.html.index('id="mo-q"'))
+
+    def test_glossary_under_the_cards_explains_fold_nowcast_and_origin(self) -> None:
+        # «Фолд» стоит в главной оговорке («на 2 фолдах из 3»), и без словаря под карточками его нигде не
+        # объясняют: длина окна — из index.json::folds, а не из головы.
+        fold = self.index_json["folds"][0]
+        first, last = pd.Period(fold["test_from"], "M"), pd.Period(fold["test_to"], "M")
+        window = int((last - first).n) + 1
+        glossary = _IdsOf(self.html).text("glossary")
+        self.assertIn(f"фолд — проверочное окно в {window} мес.: модель учится на месяцах до него и прогнозирует его", glossary)
+        self.assertIn("наукаст — прогноз текущего месяца до выхода его данных", glossary)
+        self.assertIn("origin — месяц, от которого строится прогноз", glossary)
+        # Словарь стоит сразу под строкой панели, до первого раздела.
+        self.assertLess(self.html.index('class="stat stat-panel"'), self.html.index('id="glossary"'))
+        self.assertLess(self.html.index('id="glossary"'), self.html.index('id="why"'))
+
     # -- число 2: наукаст (горизонт 1) --------------------------------------
 
     def test_nowcast_stat_matches_horizons_summary_csv(self) -> None:
@@ -1141,6 +1177,17 @@ class BuildSiteTest(unittest.TestCase):
         sentence = re.search(r"(?:Но выигрыш|Выигрыш) держится [^.]*\.", self.stats[0]["caption"])
         self.assertIsNotNone(sentence, "в первой карточке нет оговорки о фолдах")
         self.assertIn(sentence.group(0), notes[main])
+        # Подпись основного горизонта открыта по умолчанию, то есть читатель видит её первой: в ней определены
+        # фолд (с длиной окна) и скользящий origin, а в остальных подписях этих определений нет.
+        self.assertIn(f"Фолд — проверочное окно в {main} мес.: модель учится на месяцах до него и прогнозирует его.",
+                      notes[main])
+        self.assertIn("Origin — месяц, от которого строится прогноз", notes[main])
+        self.assertIn("(скользящий origin)", notes[main])
+        for horizon, note in notes.items():
+            if horizon != main:
+                with self.subTest(definitions_only_in_the_first=horizon):
+                    self.assertNotIn("Фолд — проверочное окно", note)
+                    self.assertNotIn("Origin — месяц", note)
         # Год: оговорка про фолд — число из horizons_folds.csv, как у третьей карточки.
         n_folds = int(self.horizons_folds.loc[
             (self.horizons_folds["horizon"] == 12) & (self.horizons_folds["model"] == "two_stage"), "MAE"
@@ -1397,9 +1444,10 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIn(f"Пустой запрос откроет пример — {self.index_json['default_mo']}.", nodes.text("mo-note"))
         self.assertIn(f"ещё и на факте {year} года", nodes.text("hero-lead"))
         self.assertIn("прогноз федерального ряда", nodes.text("hero-lead"))
+        # Линия подписана не только цветом: «толстая линия», а не «жёлтая».
         self.assertEqual(
             nodes.text("hero-caption"),
-            f"{sample_label}\u00a0· расходы к среднему за {base}\u00a0· жёлтая — общее движение",
+            f"{sample_label}\u00a0· расходы к среднему за {base}\u00a0· толстая линия — общее движение (медиана)",
         )
         # Шаг 01: число рядов и период — и в тексте шага, и в подписи под графиком.
         self.assertIn(f"{sample_label} из {n_series}: расходы к среднему за {base}.", nodes.text("step-1"))
@@ -1407,6 +1455,10 @@ class BuildSiteTest(unittest.TestCase):
         # Прогнозирует первый этап — по федеральному ряду; медиана рядов только показывает общее движение.
         self.assertIn("Его прогнозирует первый этап модели", nodes.text("step-2"))
         self.assertIn(f"Любой из {n_series} муниципалитетов", nodes.text("stand-lead"))
+        # Изломы — это точки структурных изменений (термин задания), а пунктир объяснён в лиде, а не только в легенде.
+        self.assertIn("изломы ряда (точки структурных изменений)", nodes.text("stand-lead"))
+        self.assertIn("Пунктир — доли муниципалитета по прошлым месяцам, умноженные на опубликованный федеральный индекс",
+                      nodes.text("stand-lead"))
         self.assertIn(f"прогноз на {year} год", nodes.text("stand-lead"))
         self.assertEqual(nodes.text("fact-title"), f"Прогноз от {origin_label} против факта {year} года")
         self.assertIn(f"за весь {year} год", nodes.text("fact-lead"))

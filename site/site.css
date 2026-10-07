@@ -354,7 +354,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding-block: 18px;
+  padding-block: 14px;
 }
 
 .brand {
