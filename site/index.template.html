@@ -43,118 +43,65 @@
 
 <section class="hero night" aria-labelledby="hero-title">
   <div class="wrap hero-grid">
-    <div class="hero-left">
-      <div class="hero-text">
-        <p class="eyebrow hero-eyebrow rise d1">Конкурс СберИндекса · Прогнозирование</p>
-        <h1 class="hero-title rise d2" id="hero-title">Прогноз <span class="amber">одного числа</span></h1>
-        <p class="hero-sub rise d3" id="hero-sub">и его разнос по ${n_series_rub} муниципалитетам</p>
-        <p class="hero-lead rise d4" id="hero-lead">
-          Потребительские расходы муниципальных образований по данным СберИндекса:
-          от наукаста до года вперёд. Проверено на истории, а прогноз федерального ряда —
-          ещё и на факте ${forecast_year} года.
-        </p>
-        <p class="hero-proof rise d5" id="hero-proof">
-          <span class="hero-proof-number">${best_gain}%</span>
-          <span class="hero-proof-text">точнее эталона конкурса на горизонте ${horizon_main} мес. — ${folds_short}</span>
-        </p>
+    <div class="hero-text">
+      <p class="eyebrow hero-eyebrow rise d1">Конкурс СберИндекса · Прогнозирование</p>
+      <h1 class="hero-title rise d2" id="hero-title">Прогноз <span class="amber">одного числа</span></h1>
+      <p class="hero-sub rise d3" id="hero-sub">и его разнос по ${n_series_rub} муниципалитетам</p>
+      <div class="hero-actions rise d4">
+        <a class="btn btn-primary" id="hero-report" href="report/report.html" target="_blank" rel="noopener">Читать отчёт<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
+        <a class="btn btn-secondary" id="hero-city" href="demo/">Найти свой город →</a>
       </div>
-
-      <div class="search hero-search rise d6" role="search">
-        <label class="search-label" for="mo-q">Покажите мой город</label>
-        <div class="field">
-          <input id="mo-q" type="text" role="combobox" aria-expanded="false" aria-controls="mo-list"
-                 aria-autocomplete="list" aria-haspopup="listbox" autocomplete="off" autocapitalize="none"
-                 spellcheck="false" enterkeyhint="go" placeholder="Название муниципалитета или региона">
-          <a class="btn btn-primary" id="mo-go" href="demo/">Открыть прогноз →</a>
-        </div>
-        <ul class="suggestions" id="mo-list" role="listbox" aria-label="Подсказки муниципальных образований" hidden></ul>
-        <p class="visually-hidden" id="mo-status" aria-live="polite" aria-atomic="true"></p>
-        <p class="search-note" id="mo-note" aria-live="polite">Например: казань, новосибирск, михайловский. Пустой запрос откроет пример — ${default_mo}.</p>
-      </div>
+      <noscript>
+        <p class="hero-noscript">Графики на странице работают с включённым JavaScript; числа и ссылки доступны и без него.</p>
+      </noscript>
     </div>
 
-    <figure class="hero-figure">
-      <div class="hero-plot" aria-hidden="true">
-        <svg class="hero-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
-          <g id="hero-lines"></g>
-        </svg>
-        <svg class="hero-svg hero-svg-glow" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
-          <path class="hero-median" id="hero-median"/>
-        </svg>
-      </div>
-      <div class="hero-axis" id="hero-axis" aria-hidden="true"></div>
-      <figcaption class="hero-caption" id="hero-caption">
-        ${sample_label}&nbsp;· расходы к среднему за ${story_base}&nbsp;·
-        <span class="amber">толстая линия — общее движение (медиана)</span>
-      </figcaption>
-      <noscript>
-        <p class="hero-noscript">Графики и поиск на странице работают с включённым JavaScript; числа и ссылки доступны и без него.</p>
-      </noscript>
-    </figure>
+    <div class="hero-plot" aria-hidden="true">
+      <svg class="hero-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+        <g id="hero-lines"></g>
+      </svg>
+      <svg class="hero-svg hero-svg-glow" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+        <path class="hero-median" id="hero-median"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <ul class="stats rise d5" aria-label="Ключевые числа работы">
+      <li class="stat stat-lead">
+        <p class="stat-number">${best_gain}%</p>
+        <p class="stat-caption">
+          <span class="stat-label">точнее эталона конкурса на ${horizon_main_months}</span>
+          <span class="stat-note">${windows_held}</span>
+        </p>
+      </li>
+
+      <li class="stat">
+        <p class="stat-number">${h1_gain}%</p>
+        <p class="stat-caption">
+          <span class="stat-label">точнее эталона на текущий месяц</span>
+          <span class="stat-note">${h1_best} против ${h1_prophet} ₽ на человека в месяц</span>
+        </p>
+      </li>
+
+      <li class="stat">
+        <p class="stat-number">${h12_gain_prophet}%</p>
+        <p class="stat-caption">
+          <span class="stat-label">точнее эталона на год вперёд</span>
+          <span class="stat-note">${h12_windows}</span>
+        </p>
+      </li>
+
+      <li class="stat">
+        <p class="stat-number">${agg_own_pct}%</p>
+        <p class="stat-caption">
+          <span class="stat-label">ошибка прогноза страны на факте ${forecast_year}</span>
+          <span class="stat-note">у простых правил — ${agg_rules_pct}%</span>
+        </p>
+      </li>
+    </ul>
   </div>
 </section>
-
-<div class="wrap stats-wrap">
-  <ul class="stats" aria-label="Ключевые числа работы">
-    <li class="stat">
-      <p class="stat-number">${best_gain}%</p>
-      <p class="stat-caption">
-        <span class="stat-label">точнее эталона конкурса Prophet на горизонте ${horizon_main} мес.</span>
-        <span class="stat-note stat-note-full">
-          MAE ${prophet_mae} ₽ → ${best_mae} ₽ на человека в месяц,
-          R² по пулу ${r2_prophet} → ${r2_best}. ${folds_caveat}
-        </span>
-        <span class="stat-note stat-note-short">${folds_short}</span>
-      </p>
-    </li>
-
-    <li class="stat">
-      <p class="stat-number">${h1_gain}%</p>
-      <p class="stat-caption">
-        <span class="stat-label">точнее эталона на наукасте</span>
-        <span class="stat-note stat-note-full">MAE ${h1_best} против ${h1_prophet} ₽ на человека в месяц.</span>
-        <span class="stat-note stat-note-short">${h1_best} против ${h1_prophet} ₽</span>
-      </p>
-    </li>
-
-    <li class="stat">
-      <p class="stat-number">${h12_gain_prophet}%</p>
-      <p class="stat-caption">
-        <span class="stat-label">точнее эталона на год вперёд</span>
-        <span class="stat-note stat-note-full">
-          наивной — на ${h12_gain_naive}%; здесь лучшая — ${h12_model}${h12_folds_caveat}.
-        </span>
-        <span class="stat-note stat-note-short">${h12_model}${h12_folds_caveat}</span>
-      </p>
-    </li>
-
-    <li class="stat">
-      <p class="stat-number">${agg_own_pct}%</p>
-      <p class="stat-caption">
-        <span class="stat-label">средняя ошибка первого этапа двухэтапной модели на факте ${forecast_year} года</span>
-        <span class="stat-note stat-note-full">
-          Прогноз федерального ряда от ${agg_origin_label}, горизонты ${agg_horizon_range} мес.;
-          у правил ${agg_rules} — ${agg_rules_pct}%.
-          Муниципальный разрез ${forecast_year} года ещё не опубликован.
-        </span>
-        <span class="stat-note stat-note-short">у правил ${agg_rules_pct}%</span>
-      </p>
-    </li>
-
-    <li class="stat stat-panel">
-      <p class="stat-number">${panel_shape}</p>
-      <p class="stat-caption">
-        ряды панели СберИндекса без длинных пропусков, ${panel_span} ·
-        MAE — средняя абсолютная ошибка, ₽ на человека в месяц
-      </p>
-    </li>
-  </ul>
-  <dl class="glossary" id="glossary">
-    <div><dt>фолд</dt> <dd>— проверочное окно длиной в горизонт прогноза (на основном горизонте — ${fold_months} мес.): модель учится на месяцах до него и прогнозирует его</dd></div>
-    <div><dt>наукаст</dt> <dd>— прогноз текущего месяца до выхода его данных</dd></div>
-    <div><dt>origin</dt> <dd>— месяц, от которого строится прогноз</dd></div>
-  </dl>
-</div>
 
 <section class="section section-first" id="why" aria-labelledby="why-title">
   <div class="wrap">

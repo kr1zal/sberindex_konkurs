@@ -1,5 +1,5 @@
 /* site/landing-lib.js — чистые помощники главной: подписи чисел и шкал, учёт наборов подписей оси,
- * разбор чисел для счёта, ранжирование поиска, раскладка истории на графике. Страницы здесь нет:
+ * разбор чисел для счёта, раскладка истории на графике. Страницы здесь нет:
  * ни document, ни window, — поэтому файл целиком запускает node в тестах
  * (tests/test_landing_lib.py). Со страницей работает site/landing.js. Данные и числа сюда не
  * пишутся: всё приходит аргументами.
@@ -165,89 +165,15 @@ const LandingLib = (() => {
   }
 
   // ---------------------------------------------------------------------------
-  // Поиск «Покажите мой город»: строки из demo/data/index.json и ранжирование
+  // Подпись региона у муниципалитета без региона
   // ---------------------------------------------------------------------------
 
-  const normalize = (s) => s.toLowerCase().replace(/ё/g, "е");
-
-  // index.json::series — [[series_id, регион|null, ОКТМО|null, файл, средние расходы], …]; пятый
-  // элемент есть только у рядов без региона: он отличает одноимённые ряды друг от друга. meanUnit —
-  // index.json::mean_unit, единица этого числа вместе с периодом («тыс. ₽ на человека в месяц за <период>»):
-  // её пишет генератор, слов о периоде здесь нет. quick — index.json::quick, [{id, short}, …]: города
-  // быстрого выбора, их обычно и ищут. Запрос ищется и в названии, и в регионе.
-  function rowsFromIndex(series, quick, meanUnit) {
-    const featured = new Set((quick || []).map((item) => item.id));
-    return series.map((entry) => ({
-      id: entry[0],
-      region: entry[1],
-      mean: entry[4] === undefined ? null : entry[4],
-      meanUnit: meanUnit || null,
-      featured: featured.has(entry[0]),
-      name: normalize(entry[0]),
-      haystack: normalize(entry[1] ? `${entry[0]} ${entry[1]}` : entry[0]),
-    }));
-  }
-
   const NO_REGION = "регион не определён";
-
-  // Подпись региона в подсказке и в строке выбора. У ряда без региона рядом — различитель из
-  // генератора: средние расходы — число, единица и период («<число> тыс. ₽ на человека в месяц за <период>»).
-  // Число без единицы читалось бы как расходы всего района, поэтому без единицы различителя нет. Тот же
-  // текст собирает страница прогноза (demo/demo.js::regionLabel).
-  function regionLabel(row) {
-    return row.region || (row.mean && row.meanUnit ? `${NO_REGION} · ${row.mean}${NBSP}${row.meanUnit}` : NO_REGION);
-  }
-
-  // Букв сверх набранного в словах названия, которым отвечают слова запроса: для каждого слова —
-  // кратчайшее слово названия, которое с него начинается, а при его отсутствии — содержащее его.
-  // Слово, найденное только в регионе, ничего не добавляет. Казань ближе к запросу «казан», чем
-  // Казанский, а он — ближе, чем Казачинский: у них больше лишних букв.
-  function extraLetters(nameWords, words) {
-    return words.reduce((sum, word) => {
-      const starting = nameWords.filter((nameWord) => nameWord.indexOf(word) === 0);
-      const pool = starting.length ? starting : nameWords.filter((nameWord) => nameWord.indexOf(word) >= 0);
-      if (!pool.length) return sum;
-      return sum + Math.min.apply(null, pool.map((nameWord) => nameWord.length)) - word.length;
-    }, 0);
-  }
-
-  // Ранжирование, то же, что на стенде (demo/demo.js::searchMunicipalities): подходят строки,
-  // где есть все слова запроса. Порядок: сначала города быстрого выбора, затем ярусы — название,
-  // которое начинается с запроса; название, в котором каждое слово запроса — начало какого-то слова
-  // («город орёл» → «городской округ город Орёл», а не «…округ Горелово», где «орел» стоит внутри
-  // слова); любое вхождение. Внутри яруса — по числу букв сверх набранного, затем по алфавиту.
-  function searchRows(rows, query, limit) {
-    const words = normalize(query.trim()).split(/\s+/).filter(Boolean);
-    if (!words.length) return { matches: [], total: 0 };
-    const phrase = words.join(" ");
-    const found = [];
-    rows.forEach((row) => {
-      if (!words.every((word) => row.haystack.indexOf(word) >= 0)) return;
-      const nameWords = row.name.split(/\s+/);
-      let tier = 2;
-      if (row.name.indexOf(phrase) === 0) tier = 0;
-      else if (words.every((word) => nameWords.some((nameWord) => nameWord.indexOf(word) === 0))) tier = 1;
-      found.push({ row, tier, extra: extraLetters(nameWords, words) });
-    });
-    const collator = new Intl.Collator("ru");
-    found.sort((a, b) => (Number(b.row.featured) - Number(a.row.featured))
-      || (a.tier - b.tier) || (a.extra - b.extra) || collator.compare(a.row.id, b.row.id));
-    return { matches: found.slice(0, limit).map((item) => item.row), total: found.length };
-  }
-
-  // Куда ведёт кнопка «Открыть прогноз»: подсвеченная подсказка, иначе первое совпадение набранного
-  // запроса. Пустой запрос и запрос без совпадений — null: кнопка ведёт на стенд без выбора, и
-  // поиск там покажет сам стенд.
-  function pickTarget(rows, query, highlighted) {
-    if (highlighted) return highlighted;
-    if (!rows || !query.trim()) return null;
-    return searchRows(rows, query, 1).matches[0] || null;
-  }
 
   return {
     groupDigits, formatInt, pluralRu,
     niceScale, stepDecimals, formatTick, percentTick, createTickSets, historyKeep,
     numberTokens, countedText,
-    NO_REGION, normalize, rowsFromIndex, regionLabel, searchRows, pickTarget,
+    NO_REGION,
   };
 })();

@@ -147,11 +147,10 @@ class _ResourceCollector(HTMLParser):
 
 
 class _StatsParser(HTMLParser):
-    """Пять пунктов `<li class="stat">` главной, по порядку — текст `.stat-number` и
-    `.stat-caption` каждого, не текст «где-то в HTML»: связь «число ↔ его подпись»
-    проверяется, только если число и текст сверяются в границах одного и того же пункта.
-    `short` — сокращённая подпись для телефона (`span.stat-note-short`): она входит и в
-    `caption` (подпись целиком — всё, что внутри `p.stat-caption`), и отдельно."""
+    """Четыре пункта `<li class="stat">` полосы чисел на обложке, по порядку: текст `.stat-number` и подпись
+    (`.stat-caption`) каждого — целиком, отдельно `.stat-label` (что за число) и `.stat-note` (строка оговорки).
+    Связь «число ↔ его подпись» проверяется, только если число и текст сверяются в границах одного и того же
+    пункта, а не «где-то в HTML»."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -159,12 +158,12 @@ class _StatsParser(HTMLParser):
         self._depth_in_li = 0
         self._current: dict[str, str] | None = None
         self._capture: str | None = None  # "number" | "caption" | None
-        self._in_short = False
+        self._span: str | None = None  # "label" | "note" | None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         classes = (dict(attrs).get("class") or "").split()
         if tag == "li" and "stat" in classes:
-            self._current = {"number": "", "caption": "", "short": ""}
+            self._current = {"number": "", "caption": "", "label": "", "note": ""}
             self.stats.append(self._current)
             self._depth_in_li = 1
             return
@@ -176,14 +175,16 @@ class _StatsParser(HTMLParser):
             self._capture = "number"
         elif tag == "p" and "stat-caption" in classes:
             self._capture = "caption"
-        elif tag == "span" and "stat-note-short" in classes:
-            self._in_short = True
+        elif tag == "span" and "stat-label" in classes:
+            self._span = "label"
+        elif tag == "span" and "stat-note" in classes:
+            self._span = "note"
 
     def handle_endtag(self, tag: str) -> None:
         if self._current is None:
             return
         if tag == "span":
-            self._in_short = False
+            self._span = None
         if tag == "p" and self._capture:
             self._capture = None
         if tag == "li":
@@ -194,8 +195,8 @@ class _StatsParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._current is not None and self._capture:
             self._current[self._capture] += data
-            if self._in_short:
-                self._current["short"] += data
+            if self._span:
+                self._current[self._span] += data
 
 
 class _AnchorCollector(HTMLParser):
@@ -275,10 +276,10 @@ class _IdCollector(HTMLParser):
 
 
 class _NodeText(HTMLParser):
-    """Видимый текст узлов по их `id` — вместе с вложенными тегами. Подстановки вне пяти карточек
-    (подзаголовок обложки, шаг 01, блок «Стенд», заголовок раздела 03, ползунок) сверяются в
-    границах своего узла: «где-то на странице» этим значениям не подходит — подмена одной
-    подстановки другой (`n_series_rub` на `n_months`) оставалась бы незамеченной."""
+    """Видимый текст узлов по их `id` — вместе с вложенными тегами. Подстановки вне полосы чисел
+    (подзаголовок обложки, шаг 01, блок «Прогноз по муниципалитету», заголовок раздела 03, ползунок) сверяются
+    в границах своего узла: «где-то на странице» этим значениям не подходит — подмена одной
+    подстановки другой (`n_series_rub` на `forecast_year`) оставалась бы незамеченной."""
 
     VOID = {"br", "hr", "img", "input", "link", "meta"}
 
@@ -399,7 +400,7 @@ class BuildSiteTest(unittest.TestCase):
         cls.landing_raw = landing_scripts[0] if len(landing_scripts) == 1 else None
         cls.landing = json.loads(cls.landing_raw) if cls.landing_raw is not None else None
 
-        # Пять пунктов <li class="stat"> по порядку — число и подпись каждого отдельно,
+        # Четыре пункта <li class="stat"> по порядку — число, подпись и оговорка каждого отдельно,
         # без схлопывания разметки, но с нормализацией пробелов (отступы и переносы строк
         # шаблона иначе попали бы прямо в текст подписи).
         stats_parser = _StatsParser()
@@ -411,7 +412,8 @@ class BuildSiteTest(unittest.TestCase):
         # не совпадающим с тем, что пишет _fmt ниже).
         collapse = lambda text: re.sub(r"[ \t\n\r\f\v]+", " ", text).strip()  # noqa: E731
         cls.stats = [
-            {"number": s["number"].strip(), "caption": collapse(s["caption"]), "short": collapse(s["short"])}
+            {"number": s["number"].strip(), "caption": collapse(s["caption"]),
+             "label": collapse(s["label"]), "note": collapse(s["note"])}
             for s in stats_parser.stats
         ]
 
@@ -509,14 +511,18 @@ class BuildSiteTest(unittest.TestCase):
     def test_scripts_do_not_write_the_period_or_the_unit_of_the_distinguisher_by_hand(self) -> None:
         # Период различителя — «за последний год панели» — стоял в трёх строках скриптов и повторял константу
         # генератора: при другой панели строки остались бы прежними. Теперь он приходит из данных, и в коде страниц
-        # (вне комментариев) ни его слов, ни единицы нет.
+        # (вне комментариев) ни его слов, ни единицы нет. Различитель показывает только страница прогноза (поле поиска
+        # главной удалено), поэтому строку из данных берёт один её скрипт.
         for name in ("site/landing.js", "site/landing-lib.js", "demo/demo.js"):
             code = self._js_without_comments((ROOT / name).read_text(encoding="utf-8"))
             with self.subTest(file=name):
                 for forbidden in ("последний год", "последнего года", "последние 12", "тыс. ₽", "тыс.\u00a0₽",
                                   "тыс.\\u00a0₽", "в мес.", "MEAN_HINT"):
                     self.assertNotIn(forbidden, code)
-                self.assertRegex(code, r"mean_unit|meanUnit")
+                if name == "demo/demo.js":
+                    self.assertRegex(code, r"mean_unit|meanUnit")
+                else:
+                    self.assertNotRegex(code, r"mean_unit|meanUnit|regionLabel")
 
     def test_quick_buttons_point_at_panel_series_with_short_labels(self) -> None:
         # Быстрые кнопки стенда: каждая — ряд панели (иначе кнопка открыла бы МО по умолчанию
@@ -642,10 +648,8 @@ class BuildSiteTest(unittest.TestCase):
         self.assertNotIn("ROLE_SHORT_LABELS", demo_js)
         self.assertIn("primary.textContent = model.name;", demo_js)
         self.assertIn("secondary.textContent = model.note;", demo_js)
-        # Старых названий на главной нет, подпись горизонта называет лучшую так же, как полоса.
+        # Старых названий на главной нет.
         self.assertNotIn("Лучшая панельная", self.html)
-        notes = dict(zip(self.landing["horizons"]["list"], self.landing["horizons"]["notes"]))
-        self.assertIn("Лучшая в среднем по панели точнее эталона на", notes[1])
 
     def test_model_names_take_the_role_not_the_identifier(self) -> None:
         self.assertEqual(build_site.model_names("two_stage", ["two_stage"]),
@@ -711,91 +715,91 @@ class BuildSiteTest(unittest.TestCase):
     def test_no_template_placeholders_left(self) -> None:
         self.assertNotIn("${", self.html)
 
-    # -- число 1: горизонт основного протокола ------------------------------
+    # -- полоса чисел на обложке: четыре числа, под каждым подпись и строка оговорки --------------
 
-    def test_headline_stat_matches_summary_csv(self) -> None:
-        # stat-number сверяется целиком, а MAE/R² — в связке с горизонтом внутри подписи
-        # ИМЕННО первого пункта (self.stats[0]), а не где угодно в HTML: раньше
-        # assertIn(str(horizon), html) проходил на любой «3» где угодно на странице,
-        # а число и подпись разных пунктов не были связаны.
-        top = self.summary["MAE"].idxmin()
-        prophet_mae = self.summary.loc["prophet", "MAE"]
-        best_mae = self.summary.loc[top, "MAE"]
-        # Выигрыш без знака: на странице число стоит перед словом «точнее».
-        best_gain = self.summary.loc[top, "к Prophet, %"]
-        r2_prophet = self.summary.loc["prophet", "R² пул"]
-        r2_best = self.summary.loc[top, "R² пул"]
-        horizon_main = int(self.full_cfg["split"]["horizon"])
+    def _cover_html(self) -> str:
+        """Разметка обложки — от `<section class="hero night">` до её закрывающего `</section>` (вложенных секций
+        в ней нет): всё, что тест считает «на обложке», лежит внутри этого тега, а не просто выше первого раздела."""
+        start = self.html.index('<section class="hero night"')
+        return self.html[start:self.html.index("</section>", start)]
 
-        stat = self.stats[0]
-        self.assertEqual(stat["number"], f"{_fmt(best_gain, 1)}%")
-        # Горизонт — в названии числа, MAE — в первой строке пояснения: они идут подряд,
-        # и «3 мес.» с MAE другого пункта связать нельзя.
-        self.assertIn(
-            f"на горизонте {horizon_main} мес. MAE {_fmt(prophet_mae, 0)} ₽ → {_fmt(best_mae, 0)} ₽",
-            stat["caption"],
-        )
-        self.assertIn(f"R² по пулу {_fmt(r2_prophet, 3)} → {_fmt(r2_best, 3)}", stat["caption"])
-
-    def test_folds_caveat_matches_per_series_csv(self) -> None:
+    def _windows_won_and_lost(self) -> tuple[list, list, list]:
+        """Окна проверки основного горизонта (фолды протокола): все, те, где лучшая модель точнее эталона, и те,
+        где эталон точнее, — по per_series.csv, своими выражениями."""
         top = self.summary["MAE"].idxmin()
         fold_mae = (self.ok[self.ok["model"].isin([top, "prophet"])]
                     .groupby(["fold", "model"])["mae"].mean().unstack())
         folds = list(fold_mae.index)
         won = [f for f in folds if fold_mae.loc[f, top] < fold_mae.loc[f, "prophet"]]
         lost = [f for f in folds if fold_mae.loc[f, top] > fold_mae.loc[f, "prophet"]]
+        return folds, won, lost
 
-        # Оговорка о фолдах — часть подписи ИМЕННО первого пункта (folds_caveat в её
-        # тексте, см. site/index.template.html): сверяем в границах self.stats[0],
-        # а не где угодно на странице.
-        caption = self.stats[0]["caption"]
-        won_phrase = f"{len(won)} {'фолде' if len(won) == 1 else 'фолдах'} из {len(folds)}"
-        self.assertIn(won_phrase, caption)
-        for fold in lost:
-            with self.subTest(fold=fold):
-                self.assertIn(_ORDINAL.get(fold, str(fold)), caption)
-        # На телефоне подпись сокращена до одного оборота — это то же число фолдов.
-        self.assertEqual(self.stats[0]["short"], f"на {won_phrase}")
+    def test_the_strip_has_four_numbers_inside_the_dark_cover_and_no_panel_line(self) -> None:
+        # Полоса — у нижнего края тёмной обложки, а не белые карточки под ней; пятого числа (панели) и словаря
+        # под карточками нет: число рядов уже стоит в подзаголовке.
+        self.assertEqual(len(self.stats), 4)
+        cover = self._cover_html()
+        self.assertEqual(cover.count('<li class="stat'), 4)
+        self.assertIn('<ul class="stats rise d5" aria-label="Ключевые числа работы">', cover)
+        self.assertNotIn("stats-wrap", self.html)
+        self.assertNotIn("stat-panel", self.html)
+        self.assertNotIn("glossary", self.html)
+        # Янтарным — только первое число.
+        self.assertEqual(self.html.count("stat-lead"), 1)
+        self.assertTrue(cover.index('<li class="stat stat-lead">') < cover.index("stat-number"))
+        # У каждого пункта: число, подпись и одна строка оговорки; подпись целиком — это они двое.
+        for stat in self.stats:
+            with self.subTest(number=stat["number"]):
+                self.assertTrue(stat["number"] and stat["label"] and stat["note"])
+                self.assertEqual(stat["caption"], f"{stat['label']} {stat['note']}")
 
-    def test_cover_proof_line_repeats_the_headline_number_with_its_caveat(self) -> None:
-        # На обложке — главное число из тех же подстановок, что первая карточка, и та же оговорка о фолдах;
-        # «проверено на факте» к нему не приписано: фактом проверен только прогноз федерального ряда.
+    def test_headline_stat_matches_summary_csv(self) -> None:
+        # stat-number сверяется целиком, а подпись — в связке с горизонтом внутри ИМЕННО первого пункта
+        # (self.stats[0]), а не где угодно в HTML: «3 месяца» из любой другой подписи число не подтвердило бы.
         top = self.summary["MAE"].idxmin()
+        # Выигрыш без знака: на странице число стоит перед словом «точнее».
         best_gain = self.summary.loc[top, "к Prophet, %"]
-        fold_mae = (self.ok[self.ok["model"].isin([top, "prophet"])]
-                    .groupby(["fold", "model"])["mae"].mean().unstack())
-        folds = list(fold_mae.index)
-        won = [f for f in folds if fold_mae.loc[f, top] < fold_mae.loc[f, "prophet"]]
-        won_phrase = f"{len(won)} {'фолде' if len(won) == 1 else 'фолдах'} из {len(folds)}"
         horizon_main = int(self.full_cfg["split"]["horizon"])
-        proof = _IdsOf(self.html).text("hero-proof")
-        self.assertEqual(
-            proof, f"{_fmt(best_gain, 1)}% точнее эталона конкурса на горизонте {horizon_main} мес. — на {won_phrase}")
-        self.assertNotIn("факт", proof)
-        # То же число, что в первой карточке, — не второе, посчитанное отдельно.
-        self.assertTrue(proof.startswith(self.stats[0]["number"]))
-        self.assertIn(self.stats[0]["short"], proof)
-        # Строка стоит в тексте обложки, до поля поиска и графика: на первом экране ноутбука она видна.
-        self.assertLess(self.html.index('id="hero-lead"'), self.html.index('id="hero-proof"'))
-        self.assertLess(self.html.index('id="hero-proof"'), self.html.index('id="mo-q"'))
 
-    def test_glossary_under_the_cards_explains_fold_nowcast_and_origin(self) -> None:
-        # «Фолд» стоит в главной оговорке («на 2 фолдах из 3»), и без словаря под карточками его нигде не
-        # объясняют: длина окна — из index.json::folds, а не из головы.
-        fold = self.index_json["folds"][0]
-        first, last = pd.Period(fold["test_from"], "M"), pd.Period(fold["test_to"], "M")
-        window = int((last - first).n) + 1
-        glossary = _IdsOf(self.html).text("glossary")
-        # Окно фолда равно горизонту прогноза: на основном горизонте — столько, сколько месяцев в окне первого фолда;
-        # у года вперёд и у наукаста окна другой длины, и «фолд — окно в три месяца» им не подходит.
-        self.assertIn(
-            f"фолд — проверочное окно длиной в горизонт прогноза (на основном горизонте — {window} мес.): "
-            "модель учится на месяцах до него и прогнозирует его", glossary)
-        self.assertIn("наукаст — прогноз текущего месяца до выхода его данных", glossary)
-        self.assertIn("origin — месяц, от которого строится прогноз", glossary)
-        # Словарь стоит сразу под строкой панели, до первого раздела.
-        self.assertLess(self.html.index('class="stat stat-panel"'), self.html.index('id="glossary"'))
-        self.assertLess(self.html.index('id="glossary"'), self.html.index('id="why"'))
+        stat = self.stats[0]
+        self.assertEqual(stat["number"], f"{_fmt(best_gain, 1)}%")
+        self.assertEqual(
+            stat["label"], f"точнее эталона конкурса на {horizon_main} {_plural(horizon_main, 'месяц', 'месяца', 'месяцев')}")
+
+    def test_windows_held_note_and_lost_windows_match_per_series_csv(self) -> None:
+        folds, won, lost = self._windows_won_and_lost()
+        # Оговорка к главному числу — строка того же пункта: в скольких окнах проверки выигрыш держится.
+        if not won:
+            held = "не держится ни в одном окне проверки"
+        elif len(won) == len(folds):
+            held = "держится во всех окнах проверки"
+        else:
+            held = f"держится в {len(won)} {'окне' if len(won) == 1 else 'окнах'} проверки из {len(folds)}"
+        self.assertEqual(self.stats[0]["note"], held)
+        # Какие окна эталон выиграл — в пояснении основного горизонта, рядом с полосами, где это видно по моделям.
+        horizons = self.landing["horizons"]
+        note = dict(zip(horizons["list"], horizons["notes"]))[horizons["main"]]
+        ordinals = [{0: "первом", 1: "втором", 2: "третьем"}[f] for f in lost]
+        self.assertTrue(lost, "в текущем прогоне эталон выигрывает хотя бы одно окно: проверке нужен такой случай")
+        joined = ordinals[0] if len(ordinals) == 1 else ", ".join(ordinals[:-1]) + " и " + ordinals[-1]
+        short_history = ", с самой короткой историей," if len(lost) == 1 and lost[0] == min(folds) else ""
+        sentence = (f"{'Во' if ordinals[0].startswith('вт') else 'В'} {joined} "
+                    f"{'окне' if len(lost) == 1 else 'окнах'}{short_history} эталон точнее.")
+        self.assertIn(sentence, note)
+
+    def test_the_site_says_validation_window_and_never_fold(self) -> None:
+        # «Фолд» — слово отчёта; на сайте то же самое называется «окно проверки»: ни в тексте страницы, ни в данных
+        # главной, ни в шаблоне слова нет. Страница прогноза (demo/) не меняется и в проверку не входит.
+        template = (ROOT / "site" / "index.template.html").read_text(encoding="utf-8")
+        for name, page in (("index.html", self.html), ("шаблон", template)):
+            collector = _TextCollector()
+            collector.feed(page)
+            with self.subTest(page=name):
+                self.assertNotRegex(" ".join(collector.chunks), r"(?i)фолд")
+        self.assertNotRegex(self.landing_raw, r"(?i)фолд")
+        # Проверка не слепа: слово заменено, а не вычеркнуто.
+        self.assertIn("окнах проверки", self.stats[0]["note"])
+        self.assertIn("окнам проверки", " ".join(self.landing["horizons"]["notes"]))
 
     # -- число 2: наукаст (горизонт 1) --------------------------------------
 
@@ -809,8 +813,8 @@ class BuildSiteTest(unittest.TestCase):
 
         stat = self.stats[1]
         self.assertEqual(stat["number"], f"{_fmt(h1_gain, 1)}%")
-        self.assertIn(f"MAE {_fmt(h1_best, 0)} против {_fmt(h1_prophet, 0)} ₽", stat["caption"])
-        self.assertEqual(stat["short"], f"{_fmt(h1_best, 0)} против {_fmt(h1_prophet, 0)} ₽")
+        self.assertEqual(stat["label"], "точнее эталона на текущий месяц")
+        self.assertEqual(stat["note"], f"{_fmt(h1_best, 0)} против {_fmt(h1_prophet, 0)} ₽ на человека в месяц")
 
     # -- число 3: год вперёд (горизонт 12, без оракула) ---------------------
 
@@ -820,7 +824,6 @@ class BuildSiteTest(unittest.TestCase):
             & (self.horizons_summary["model"] != "two_stage_known")
         ].set_index("model")
         year_top = year["MAE"].idxmin()
-        gain_naive = year.loc[year_top, "к наивной, %"]
         gain_prophet = year.loc[year_top, "к Prophet, %"]
         n_folds_top = int(self.horizons_folds.loc[
             (self.horizons_folds["horizon"] == 12) & (self.horizons_folds["model"] == year_top), "MAE"
@@ -828,22 +831,10 @@ class BuildSiteTest(unittest.TestCase):
 
         stat = self.stats[2]
         self.assertEqual(stat["number"], f"{_fmt(gain_prophet, 0)}%")
-        self.assertIn(f"наивной — на {_fmt(gain_naive, 0)}%", stat["caption"])
-        # «лучшая — …» — либо «двухэтапная» без кавычек, либо название из MODEL_LABELS
-        # в кавычках (build_site.compute_placeholders::h12_model) — какая именно из двух
-        # форм, зависит от того, какая модель победила, но подпись обязана содержать
-        # одну из них, а не молчать, если это не двухэтапная (было именно так раньше).
-        if year_top == "two_stage":
-            self.assertIn("лучшая — двухэтапная", stat["caption"])
-        else:
-            label = build_site.MODEL_LABELS.get(year_top, year_top)
-            self.assertIn(f"лучшая — «{label}»", stat["caption"])
-        if 0 < n_folds_top < 3:
-            # Оговорка целиком, числом словом: «один фолд» / «два фолда».
-            words = {1: "один", 2: "два"}[n_folds_top]
-            fold = _plural(n_folds_top, "фолд", "фолда", "фолдов")
-            self.assertIn(f"но это {words} {fold}", stat["caption"])
-            self.assertIn(f"но это {words} {fold}", stat["short"])
+        self.assertEqual(stat["label"], "точнее эталона на год вперёд")
+        # Оговорка — сколько окон проверки за числом, словом: «одно окно проверки» / «два окна проверки».
+        words = {1: "одно", 2: "два", 3: "три"}[n_folds_top]
+        self.assertEqual(stat["note"], f"{words} {_plural(n_folds_top, 'окно', 'окна', 'окон')} проверки")
 
     # -- число 4: проверка агрегата по факту 2025 года -----------------------
 
@@ -856,7 +847,6 @@ class BuildSiteTest(unittest.TestCase):
             lo, hi = series.min(), series.max()
             return _fmt(lo, 1) if _fmt(lo, 1) == _fmt(hi, 1) else f"{_fmt(lo, 1)}–{_fmt(hi, 1)}"
 
-        horizons = sorted(int(h) for h in self.agg_check["horizon"].unique())
         origin = pd.Period(self.forward_cfg["origin"], "M")
         # «Год факта» страницы — тот же origin.year + 1, что и в отдельном годе прогноза
         # вперёд (число 3): здесь достаточно локального значения, привязанного к этому
@@ -865,32 +855,10 @@ class BuildSiteTest(unittest.TestCase):
 
         stat = self.stats[3]
         self.assertEqual(stat["number"], f"{_range(own)}%")
-        self.assertIn(f"— {_range(rules)}%.", stat["caption"])
-        self.assertEqual(stat["short"], f"у правил {_range(rules)}%")
-        self.assertIn(f"на факте {forecast_year} года", stat["caption"])
-        self.assertIn(f"горизонты {horizons[0]}–{horizons[-1]} мес.", stat["caption"])
-        self.assertIn(f"{_MONTH_OF[origin.month - 1]} {origin.year}", stat["caption"])
-        # Названия простых правил — из колонки aggregate_model того же файла.
-        for name in self.agg_check.loc[self.agg_check["method"] != "two_stage", "aggregate_model"].unique():
-            self.assertIn(f"«{name}»", stat["caption"])
-
-    # -- число 5: форма панели ------------------------------------------------
-
-    def test_panel_stat_matches_build_matrix(self) -> None:
-        n_series, n_months = self.wide.shape[1], self.wide.shape[0]
-        expected_shape = (
-            f"{_fmt(n_series, 0)} {_plural(n_series, 'ряд', 'ряда', 'рядов')} × "
-            f"{n_months} {_plural(n_months, 'месяц', 'месяца', 'месяцев')}"
-        )
-        start, end = self.wide.index[0], self.wide.index[-1]
-        # panel_span целиком — с месяцами, а не только годы: «январь 2023 — декабрь
-        # 2024», подменённое на «март 2023 — октябрь 2024», раньше проходило зелёным —
-        # оба года встречались на странице и так.
-        expected_span = f"{_MONTH_NOM[start.month - 1]} {start.year} — {_MONTH_NOM[end.month - 1]} {end.year}"
-
-        stat = self.stats[4]
-        self.assertEqual(stat["number"], expected_shape)
-        self.assertIn(expected_span, stat["caption"])
+        self.assertEqual(stat["label"], f"ошибка прогноза страны на факте {forecast_year}")
+        self.assertEqual(stat["note"], f"у простых правил — {_range(rules)}%")
+        # Диапазон — по горизонтам проверки: у простых правил он шире, чем у первого этапа.
+        self.assertGreater(float(rules.max()), float(own.max()))
 
     # -- дата сборки -----------------------------------------------------------
 
@@ -1317,54 +1285,41 @@ class BuildSiteTest(unittest.TestCase):
         else:
             self.assertEqual(model["mae"][index], int(round(float(year[best]))))
 
-    def test_horizons_notes_carry_the_generators_numbers_and_caveats(self) -> None:
+    def test_horizons_notes_are_one_phrase_with_the_number_of_validation_windows(self) -> None:
         horizons = self.landing["horizons"]
         notes = dict(zip(horizons["list"], horizons["notes"]))
-        top = self.summary["MAE"].idxmin()
-        by_horizon_model = self.horizons_summary.set_index(["horizon", "model"])
-        # Наукаст: выигрыш лучшей модели к эталону — число из CSV.
-        h1_gain = by_horizon_model.loc[(1, top), "к Prophet, %"]
-        self.assertIn(f"{_fmt(h1_gain, 1)}%", notes[1])
-        # Основной горизонт: тот же выигрыш и та же оговорка о фолдах, что в первой карточке.
         main = horizons["main"]
-        self.assertIn(f"{_fmt(self.summary.loc[top, 'к Prophet, %'], 1)}%", notes[main])
-        sentence = re.search(r"(?:Но выигрыш|Выигрыш) держится [^.]*\.", self.stats[0]["caption"])
-        self.assertIsNotNone(sentence, "в первой карточке нет оговорки о фолдах")
-        self.assertIn(sentence.group(0), notes[main])
-        # Подпись основного горизонта открыта по умолчанию, то есть читатель видит её первой: в ней определены
-        # фолд (с длиной окна) и скользящий origin, а в остальных подписях этих определений нет.
-        self.assertIn(f"Фолд — проверочное окно в {main} мес.: модель учится на месяцах до него и прогнозирует его.",
-                      notes[main])
-        self.assertIn("Origin — месяц, от которого строится прогноз", notes[main])
-        self.assertIn("(скользящий origin)", notes[main])
-        for horizon, note in notes.items():
-            if horizon != main:
-                with self.subTest(definitions_only_in_the_first=horizon):
-                    self.assertNotIn("Фолд — проверочное окно", note)
-                    self.assertNotIn("Origin — месяц", note)
-        # Год: оговорка про фолд — число из horizons_folds.csv, как у третьей карточки.
-        n_folds = int(self.horizons_folds.loc[
-            (self.horizons_folds["horizon"] == 12) & (self.horizons_folds["model"] == "two_stage"), "MAE"
-        ].notna().sum())
-        if 0 < n_folds < 3:
-            words = {1: "один", 2: "два"}[n_folds]
-            self.assertIn(f"но это {words} {_plural(n_folds, 'фолд', 'фолда', 'фолдов')}", notes[12])
-        # Число фолдов каждого горизонта — в его пояснении, из двух независимых источников: конфига
-        # и результатов. Среднее по двум фолдам и по девяти — разные по весу утверждения.
+        # Число окон проверки каждого горизонта — словом, в одной фразе под полосами, из двух независимых источников:
+        # конфига и результатов. Среднее по двум окнам и по девяти — разные по весу утверждения.
         config_folds = {int(item["horizon"]): int(item["n_folds"]) for item in self.horizons_cfg["horizons"]}
         result_folds = self.horizons_folds.groupby("horizon")["fold"].nunique()
         self.assertEqual(sorted(config_folds), horizons["list"])
+        dative = {1: "одному окну", 2: "двум окнам", 3: "трём окнам", 6: "шести окнам", 9: "девяти окнам"}
         for horizon, note in notes.items():
             with self.subTest(horizon=horizon):
                 self.assertEqual(int(result_folds[horizon]), config_folds[horizon])
-                self.assertEqual(note.count("Фолдов:"), 1)
-                self.assertIn(f"Фолдов: {config_folds[horizon]}.", note)
+                self.assertIn(f"Средняя ошибка, ₽ на человека в месяц, по {dative[config_folds[horizon]]} проверки.",
+                              note)
+                self.assertNotRegex(note, r"\d")
+        # Наукаст назван прогнозом текущего месяца: слово «Наукаст» на переключателе иначе нигде не объяснено.
+        self.assertTrue(notes[1].startswith("Наукаст — прогноз текущего месяца, пока его данных ещё нет."))
+        self.assertTrue(all("Наукаст" not in note for horizon, note in notes.items() if horizon != 1))
+        # Основной горизонт открыт по умолчанию: где эталон выиграл окно, сказано рядом с полосами (число окон —
+        # в оговорке полосы чисел, а какое окно — здесь); у других горизонтов этой фразы нет.
+        self.assertIn("эталон точнее.", notes[main])
+        for horizon, note in notes.items():
+            if horizon != main:
+                with self.subTest(lost_window_only_at_the_main_horizon=horizon):
+                    self.assertNotIn("эталон точнее", note)
         # Пояснение «модель не удалось обучить» — только если на этом горизонте у какой-то из
         # четырёх моделей MAE нет: полосы нет, и читатель должен знать почему.
         year = self.horizons_summary[self.horizons_summary["horizon"] == 12].set_index("model")["MAE"]
         shown = [m["id"] for m in horizons["models"]]
         has_gap = any(pd.isna(year.get(model_id, np.nan)) for model_id in shown)
         self.assertEqual("не удалось обучить" in notes[12], has_gap)
+        for horizon, note in notes.items():
+            if horizon != 12:
+                self.assertNotIn("не удалось обучить", note)
 
     # -- fact и teaser: те же значения, что в файлах стенда --------------------------------------
 
@@ -1583,10 +1538,10 @@ class BuildSiteTest(unittest.TestCase):
         self.assertTrue(_number_words_in("первый этап и первый год"))
         self.assertTrue(_number_words_in("двухэтапная модель на двух горизонтах"))
 
-    def test_substitutions_outside_the_stat_cards_sit_in_their_own_nodes(self) -> None:
-        # Подстановки вне пяти карточек привязаны к узлам по id: подмена `n_series_rub` на `n_months`
-        # в подзаголовке обложки, в шаге 01 или в блоке «Стенд», `forecast_year` на другое число в
-        # заголовке раздела 03 или в подписи ползунка тест видит, а не «число нашлось где-то на странице».
+    def test_substitutions_outside_the_strip_sit_in_their_own_nodes(self) -> None:
+        # Подстановки вне полосы чисел привязаны к узлам по id: подмена `n_series_rub` на другое число
+        # в подзаголовке обложки, в шаге 01 или в блоке «Прогноз по муниципалитету», `forecast_year` на другое
+        # число в заголовке раздела 03 или в подписи ползунка тест видит, а не «число нашлось где-то на странице».
         nodes = _IdsOf(self.html)
         n_series = _fmt(self.wide.shape[1], 0)
         origin = pd.Period(self.forward_cfg["origin"], "M")
@@ -1600,15 +1555,6 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIsNotNone(base, "панель начинается не с января: проверке нужна своя подпись периода")
 
         self.assertEqual(nodes.text("hero-sub"), f"и его разнос по {n_series} муниципалитетам")
-        # Пустое поле ведёт на пример: его имя называет подпись под полем, а не догадка пользователя.
-        self.assertIn(f"Пустой запрос откроет пример — {self.index_json['default_mo']}.", nodes.text("mo-note"))
-        self.assertIn(f"ещё и на факте {year} года", nodes.text("hero-lead"))
-        self.assertIn("прогноз федерального ряда", nodes.text("hero-lead"))
-        # Линия подписана не только цветом: «толстая линия», а не «жёлтая».
-        self.assertEqual(
-            nodes.text("hero-caption"),
-            f"{sample_label}\u00a0· расходы к среднему за {base}\u00a0· толстая линия — общее движение (медиана)",
-        )
         # Шаг 01: число рядов и период — и в тексте шага, и в подписи под графиком.
         self.assertIn(f"{sample_label} из {n_series}: расходы к среднему за {base}.", nodes.text("step-1"))
         self.assertIn(f"от его среднего за {base}.", nodes.attr("step-1", "data-caption"))
@@ -1627,6 +1573,47 @@ class BuildSiteTest(unittest.TestCase):
         meta = re.search(r'<meta name="description" content="([^"]*)"', self.html).group(1)
         self.assertIn(f"Прогноз потребительских расходов {n_series} муниципальных образований", meta)
         self.assertIn(f"прогноз на {year} год", meta)
+
+    def test_cover_has_two_buttons_the_report_in_a_new_tab_and_the_forecast_page(self) -> None:
+        # Вместо поля поиска на обложке — две кнопки: основная ведёт в отчёт (в новой вкладке, со знаком «↗» и
+        # скрытой подписью, как все ссылки на документы), вторая — на страницу прогноза по муниципалитету.
+        ids = _IdCollector()
+        ids.feed(self.html)
+        anchors = {a["href"]: a for a in _anchors(self.html)}
+        nodes = _IdsOf(self.html)
+        report, city = ids.ids["hero-report"], ids.ids["hero-city"]
+        self.assertEqual((report["tag"], report["href"], report["target"], report["rel"]),
+                         ("a", "report/report.html", "_blank", "noopener"))
+        self.assertEqual(nodes.text("hero-report"), "Читать отчёт\u00a0↗ (откроется в новой вкладке)")
+        self.assertIn("btn-primary", report["class"])
+        self.assertEqual((city["tag"], city["href"], city.get("target")), ("a", "demo/", None))
+        self.assertEqual(nodes.text("hero-city"), "Найти свой город →")
+        self.assertIn("btn-secondary", city["class"])
+        self.assertIn("demo/", anchors)
+        # Кнопки — в одном блоке под подзаголовком: сначала основная, и обе до графика.
+        cover = self._cover_html()
+        cover = cover[:cover.index('class="stats')]
+        self.assertTrue(cover.index('id="hero-sub"') < cover.index('id="hero-report"') < cover.index('id="hero-city"')
+                        < cover.index('class="hero-plot"'))
+
+    def test_cover_has_no_search_field_and_no_text_around_the_chart(self) -> None:
+        # Поле «Покажите мой город», его подсказки и подпись удалены с обложки целиком — поиск живёт на странице
+        # прогноза. Абзац-лид, строка с главным числом, подписи осей и легенда графика — тоже: он — иллюстрация.
+        for gone in ("mo-q", "mo-list", "mo-go", "mo-status", "mo-note", 'role="search"', "search-label", "suggestions",
+                     "hero-lead", "hero-proof", "hero-axis", "hero-caption", "hero-figure"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, self.html)
+        self.assertNotIn("combobox", self.html)
+        self.assertIn('<div class="hero-plot" aria-hidden="true">', self.html)
+        cover = self._cover_html()
+        self.assertNotIn("<figcaption", cover)
+        collector = _TextCollector()
+        collector.feed(cover)
+        text = " ".join(collector.chunks)
+        # Видимый текст обложки — метка, заголовок, подзаголовок, кнопки и полоса; цифра 23 (главное число) только
+        # в полосе, один раз.
+        self.assertEqual(text.count(self.stats[0]["number"]), 1)
+        self.assertNotIn("медиана", text)
 
     def test_story_base_label_names_a_year_only_when_it_is_one(self) -> None:
         january = pd.DataFrame(index=pd.date_range("2023-01-01", periods=24, freq="MS"))
@@ -1926,21 +1913,20 @@ class BuildSiteTest(unittest.TestCase):
                 self.assertEqual(re.findall(r".{0,40}[Сс]тенд.{0,30}", code), [])
 
     def test_demo_page_is_named_forecast_by_municipality_on_both_pages(self) -> None:
-        # Одно имя: «Прогноз по муниципалитету» — в меню, метке раздела и кнопках главной, в карточке материалов,
-        # в метке и заголовке страницы. Приглашение «Покажите мой город» остаётся: поле обложки, H1 страницы.
+        # Одно имя: «Прогноз по муниципалитету» — в меню, метке раздела и карточке материалов, в метке и заголовке
+        # страницы. Приглашение «Покажите мой город» остаётся: заголовок блока на главной и H1 страницы; кнопка
+        # обложки зовёт «Найти свой город», кнопка блока — «Открыть прогноз».
         self.assertIn('<a class="nav-link" href="demo/">Прогноз по муниципалитету</a>', self.html)
         self.assertIn('<p class="eyebrow">05 · Прогноз по муниципалитету</p>', self.html)
         self.assertIn('<a class="material-link" href="demo/">Прогноз по муниципалитету</a>', self.html)
-        self.assertEqual(self.html.count(">Открыть прогноз →</a>"), 2, "кнопки обложки и блока ведут на страницу прогноза")
-        self.assertIn('<label class="search-label" for="mo-q">Покажите мой город</label>', self.html)
+        self.assertEqual(self.html.count(">Открыть прогноз →</a>"), 1, "кнопка блока ведёт на страницу прогноза")
+        self.assertEqual(self.html.count(">Найти свой город →</a>"), 1, "кнопка обложки ведёт на страницу прогноза")
         self.assertIn('<h2 class="section-title" id="city-title">Покажите мой город</h2>', self.html)
         self.assertIn("<title>Прогноз по муниципалитету — покажите мой город</title>", self.demo_html)
         self.assertIn('<p class="eyebrow">Прогноз по муниципалитету</p>', self.demo_html)
         self.assertIn('<h1 class="stand-title" id="stand-title">Покажите мой город</h1>', self.demo_html)
         demo_js = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
         self.assertIn("document.title = `${seriesId} — прогноз по муниципалитету`;", demo_js)
-        landing_js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
-        self.assertIn('"открыть прогноз →"', landing_js)
 
     def test_demo_page_names_the_landing_page_one_way_and_has_the_slides_link(self) -> None:
         # Главная названа в навигации «Обзор работы» — так же и в кнопке агрегата, а не «на главной»; в меню
@@ -1995,12 +1981,10 @@ class BuildSiteTest(unittest.TestCase):
                 self.assertEqual(ids.ids[section]["tag"], "section")
                 self.assertEqual(ids.ids[section]["aria-labelledby"], f"{section}-title")
                 self.assertIn(f"{section}-title", ids.ids)
-        # Поиск — ARIA-комбобокс со списком и живой областью; подписи под графиками — живые.
-        combo = ids.ids["mo-q"]
-        self.assertEqual(combo["role"], "combobox")
-        self.assertEqual(combo["aria-controls"], "mo-list")
-        self.assertEqual(ids.ids["mo-list"]["role"], "listbox")
-        for live in ("mo-status", "story-caption", "h-note"):
+        # Поля поиска на главной нет (оно — на странице прогноза); смена шага и горизонта объявляется
+        # живыми областями.
+        self.assertNotIn("mo-q", ids.ids)
+        for live in ("story-caption", "h-note"):
             with self.subTest(live=live):
                 self.assertEqual(ids.ids[live]["aria-live"], "polite")
         # Графики с данными — картинки с названием; декоративный график обложки скрыт.
@@ -2034,6 +2018,35 @@ class BuildSiteTest(unittest.TestCase):
                      "https://github.com/kr1zal/sberindex_konkurs"):
             with self.subTest(link=link):
                 self.assertIn(link, collector.links)
+
+
+class WindowsWordingTest(unittest.TestCase):
+    """Оговорки об окнах проверки (фолдах протокола) на числах, которых нет в текущем прогоне: ни одного окна,
+    все окна, одно, несколько; числа словом в формах «одно окно проверки» и «по трём окнам проверки»."""
+
+    def test_windows_held_names_how_many_of_the_windows_the_gain_holds_in(self) -> None:
+        self.assertEqual(build_site.on_windows(2, 3), "в 2 окнах проверки из 3")
+        self.assertEqual(build_site.on_windows(1, 3), "в 1 окне проверки из 3")
+        self.assertEqual(build_site.on_windows(21, 25), "в 21 окне проверки из 25")
+        self.assertEqual(build_site.on_windows(3, 3), "во всех окнах проверки")
+        self.assertEqual(build_site.on_windows(0, 3), "ни в одном окне проверки")
+
+    def test_lost_windows_are_named_by_their_order_and_the_shortest_history_only_when_alone(self) -> None:
+        sentence = build_site.windows_lost_sentence
+        self.assertEqual(sentence([0], 0), "В первом окне, с самой короткой историей, эталон точнее.")
+        self.assertEqual(sentence([1], 0), "Во втором окне эталон точнее.")
+        self.assertEqual(sentence([2], 0), "В третьем окне эталон точнее.")
+        self.assertEqual(sentence([1, 2], 0), "Во втором и третьем окнах эталон точнее.")
+        # Первое окно среди нескольких — без слов о короткой истории: они про одно окно.
+        self.assertEqual(sentence([0, 2], 0), "В первом и третьем окнах эталон точнее.")
+        self.assertEqual(sentence([3], 0), "В 4-м окне эталон точнее.")
+        self.assertEqual(sentence([], 0), "")
+
+    def test_small_numbers_in_the_site_forms_are_words_and_larger_ones_digits(self) -> None:
+        self.assertEqual([build_site.in_words(n, "им_с") for n in (1, 2, 3, 10, 11)], ["одно", "два", "три", "десять", "11"])
+        self.assertEqual([build_site.in_words(n, "дат") for n in (1, 2, 3, 9, 12)], ["одному", "двум", "трём", "девяти", "12"])
+        self.assertEqual([build_site.plural(n, "окну", "окнам", "окнам") for n in (1, 2, 5, 21)],
+                         ["окну", "окнам", "окнам", "окну"])
 
 
 class ChangepointClaimTest(unittest.TestCase):

@@ -1,5 +1,5 @@
-/* site/landing.js — главная: графики, счётчики чисел, переключатели и поиск поверх данных
- * из <script id="landing-data">. Данные и все числа приходят от генератора
+/* site/landing.js — главная: графики, счёт чисел и переключатели поверх данных из
+ * <script id="landing-data">. Данные и все числа приходят от генератора
  * (scripts/build_site.py, формат — его докстринг); здесь только отрисовка, форматирование
  * и подписи. Ни одно число данных в этом файле не пишется: ни ряды, ни доли, ни проценты.
  *
@@ -7,15 +7,15 @@
  * подписи и точки — в процентах блока графика (раскладка — site/landing.css).
  * При prefers-reduced-motion всё показывается сразу, без анимаций.
  *
- * Всё, что не касается страницы (шкалы, подписи оси, разбор чисел, ранжирование поиска), живёт
- * в site/landing-lib.js и подключается перед этим файлом: там его проверяют тесты через node.
+ * Всё, что не касается страницы (шкалы, подписи оси, разбор чисел), живёт в site/landing-lib.js
+ * и подключается перед этим файлом: там его проверяют тесты через node.
  */
 (function () {
   "use strict";
 
   const {
     formatInt, pluralRu, niceScale, formatTick, percentTick, createTickSets, historyKeep,
-    numberTokens, countedText, NO_REGION, rowsFromIndex, regionLabel, searchRows, pickTarget,
+    numberTokens, countedText, NO_REGION,
   } = LandingLib;
 
   let data;
@@ -191,7 +191,8 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Обложка: 30 линий прорисовываются со сдвигом, затем общее движение
+  // Обложка: 30 линий прорисовываются со сдвигом, затем общее движение. График — иллюстрация:
+  // без осей и подписей, скрыт от программ чтения с экрана
   // ---------------------------------------------------------------------------
 
   function initHero(story) {
@@ -208,19 +209,10 @@
       path.style.setProperty("--i", index);
     });
     median.setAttribute("d", linePath(story.median.map((v) => yOf(v, scale)), xs));
-
-    const axis = byId("hero-axis");
-    if (axis) {
-      setAxisLabels(axis, [
-        { index: 0, text: monthLabel(story.months[0]) },
-        { index: story.base_months, text: monthLabel(story.months[story.base_months]) },
-        { index: count - 1, text: monthLabel(story.months[count - 1]) },
-      ], count);
-    }
   }
 
   // ---------------------------------------------------------------------------
-  // Четыре числа в карточках: при появлении в окне — счёт от нуля, в конце — исходный текст
+  // Четыре числа полосы на обложке: при появлении в окне — счёт от нуля, в конце — исходный текст
   // ---------------------------------------------------------------------------
 
   // Счёт короткий: на полпути число — не то, что в итоге, и беглый взгляд не должен успеть его прочесть.
@@ -237,10 +229,10 @@
     });
   }
 
-  // Строка панели («N рядов × M месяцев») не считается: на полпути формы слов не пересчитываются,
-  // и выходило «946 рядов × 11 месяца». Считаются числа карточек.
+  // Считаются только числа полосы: слова рядом с числом на полпути не пересчитываются
+  // (так вышло бы «946 рядов × 11 месяца»), и такие строки в полосе не стоят.
   function initCounters() {
-    const numbers = document.querySelectorAll(".stat:not(.stat-panel) .stat-number");
+    const numbers = document.querySelectorAll(".stat .stat-number");
     if (!numbers.length || reducedMotion() || !("IntersectionObserver" in window)) return;
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
@@ -310,6 +302,7 @@
     function stepText(step) {
       return buttons[step].querySelector(".step-text").textContent.replace(/\s+/g, " ").trim();
     }
+
 
     function select(step, animateMove) {
       const target = states[step];
@@ -725,288 +718,6 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Поиск «Покажите мой город»: список рядов из demo/data/index.json — при первом фокусе.
-  // Ранжирование — LandingLib.searchRows, то же, что на стенде.
-  // ---------------------------------------------------------------------------
-
-  function initSearch() {
-    const input = byId("mo-q");
-    const list = byId("mo-list");
-    const go = byId("mo-go");
-    const status = byId("mo-status");
-    const note = byId("mo-note");
-    if (!input || !list || !go || !note) return;
-
-    const LIMIT = 6;
-    const STAND = "demo/";
-    const defaultNote = note.textContent;
-    let rows = null;
-    let defaultMo = null; // index.json::default_mo — пример, который открывает кнопка без совпадений
-    let loading = null;
-    let failed = false;
-    let failureShown = false;
-    let selected = null;
-    let options = [];
-    let active = -1;
-
-    function load() {
-      if (rows) return Promise.resolve(rows);
-      if (!loading) {
-        loading = fetch("demo/data/index.json")
-          .then((response) => {
-            if (!response.ok) throw new Error(`demo/data/index.json: ${response.status}`);
-            return response.json();
-          })
-          .then((index) => {
-            rows = rowsFromIndex(index.series, index.quick, index.mean_unit);
-            defaultMo = index.default_mo;
-            failed = false;
-            // Подсказка о сбое устарела: список загрузился при повторной попытке.
-            if (failureShown) resetNote();
-            return rows;
-          })
-          .catch((error) => {
-            // Не запоминаем отказ: следующий фокус попробует загрузить заново.
-            loading = null;
-            failed = true;
-            showFailure();
-            throw error;
-          });
-      }
-      return loading;
-    }
-
-    // Куда ведёт кнопка «Открыть прогноз»: выбранный в списке ряд, иначе подсвеченная подсказка,
-    // иначе первое совпадение набранного запроса; пустой запрос и запрос без совпадений — стенд
-    // без выбора, поиск там покажет сам стенд.
-    function currentTarget() {
-      return selected || pickTarget(rows, input.value, active >= 0 ? options[active] : null);
-    }
-
-    function targetUrl() {
-      const row = currentTarget();
-      return row ? standUrl(row.id) : STAND;
-    }
-
-    // Строка под полем говорит, что откроет кнопка, пока ряд не выбран из списка: набранный запрос
-    // без выбора ведёт на первое совпадение, и узнавать об этом уже на странице прогноза поздно. Запрос без
-    // совпадений ведёт на пример — это тоже сказано, а не возвращается подпись пустого поля. У выбранного
-    // ряда (choose) и при сбое загрузки (showFailure) у строки свой текст.
-    function showTarget(row) {
-      if (selected || failureShown) return;
-      let text = defaultNote;
-      if (input.value.trim()) {
-        if (row) text = `Откроется: ${row.id} · ${regionLabel(row)}`;
-        else if (rows) text = `Совпадений нет — откроется пример: ${defaultMo}`;
-      }
-      if (note.textContent !== text) note.textContent = text;
-    }
-
-    // Адрес кнопки держится в ссылке заранее: так он верен и при открытии в новой вкладке.
-    function syncGo() {
-      const row = currentTarget();
-      go.href = row ? standUrl(row.id) : STAND;
-      showTarget(row);
-    }
-
-    // Переход по кнопке или клавише Enter. Запрос уже набран, а список ещё грузится (быстрый
-    // набор, поле заполнено браузером после возврата на страницу): ждём список и идём по нему.
-    function openStand() {
-      if (rows || selected || !input.value.trim()) {
-        window.location.href = targetUrl();
-        return;
-      }
-      load().then(() => { window.location.href = targetUrl(); }, () => { window.location.href = STAND; });
-    }
-
-    function showFailure() {
-      closeList();
-      failureShown = true;
-      note.textContent = "";
-      note.appendChild(document.createTextNode("Список муниципалитетов не загрузился. Найти свой город можно "));
-      const link = node("a", null, "на странице прогноза", note);
-      link.href = STAND;
-      note.appendChild(document.createTextNode("."));
-    }
-
-    function resetNote() {
-      failureShown = false;
-      note.textContent = defaultNote;
-    }
-
-    function openList() {
-      list.hidden = false;
-      input.setAttribute("aria-expanded", "true");
-      // Поле стоит низко, и список выходит за нижний край окна: докручиваем ровно настолько, чтобы он влез.
-      list.scrollIntoView({ block: "nearest" });
-    }
-
-    function closeList() {
-      list.hidden = true;
-      input.setAttribute("aria-expanded", "false");
-      input.removeAttribute("aria-activedescendant");
-      active = -1;
-      syncGo();
-    }
-
-    function setActive(index) {
-      const items = list.querySelectorAll('[role="option"]:not([aria-disabled])');
-      items.forEach((item) => item.setAttribute("aria-selected", "false"));
-      active = index;
-      if (index >= 0 && index < items.length) {
-        items[index].setAttribute("aria-selected", "true");
-        input.setAttribute("aria-activedescendant", items[index].id);
-        items[index].scrollIntoView({ block: "nearest" });
-      } else {
-        input.removeAttribute("aria-activedescendant");
-      }
-      syncGo();
-    }
-
-    function statusRow(text) {
-      list.textContent = "";
-      const item = node("li", "suggestion-status", text, list);
-      item.setAttribute("role", "option");
-      item.setAttribute("aria-disabled", "true");
-      openList();
-    }
-
-    function choose(row) {
-      selected = row;
-      failureShown = false;
-      input.value = row.id;
-      closeList();
-      note.textContent = "";
-      note.appendChild(document.createTextNode("Выбран: "));
-      node("span", "picked", row.id, note);
-      note.appendChild(document.createTextNode(` · ${regionLabel(row)} · `));
-      const link = node("a", null, "открыть прогноз →", note);
-      link.href = standUrl(row.id);
-    }
-
-    function renderList() {
-      const query = input.value;
-      if (!query.trim()) {
-        list.textContent = "";
-        options = [];
-        status.textContent = "";
-        closeList();
-        return;
-      }
-      if (!rows) {
-        statusRow("Загружаю список…");
-        return;
-      }
-      const { matches, total } = searchRows(rows, query, LIMIT);
-      options = matches;
-      status.textContent = total
-        ? `Найдено ${formatInt(total)} ${pluralRu(total, "совпадение", "совпадения", "совпадений")}`
-        : "Ничего не нашлось";
-      if (!matches.length) {
-        statusRow("Ничего не нашлось — попробуйте часть названия или регион.");
-        return;
-      }
-      list.textContent = "";
-      matches.forEach((row, index) => {
-        const item = node("li", "suggestion", null, list);
-        item.id = `mo-option-${index}`;
-        item.setAttribute("role", "option");
-        item.setAttribute("aria-selected", "false");
-        node("span", "suggestion-name", row.id, item);
-        node("span", "suggestion-region", regionLabel(row), item);
-        item.addEventListener("click", () => choose(row));
-      });
-      if (total > matches.length) {
-        const more = total - matches.length;
-        const item = node("li", "suggestion-status",
-          `И ещё ${formatInt(more)} ${pluralRu(more, "совпадение", "совпадения", "совпадений")} — уточните запрос`, list);
-        item.setAttribute("role", "option");
-        item.setAttribute("aria-disabled", "true");
-      }
-      active = -1;
-      input.removeAttribute("aria-activedescendant");
-      openList();
-    }
-
-    function render() {
-      renderList();
-      syncGo();
-    }
-
-    // Список загрузился: раскрывается он, только если поле всё ещё в фокусе — иначе медленная сеть
-    // открыла бы подсказки у человека, который уже ушёл с поля.
-    function afterLoad() {
-      if (document.activeElement === input) render();
-      else syncGo();
-    }
-
-    // mousedown до click: иначе фокус успевает уйти с поля раньше, чем сработает выбор.
-    list.addEventListener("mousedown", (event) => event.preventDefault());
-    // То же у кнопки: уход с поля закрывает список и сбрасывает подсвеченную подсказку раньше,
-    // чем кнопка получит щелчок, — и она открыла бы первое совпадение вместо выбранного.
-    go.addEventListener("mousedown", (event) => event.preventDefault());
-
-    input.addEventListener("focus", () => {
-      // Первый фокус загружает список; после отказа каждый следующий пробует снова.
-      load().then(afterLoad, () => {});
-    });
-
-    // Уход с поля (Tab) закрывает список; выбор мышью поле не покидает — см. mousedown выше.
-    input.addEventListener("blur", closeList);
-
-    input.addEventListener("input", () => {
-      if (selected) {
-        selected = null;
-        resetNote();
-      }
-      if (!rows && failed) {
-        showFailure();
-        return;
-      }
-      render();
-      if (!rows) load().then(afterLoad, () => {});
-    });
-
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        if (list.hidden) render();
-        else if (options.length) setActive(Math.min(options.length - 1, active + 1));
-      } else if (event.key === "ArrowUp") {
-        event.preventDefault();
-        if (!list.hidden && options.length) setActive(Math.max(0, active - 1));
-      } else if (event.key === "Enter") {
-        if (!list.hidden && options.length) {
-          event.preventDefault();
-          choose(options[active >= 0 ? active : 0]);
-        } else if (input.value.trim()) {
-          // Список закрыт или подсказок нет: то же, что кнопка «Открыть прогноз».
-          event.preventDefault();
-          openStand();
-        }
-      }
-    });
-
-    go.addEventListener("click", (event) => {
-      if (rows || selected || !input.value.trim()) {
-        syncGo();
-        return;
-      }
-      event.preventDefault();
-      openStand();
-    });
-
-    // Escape закрывает список всегда, где бы ни стоял фокус.
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !list.hidden) closeList();
-    });
-
-    document.addEventListener("click", (event) => {
-      if (!event.target.closest(".search")) closeList();
-    });
-  }
-
-  // ---------------------------------------------------------------------------
   // Запуск: сбой одного блока не должен останавливать остальные
   // ---------------------------------------------------------------------------
 
@@ -1019,7 +730,6 @@
     ["факт", () => initFact(data.fact)],
     ["изломы", () => initBreaks(data.breaks)],
     ["прогноз по муниципалитету", () => initTeaser(data.teaser)],
-    ["поиск", initSearch],
   ].forEach((block) => {
     try {
       block[1]();

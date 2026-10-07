@@ -1,10 +1,10 @@
-"""Скрипты страницы прогноза и главной: ранжирование поиска, поле поиска и ключ изломов в легенде графика.
+"""Скрипты страницы прогноза и главной: ранжирование поиска и поле поиска страницы прогноза, ключ изломов в
+легенде графика.
 
-Поиск страницы прогноза (`demo/demo.js::searchMunicipalities`) и поиск на обложке главной
-(`site/landing-lib.js::searchRows`) — две копии одного правила, и подсказки у них обязаны совпадать.
-Файл страницы целиком загружается в пустом контексте с заглушками страницы: настоящий код, а не его
-копия в тесте. Поле поиска проверяется на заглушке DOM, у которой обработчики вызываются событиями.
-Без node проверки поиска пропускаются.
+Поиска на главной нет (он — только на странице прогноза), поэтому порядок подсказок проверяется на одной
+копии правила — `demo/demo.js::searchMunicipalities`. Файл страницы целиком загружается в пустом контексте
+с заглушками страницы: настоящий код, а не его копия в тесте. Поле поиска проверяется на заглушке DOM,
+у которой обработчики вызываются событиями. Без node проверки поиска пропускаются.
 """
 from __future__ import annotations
 
@@ -25,12 +25,13 @@ QUERIES = [
 ]
 
 
-def run_both(queries: list[str], limit: int) -> dict:
-    """Результаты обоих поисков на настоящем списке рядов: id найденных строк и их число. Быстрые
-    кнопки (`index.quick`) передаются обоим: порядок подсказок зависит и от них."""
+def run_stand(queries: list[str], limit: int) -> dict:
+    """Результаты поиска страницы прогноза на настоящем списке рядов: id найденных строк и их число, а также
+    подпись региона каждой строки. Быстрые кнопки (`index.quick`) передаются поиску: порядок подсказок
+    зависит и от них."""
     script = """
         const vm = require('vm'), fs = require('fs');
-        const [demoPath, libPath, indexPath, payload] = process.argv.slice(1);
+        const [demoPath, indexPath, payload] = process.argv.slice(1);
         const input = JSON.parse(payload);
         const noop = () => {};
         const page = {
@@ -40,23 +41,19 @@ def run_both(queries: list[str], limit: int) -> dict:
         };
         const stand = vm.runInNewContext(
           fs.readFileSync(demoPath, 'utf8') + '\\n({searchMunicipalities, buildSearchIndex, regionLabel});', page);
-        const lib = vm.runInNewContext(fs.readFileSync(libPath, 'utf8') + '\\nLandingLib;', {});
         const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
         const standRows = stand.buildSearchIndex(index.series, index.quick, index.mean_unit);
-        const homeRows = lib.rowsFromIndex(index.series, index.quick, index.mean_unit);
         const out = {};
         input.queries.forEach((query) => {
           const a = stand.searchMunicipalities(query, standRows, input.limit);
-          const b = lib.searchRows(homeRows, query, input.limit);
-          out[query] = { stand: a.matches.map((r) => r.seriesId), home: b.matches.map((r) => r.id),
-                         standTotal: a.total, homeTotal: b.total };
+          out[query] = { stand: a.matches.map((r) => r.seriesId), standTotal: a.total };
         });
-        out.labels = standRows.map((row, i) => [stand.regionLabel(row), lib.regionLabel(homeRows[i])]);
+        out.labels = standRows.map((row) => stand.regionLabel(row));
         console.log(JSON.stringify(out));
     """
     done = subprocess.run(
-        ["node", "-e", script, str(ROOT / "demo" / "demo.js"), str(ROOT / "site" / "landing-lib.js"),
-         str(ROOT / "demo" / "data" / "index.json"), json.dumps({"queries": queries, "limit": limit})],
+        ["node", "-e", script, str(ROOT / "demo" / "demo.js"), str(ROOT / "demo" / "data" / "index.json"),
+         json.dumps({"queries": queries, "limit": limit})],
         capture_output=True, text=True, check=True, timeout=120,
     )
     return json.loads(done.stdout)
@@ -114,16 +111,19 @@ def run_page(body: str, payload: object) -> object:
 class SearchRankingTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.small = run_both(QUERIES, 8)
-        cls.full = run_both(QUERIES, 100000)
+        cls.small = run_stand(QUERIES, 8)
+        cls.full = run_stand(QUERIES, 100000)
 
-    def test_stand_and_cover_search_return_the_same_suggestions(self) -> None:
-        for query in QUERIES:
-            with self.subTest(query=query):
-                self.assertEqual(self.small[query]["stand"], self.small[query]["home"])
-                self.assertEqual(self.small[query]["standTotal"], self.small[query]["homeTotal"])
-                # Не только первые подсказки: весь порядок результатов.
-                self.assertEqual(self.full[query]["stand"], self.full[query]["home"])
+    def test_only_the_forecast_page_has_a_search_and_the_cover_keeps_no_copy_of_its_rule(self) -> None:
+        # Раньше правило порядка подсказок жило в двух копиях (страница прогноза и поле на обложке) и тест сверял
+        # их друг с другом. Поле с обложки удалено вместе со своей копией: правило одно, `searchMunicipalities`.
+        library = (ROOT / "site" / "landing-lib.js").read_text(encoding="utf-8")
+        landing = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        for name in ("searchRows", "rowsFromIndex", "pickTarget", "regionLabel", "extraLetters"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, library)
+                self.assertNotIn(name, landing)
+        self.assertIn("function searchMunicipalities", (ROOT / "demo" / "demo.js").read_text(encoding="utf-8"))
 
     def test_every_word_starting_a_name_word_goes_before_a_plain_inclusion(self) -> None:
         got = self.small["город орёл"]["stand"]
@@ -133,15 +133,14 @@ class SearchRankingTest(unittest.TestCase):
         self.assertEqual(len(gorelovo), 1)
         self.assertGreater(self.full["город орёл"]["stand"].index(gorelovo[0]), 0)
 
-    def test_kazan_goes_first_on_both_pages(self) -> None:
+    def test_kazan_goes_first(self) -> None:
         # «каз», «казан» и Enter без выбора открывали «Казанский муниципальный район» Тюменской области:
-        # внутри яруса сортировка была по алфавиту, и Казань стояла четвёртой. Теперь Казань первая и там,
-        # и там — ряд быстрого выбора, а за ним по длине совпавшего слова: Казанский, Казачинский, …
+        # внутри яруса сортировка была по алфавиту, и Казань стояла четвёртой. Теперь Казань первая — ряд
+        # быстрого выбора, а за ним по длине совпавшего слова: Казанский, Казачинский, …
         kazan = "городской округ город Казань"
         for query in ("каз", "казан", "казань", "город казань"):
-            for page in ("stand", "home"):
-                with self.subTest(query=query, page=page):
-                    self.assertEqual(self.small[query][page][0], kazan)
+            with self.subTest(query=query):
+                self.assertEqual(self.small[query]["stand"][0], kazan)
         self.assertEqual(self.small["казан"]["stand"], [kazan, "Казанский муниципальный район"])
         self.assertEqual(self.small["каз"]["stand"][:4], [
             kazan, "Казанский муниципальный район", "Казачинский муниципальный район",
@@ -168,23 +167,23 @@ class SearchRankingTest(unittest.TestCase):
         self.assertEqual(self.small[""]["stand"], [])
         self.assertEqual(self.small["ъъъ"]["stand"], [])
 
-    def test_both_pages_label_regions_the_same_way(self) -> None:
-        # Подпись региона в подсказке — одна и та же строка на главной и на странице прогноза; у ряда без региона
-        # рядом различитель из генератора: число, единица «на человека в месяц» и период — как в `mean_unit`
-        # («регион не определён · <число> тыс. ₽ на человека в месяц за <период>»).
+    def test_region_label_of_a_suggestion_follows_the_index_data(self) -> None:
+        # Подпись региона в подсказке: регион ряда; у ряда без региона рядом различитель из генератора — число,
+        # единица «на человека в месяц» и период, как в `mean_unit` («регион не определён · <число> тыс. ₽ на человека
+        # в месяц за <период>»). Слов о периоде скрипт не держит: что передали, то и показывает.
         labels = self.small["labels"]
-        self.assertTrue(all(stand == home for stand, home in labels))
         index = json.loads((ROOT / "demo" / "data" / "index.json").read_text(encoding="utf-8"))
         self.assertIn("на человека в\u00a0месяц за\u00a0", index["mean_unit"])
-        for (series_id, region, _oktmo, _file, *mean), (stand, _home) in zip(index["series"], labels):
+        self.assertEqual(len(labels), len(index["series"]))
+        for (series_id, region, _oktmo, _file, *mean), label in zip(index["series"], labels):
             if region:
-                self.assertEqual(stand, region)
+                self.assertEqual(label, region)
             else:
                 self.assertEqual(len(mean), 1, f"у ряда без региона {series_id!r} нет различителя")
-                self.assertEqual(stand, f"регион не определён · {mean[0]}\u00a0{index['mean_unit']}")
+                self.assertEqual(label, f"регион не определён · {mean[0]}\u00a0{index['mean_unit']}")
 
-    def test_suggestion_list_scrolls_into_view_on_the_stand_like_on_the_cover(self) -> None:
-        # На телефоне список подсказок стенда уходил за низ экрана на несколько строк и не докручивался.
+    def test_suggestion_list_scrolls_into_view_on_the_forecast_page(self) -> None:
+        # На телефоне список подсказок страницы прогноза уходил за низ экрана на несколько строк и не докручивался.
         demo = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
         body = re.search(r"function openListbox\(\) \{.*?\n  \}\n", demo, re.S).group(0)
         self.assertIn('listbox.scrollIntoView({ block: "nearest" })', body)
@@ -301,58 +300,6 @@ class SearchFieldSelectionTest(unittest.TestCase):
         start = demo.index("searchInput.value = seriesId;")
         self.assertIn("if (document.activeElement === searchInput) selectFieldText(searchInput);",
                       demo[start:start + 300])
-
-
-@unittest.skipUnless(shutil.which("node"), "для скриптов стенда нужен node")
-class CoverSearchNoteTest(unittest.TestCase):
-    """Подпись под полем обложки говорит, куда ведёт кнопка: на совпадение, на пример (пустой запрос и запрос без
-    совпадений) — с именем примера из данных."""
-
-    SCRIPT = """
-        const page = vm.createContext({ document, window: {}, console: { error: noop }, setTimeout,
-          requestAnimationFrame: noop, fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve(input.index) }) });
-        document.getElementById('landing-data').textContent = '{}';
-        const note = document.getElementById('mo-note');
-        note.textContent = input.defaultNote;
-        vm.runInContext(fs.readFileSync(input.lib, 'utf8'), page);
-        vm.runInContext(fs.readFileSync(input.landing, 'utf8'), page);
-        const field = document.getElementById('mo-q');
-        const log = {};
-        const type = (text) => { field.value = text; document.activeElement = field; fire(field, 'input'); return note.textContent; };
-        log.loading = type('ъъъ');            // список ещё грузится: совпадений «нет» говорить рано
-        await tick();
-        log.noMatch = note.textContent;       // загрузился: совпадений нет, кнопка ведёт на пример
-        log.match = type('казань');
-        log.region = type('михайловский');
-        log.empty = type('');
-        log.again = type('ъъъ');
-        log.blank = type('   ');
-        return log;
-    """
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.index = {
-            "series": [["городской округ город Казань", "Республика Татарстан", "x", 0],
-                       ["Михайловский муниципальный район #1", None, None, 1, "23,7"]],
-            "quick": [], "mean_unit": "тыс. ₽ на человека в месяц за год панели", "default_mo": "Пример из данных",
-        }
-        cls.default_note = "Например: казань. Пустой запрос откроет пример — Пример из данных."
-        cls.got = run_page(cls.SCRIPT, {"lib": str(ROOT / "site" / "landing-lib.js"),
-                                        "landing": str(ROOT / "site" / "landing.js"), "index": cls.index,
-                                        "defaultNote": cls.default_note})
-
-    def test_query_without_matches_says_which_example_the_button_opens(self) -> None:
-        self.assertEqual(self.got["noMatch"], "Совпадений нет — откроется пример: Пример из данных")
-        self.assertEqual(self.got["again"], "Совпадений нет — откроется пример: Пример из данных")
-
-    def test_other_states_keep_their_notes(self) -> None:
-        self.assertEqual(self.got["loading"], self.default_note, "пока список грузится, «совпадений нет» не говорят")
-        self.assertEqual(self.got["match"], "Откроется: городской округ город Казань · Республика Татарстан")
-        self.assertEqual(self.got["region"], "Откроется: Михайловский муниципальный район #1 · регион не определён · "
-                         "23,7\u00a0тыс. ₽ на человека в месяц за год панели")
-        self.assertEqual(self.got["empty"], self.default_note)
-        self.assertEqual(self.got["blank"], self.default_note, "пробелы — не запрос")
 
 
 class MarkerKeyInLegendTest(unittest.TestCase):

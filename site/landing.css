@@ -1,6 +1,6 @@
 /* Главная: раскладка разделов и графики. Шрифты, токены и общие компоненты (шапка, кнопки,
-   чипы, поле поиска, карточки, подвал) — в site.css, здесь только то, что нужно одной этой
-   странице.
+   чипы, поле поиска страницы прогноза, карточки, подвал) — в site.css, здесь только то, что нужно
+   одной этой странице.
 
    Графики — SVG с viewBox 1000×1000 и preserveAspectRatio="none": линии растягиваются
    по блоку любого размера, а толщина штриха не искажается из-за vector-effect.
@@ -50,36 +50,45 @@
   animation: rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
-/* Весь текст обложки, вместе с полем поиска, проявляется меньше чем за секунду: у читателя на первую
-   секунду страницы — заголовок, число и поле, а не пустой тёмный экран. */
+/* Весь текст обложки, кнопки и полоса чисел проявляются меньше чем за секунду: у читателя на первую
+   секунду страницы — заголовок, кнопки и числа, а не пустой тёмный экран. */
 .d1 { animation-delay: 0.05s; }
 .d2 { animation-delay: 0.1s; }
 .d3 { animation-delay: 0.15s; }
 .d4 { animation-delay: 0.2s; }
 .d5 { animation-delay: 0.25s; }
-.d6 { animation-delay: 0.3s; }
 
 /* -- обложка --------------------------------------------------------------------- */
 
-/* Без overflow: hidden: список подсказок поиска выходит за нижний край обложки. */
+/* Обложка — первый экран целиком: шапка, заголовок с кнопками, график и полоса чисел у нижнего края. На широком
+   окне она занимает его высоту за вычетом шапки (--header-h: поля 14 + кнопка 44 + поля 14), и полоса стоит
+   внизу; кегли и высоты ниже считаются от высоты окна (vh), чтобы на ноутбуке полоса не уходила за него. */
 .hero {
-  position: relative;
-  overflow-x: clip;
-  padding-bottom: 72px;
+  --header-h: 72px;
   --hero-line: #5b8cff;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+}
+
+@media (min-width: 960px) {
+  .hero {
+    min-height: calc(100vh - var(--header-h));
+    min-height: calc(100svh - var(--header-h));
+  }
 }
 
 .hero-grid {
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
   gap: 48px;
   align-items: center;
-  padding-top: 12px;
+  padding-block: clamp(8px, 1.6vh, 16px) clamp(12px, 3vh, 28px);
 }
 
-.hero-left {
-  position: relative;
-  z-index: 5;
+.hero-text {
   min-width: 0;
 }
 
@@ -91,7 +100,8 @@
 /* Кегль подогнан под колонку: «одного числа» (в Unbounded около 8,5 кегля) целиком в
    одной строке, заголовок — в две строки, а не в три. На телефоне колонка — вся ширина
    за вычетом полей, на планшете заголовок целиком влезает в одну строку, на широком
-   экране колонка — доля обёртки. */
+   экране колонка — доля обёртки. На широком окне кегль ещё и доля высоты окна (8,4vh): так
+   заголовок, кнопки и полоса чисел помещаются на ноутбуке без прокрутки; vh только уменьшает кегль. */
 .hero-title {
   margin: 0;
   font-size: min(2.375rem, calc((100vw - 40px) / 8.8));
@@ -107,15 +117,7 @@
 
 @media (min-width: 960px) {
   .hero-title {
-    font-size: clamp(3rem, calc(6vw - 8px), 4.125rem);
-  }
-}
-
-/* Ноутбуки невысокие: на экране с невысоким окном заголовок крупного кегля оставлял бы главное число
-   за первым экраном, поэтому он здесь поменьше (в колонку влезает с запасом: кегль только уменьшился). */
-@media (min-width: 960px) and (max-height: 820px) {
-  .hero-title {
-    font-size: clamp(2.75rem, calc(5vw - 8px), 3.625rem);
+    font-size: clamp(2.75rem, min(calc(6vw - 8px), 8.4vh), 4.125rem);
   }
 }
 
@@ -128,75 +130,53 @@
   color: var(--night-ink-2);
 }
 
-.hero-lead {
-  max-width: 580px;
-  margin: 16px 0 0;
-  font-size: 1.0625rem;
-  line-height: 1.55;
-  color: var(--night-ink-3);
+@media (min-width: 960px) {
+  .hero-sub {
+    margin-top: clamp(8px, 1.8vh, 14px);
+    font-size: clamp(1.1875rem, min(1.9vw, 3.1vh), 1.5rem);
+  }
 }
 
-/* Главное число работы — на первом экране, а не за карточками ниже: те же подстановки генератора и та же
-   оговорка о фолдах, что в первой карточке. Проверка фактом ему не приписана: фактом проверен только
-   прогноз федерального ряда. */
-.hero-proof {
+/* Две кнопки: основная — отчёт (в новой вкладке), вторая — страница прогноза по муниципалитету. */
+.hero-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 12px;
-  max-width: 580px;
+  gap: 10px 12px;
+  margin-top: 28px;
+}
+
+.hero-actions .btn {
+  flex: 0 0 auto;
+  min-height: 52px;
+  padding: 0 22px;
+  font-size: 1rem;
+}
+
+.hero-actions .btn-secondary {
+  font-weight: 500;
+}
+
+@media (min-width: 960px) {
+  .hero-actions {
+    margin-top: clamp(20px, 4.6vh, 36px);
+  }
+
+  .hero-actions .btn {
+    min-height: clamp(46px, 6.6vh, 52px);
+  }
+}
+
+.hero-noscript {
   margin: 14px 0 0;
+  color: var(--night-ink-3);
+  font-size: 0.875rem;
 }
 
-.hero-proof-number {
-  color: var(--amber);
-  font-family: var(--font-display);
-  font-size: 1.625rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.hero-proof-text {
-  color: var(--night-ink-2);
-  font-size: 0.9375rem;
-  line-height: 1.4;
-}
-
-.hero-search {
-  position: relative;
-  z-index: 5;
-  max-width: 560px;
-  margin-top: 22px;
-}
-
-/* Подпись под полем меняется от запроса: пример на две строки, «Откроется: …» — на одну. Высота держится
-   на две строки, чтобы карточки ниже не прыгали при наборе. */
-.search-note {
-  min-height: 3.1em;
-  margin: 8px 0 0;
-  color: var(--night-dim);
-  font-size: 0.8125rem;
-}
-
-.search-note a {
-  color: var(--amber);
-}
-
-.search-note .picked {
-  color: var(--night-ink);
-}
-
-.hero-figure {
-  position: relative;
-  min-width: 0;
-  margin: 0;
-}
-
+/* График обложки — иллюстрация: без осей и подписей; линии и медиана рисует landing.js. */
 .hero-plot {
   position: relative;
-  height: 400px;
+  min-width: 0;
+  height: clamp(220px, 46vh, 440px);
 }
 
 .hero-svg {
@@ -233,79 +213,26 @@
   animation: draw 1.2s cubic-bezier(0.3, 0.6, 0.1, 1) 0.9s both, breathe 3.2s ease-in-out 2.1s 3;
 }
 
-.hero-axis {
-  position: relative;
-  height: 18px;
-  margin-top: 10px;
-  color: var(--night-dim);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-}
-
-.hero-axis span {
-  position: absolute;
-  top: 0;
-  white-space: nowrap;
-}
-
-.hero-caption {
-  margin: 8px 0 0;
-  color: var(--night-dim);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  line-height: 1.5;
-  text-align: right;
-}
-
 @media (max-width: 959px) {
   /* stretch: иначе align-items: center из сетки выше центрирует колонку блоков по ширине
-     содержимого, и на планшете у заголовка, графика и поиска три разных левых края. */
+     содержимого, и на планшете у заголовка и графика два разных левых края. */
   .hero-grid {
     display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: 0;
-    padding-top: 8px;
-  }
-
-  /* Обёртка исчезает из раскладки, и заголовок, график и поиск встают в одну колонку
-     в этом порядке: на узком экране поиск стоит после графика. */
-  .hero-left {
-    display: contents;
-  }
-
-  .hero-text {
-    order: 1;
-  }
-
-  .hero-figure {
-    order: 2;
-    margin-top: 22px;
-  }
-
-  .hero-search {
-    order: 3;
-    width: 100%;
-    margin-top: 24px;
+    padding-block: 8px 0;
   }
 
   .hero-plot {
     height: 240px;
-  }
-
-  .hero-caption, .hero-noscript {
-    text-align: left;
+    margin-top: 28px;
   }
 }
 
-/* На телефоне поле поиска — на первом экране, вместе со строкой главного числа: график обложки ниже, отступы между
-   блоками теснее. Поле стоит после графика (порядок блоков выше), и каждые лишние десятки пикселей над ним уводят
-   его за нижний край экрана. */
+/* Телефон: на первом экране — заголовок и кнопки, график — следом, числа сеткой 2×2 ниже. Кнопки в колонку
+   на всю ширину, если рядом не помещаются. */
 @media (max-width: 639px) {
-  .hero {
-    padding-bottom: 72px;
-  }
-
   .hero-grid {
     padding-top: 4px;
   }
@@ -319,37 +246,17 @@
     margin-top: 6px;
   }
 
-  .hero-lead {
-    margin-top: 12px;
-    font-size: 1rem;
+  .hero-actions {
+    margin-top: 22px;
   }
 
-  .hero-proof {
-    margin-top: 10px;
-  }
-
-  .hero-figure {
-    margin-top: 16px;
+  .hero-actions .btn {
+    flex: 1 1 100%;
   }
 
   .hero-plot {
-    height: 160px;
-  }
-
-  .hero-axis {
-    margin-top: 6px;
-  }
-
-  .hero-caption {
-    margin-top: 6px;
-  }
-
-  .hero-search {
-    margin-top: 16px;
-  }
-
-  .hero-search .search-label {
-    margin-bottom: 8px;
+    height: 180px;
+    margin-top: 24px;
   }
 
   .hero-line {
@@ -359,200 +266,109 @@
   .hero-median {
     stroke-width: 3;
   }
+}
 
-  /* На телефоне поле и кнопка — два блока друг под другом, поле — отдельной плашкой. */
-  .hero-search .field {
-    flex-direction: column;
-    gap: 8px;
-    padding: 0;
-    background: transparent;
-    border: 0;
-  }
-
-  .hero-search .field input {
-    min-height: 52px;
-    padding: 0 16px;
-    background: var(--surface);
-    border: 1px solid var(--field-line);
-    border-radius: 14px;
-    font-size: 1rem;
-  }
-
-  .hero-search .field input:focus-visible {
-    outline: 2px solid var(--focus);
-    outline-offset: 2px;
-  }
-
-  .hero-search .field .btn {
-    min-height: 52px;
-    font-size: 1rem;
+@media (min-width: 480px) and (max-width: 639px) {
+  .hero-actions .btn {
+    flex: 1 1 auto;
   }
 }
 
-.hero-noscript {
-  margin: 12px 0 0;
-  color: var(--night-ink-3);
-  font-size: 0.875rem;
-  text-align: right;
-}
+/* -- четыре числа на обложке ----------------------------------------------------- */
 
-/* -- пять чисел ------------------------------------------------------------------ */
-
-.stats-wrap {
-  position: relative;
-  z-index: 3;
-  margin-top: -48px;
-}
-
+/* Полоса у нижнего края тёмной обложки: четыре числа через тонкие вертикали, под каждым подпись и одна
+   строка оговорки. Первое число — янтарное. Все цвета — токены ночного блока (.night): полоса лежит на обложке. */
 .stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
   margin: 0;
   padding: 0;
   list-style: none;
+  border-top: 1px solid var(--rule);
 }
 
 .stat {
-  padding: 24px 24px 22px;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 18px;
-  /* Размер числа задан шириной самой карточки (cqw ниже): диапазон двух процентов длиннее
-     одного значения, и на узкой карточке иначе вылез бы за край. */
+  min-width: 0;
+  padding: clamp(14px, 3.4vh, 26px) 18px clamp(18px, 4vh, 30px);
+  border-left: 1px solid var(--rule);
+  /* Размер числа задан и шириной самой ячейки (cqw ниже): диапазон двух процентов длиннее
+     одного значения, и в узкой ячейке иначе вылез бы за край. */
   container-type: inline-size;
+}
+
+/* Крайние ячейки без внешнего поля: полоса выровнена по краям обёртки, как заголовок и шапка, а подписи
+   в одну строку получают то место, которое иначе пропало бы у границы. */
+.stat:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.stat:last-child {
+  padding-right: 0;
 }
 
 .stat-number {
   font-size: 1.75rem;
+  white-space: nowrap;
 }
 
-/* Размер числа — доля ширины карточки: самое длинное число — диапазон двух процентов через
-   тире — должно умещаться в одну строку, поэтому на узкой карточке кегль уменьшается вместе
-   с ней, а не число переносится по тире. Доля подобрана по форме числа, а не по его значениям. */
+/* Размер числа — доля высоты окна (на ноутбуке полоса должна уместиться) и не больше доли ширины ячейки:
+   самое длинное число — диапазон двух процентов через тире — умещается в одну строку, поэтому в узкой ячейке
+   кегль уменьшается вместе с ней, а число не переносится по тире. Доля подобрана по форме числа, а не по
+   его значениям. */
 @supports (width: 1cqw) {
   .stat-number {
-    font-size: clamp(1.25rem, 17cqw, 2.75rem);
+    font-size: clamp(1.5rem, min(5vh, 17cqw), 2.5rem);
   }
 }
 
+.stat-lead .stat-number {
+  color: var(--amber);
+}
+
 .stat-caption {
-  margin: 12px 0 0;
+  margin: 0;
 }
 
 .stat-label {
   display: block;
-  font-size: 1rem;
-  font-weight: 500;
-  line-height: 1.4;
+  margin-top: clamp(6px, 1.4vh, 10px);
+  color: var(--ink);
+  font-size: clamp(0.8125rem, 1.9vh, 0.875rem);
+  line-height: 1.35;
 }
 
 .stat-note {
   display: block;
-  margin-top: 8px;
+  margin-top: 4px;
   color: var(--ink-soft);
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-.stat-note-short {
-  display: none;
-}
-
-/* Пятый пункт — строка панели во всю ширину, без карточки. */
-.stat-panel {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 14px;
-  padding: 0 2px;
-  background: none;
-  border: 0;
-  border-radius: 0;
-  container-type: normal;
-  color: var(--ink-soft);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-}
-
-.stat-panel .stat-number {
-  color: var(--ink);
-  font-family: var(--font-mono);
   font-size: 0.8125rem;
-  font-weight: 500;
-  letter-spacing: 0;
-  line-height: 1.5;
+  line-height: 1.35;
 }
 
-.stat-panel .stat-caption {
-  margin: 0;
-}
-
-/* Словарь под карточками: слова, которые дальше в тексте не объясняются. Набор тот же, что у строки
-   панели выше. */
-.glossary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 6px 28px;
-  margin: 14px 2px 0;
-  color: var(--ink-soft);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  line-height: 1.55;
-}
-
-.glossary dt {
-  display: inline;
-  color: var(--ink);
-  font-weight: 500;
-}
-
-.glossary dd {
-  display: inline;
-  margin: 0;
-}
-
+/* Меньше тысячи пикселей четыре ячейки в ряд не умещаются: числа сеткой 2×2, у каждой ячейки своя линия сверху. */
 @media (max-width: 999px) {
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 20px;
+    margin-top: 28px;
+    border-top: 0;
+  }
+
+  .stat, .stat:first-child, .stat:last-child {
+    padding: 16px 0 20px;
+    border-top: 1px solid var(--rule);
+    border-left: 0;
   }
 }
 
 @media (max-width: 639px) {
-  .stats-wrap {
-    margin-top: -36px;
-  }
-
   .stats {
-    gap: 10px;
+    column-gap: 16px;
   }
 
-  .stat {
-    padding: 16px;
-    border-radius: 16px;
-  }
-
-  .stat-label {
-    margin-top: 2px;
-    font-size: 0.84rem;
-    line-height: 1.4;
-  }
-
-  /* Телефон: длинные оговорки заменены короткими — карточка в полторы строки, а не в десять. */
-  .stat-note-full {
-    display: none;
-  }
-
-  .stat-note-short {
-    display: block;
-    margin-top: 6px;
+  .stat-note {
     font-size: 0.75rem;
-    line-height: 1.4;
-  }
-
-  .stat-panel {
-    padding: 0 2px;
   }
 }
 

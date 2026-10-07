@@ -1,9 +1,10 @@
-"""Вёрстка главной и стенда: то, что выяснилось только в браузере и держится на CSS и скриптах.
+"""Вёрстка главной и страницы прогноза: то, что выяснилось только в браузере и держится на CSS и скриптах.
 
 Сборка не нужна: читаются сами файлы `site/`, `demo/` и шаблон. Проверки — о формулах и
-правилах, а не о пикселях: кегль заголовка обложки считается по формулам из стилей на
-каждой ширине экрана; раскладка подписей отметок графика стенда — чистая функция
-`LineChart.assignMarkerRows`, её запускает node (без него проверка пропускается).
+правилах, а не о пикселях: кегль заголовка обложки и высоты первого экрана считаются по формулам из стилей
+на каждой ширине и высоте окна; раскладка подписей отметок графика страницы прогноза — чистая функция
+`LineChart.assignMarkerRows`, её запускает node (без него проверка пропускается). Что весь первый экран,
+включая полосу чисел, видно без прокрутки, подтверждает браузер; здесь — что формулы этого не нарушают.
 """
 from __future__ import annotations
 
@@ -44,10 +45,12 @@ def _evaluate(node: ast.AST) -> float:
     raise ValueError(f"выражение не из того, что умеет проверка: {ast.dump(node)}")
 
 
-def _css_length(expr: str, viewport: float) -> float:
-    """Значение выражения из стилей (px, rem, vw, calc, clamp, min, max) в пикселях."""
+def _css_length(expr: str, viewport: float, height: float = 0.0) -> float:
+    """Значение выражения из стилей (px, rem, vw, vh, calc, clamp, min, max) в пикселях; `height` — высота окна
+    для vh, `viewport` — ширина."""
     text = expr.strip()
     text = re.sub(r"(\d+(?:\.\d+)?)vw", lambda m: f"({m.group(1)}*{viewport}/100)", text)
+    text = re.sub(r"(\d+(?:\.\d+)?)vh", lambda m: f"({m.group(1)}*{height}/100)", text)
     text = re.sub(r"(\d+(?:\.\d+)?)rem", lambda m: f"({m.group(1)}*16)", text)
     text = re.sub(r"(\d+(?:\.\d+)?)px", lambda m: f"({m.group(1)})", text)
     text = text.replace("calc(", "(")
@@ -64,8 +67,13 @@ def _hero_title_font_sizes(css: str) -> list[tuple[int, str]]:
     return sorted(rules)
 
 
+# Окна, в которых весь первый экран — шапка, заголовок с кнопками, график и полоса чисел — должен быть виден без
+# прокрутки: ширина, высота.
+FIRST_SCREENS = [(1366, 768), (1280, 720), (1440, 900), (1536, 864)]
+
+
 class HeroTitleTest(unittest.TestCase):
-    """Заголовок обложки: «одного числа» целиком в строке на любой ширине — две строки,
+    """Заголовок обложки: «одного числа» целиком в строке на любой ширине и высоте окна — две строки,
     а не три."""
 
     @classmethod
@@ -89,47 +97,153 @@ class HeroTitleTest(unittest.TestCase):
         content = min(viewport, self.wrap_max) - 2 * self.pad_wide - self.gap
         return content * self.left_fr / (self.left_fr + self.right_fr)
 
-    def _font(self, viewport: int) -> float:
+    def _font(self, viewport: int, height: float = 5000.0) -> float:
+        """Кегль заголовка; без высоты окна — «обычный», когда доля высоты (vh) не ограничивает."""
         expr = [e for width, e in _hero_title_font_sizes(self.landing_css) if width <= viewport][-1]
-        return _css_length(expr, viewport)
+        return _css_length(expr, viewport, height)
 
-    def test_amber_phrase_fits_the_column_at_every_width(self) -> None:
+    def test_amber_phrase_fits_the_column_at_every_width_and_height(self) -> None:
+        too_wide = []
         for viewport in list(range(320, 640, 10)) + list(range(640, 2561, 20)) + [959, 960, 1279, 1280, 1304]:
-            with self.subTest(viewport=viewport):
-                font, column = self._font(viewport), self._column(viewport)
-                self.assertLessEqual(
-                    font * AMBER_PHRASE_EM, column,
-                    f"при {viewport} px «одного числа» ({font:.1f} px кегля) шире колонки {column:.0f} px: "
-                    "заголовок снова рвётся на три строки",
-                )
+            for height in (480, 600, 720, 768, 864, 900, 1080, 1440):
+                font, column = self._font(viewport, height), self._column(viewport)
+                if font * AMBER_PHRASE_EM > column:
+                    too_wide.append((viewport, height, round(font, 1), round(column)))
+        self.assertEqual(too_wide, [], "«одного числа» шире колонки: заголовок снова рвётся на три строки")
 
-    def test_title_stays_large_on_desktop(self) -> None:
-        # Подгонка под колонку не должна превратить заголовок в обычный: на широком экране
-        # кегль заметно крупнее подзаголовка (32 px).
-        self.assertGreaterEqual(self._font(1440), 60)
+    def test_title_stays_large_in_the_four_laptop_windows(self) -> None:
+        # Подгонка под колонку и под высоту окна не должна превратить заголовок в обычный: в окнах ноутбуков кегль
+        # заметно крупнее подзаголовка (24 px).
+        for width, height in FIRST_SCREENS:
+            with self.subTest(window=f"{width}x{height}"):
+                self.assertGreaterEqual(self._font(width, height), 60)
 
-    def test_short_viewport_title_is_never_larger_than_the_usual_one(self) -> None:
-        # На невысоких окнах (ноутбуки) заголовок мельче, чтобы главное число не уходило за первый экран;
-        # правило только уменьшает кегль, поэтому «одного числа» в колонку по-прежнему влезает.
-        found = re.search(
-            r"@media \(min-width: 960px\) and \(max-height: (\d+)px\) \{\s*\.hero-title \{\s*font-size:\s*([^;]+);",
-            self.landing_css)
-        self.assertIsNotNone(found, "нет правила заголовка для невысоких окон")
+    def test_height_only_shrinks_the_title(self) -> None:
+        # На невысоких окнах (ноутбуки) заголовок мельче, чтобы заголовок, кнопки и полоса чисел помещались без
+        # прокрутки; доля высоты окна только уменьшает кегль, поэтому «одного числа» в колонку по-прежнему влезает.
+        found = re.search(r"@media \(min-width: 960px\) \{\s*\.hero-title \{\s*font-size:\s*([^;]+);", self.landing_css)
+        self.assertIsNotNone(found, "у заголовка на широком окне нет своего правила")
+        self.assertIn("vh", found.group(1), "кегль заголовка не зависит от высоты окна")
         for viewport in range(960, 2561, 20):
-            with self.subTest(viewport=viewport):
-                self.assertLessEqual(_css_length(found.group(2), viewport), self._font(viewport))
-                self.assertLessEqual(_css_length(found.group(2), viewport) * AMBER_PHRASE_EM, self._column(viewport))
+            usual = self._font(viewport)
+            for height in (480, 600, 720, 768, 864, 900, 1080, 1440):
+                with self.subTest(viewport=viewport, height=height):
+                    self.assertLessEqual(self._font(viewport, height), usual)
 
     def test_hero_columns_share_the_left_edge_below_desktop(self) -> None:
         # Без align-items: stretch сетка обложки центрирует блоки по ширине содержимого,
-        # и на планшете у заголовка, графика и поиска разные левые края.
+        # и на планшете у заголовка и графика разные левые края.
         block = re.search(r"@media \(max-width: 959px\) \{(.*?)\n\}", self.landing_css, re.S).group(1)
         grid_rule = re.search(r"\.hero-grid \{([^}]*)\}", block).group(1)
         self.assertRegex(grid_rule, r"align-items:\s*stretch")
 
 
+class FirstScreenTest(unittest.TestCase):
+    """Весь первый экран — шапка, заголовок, две кнопки, график и полоса из четырёх чисел — помещается в окно без
+    прокрутки в четырёх окнах ноутбуков (`FIRST_SCREENS`). Браузер подтверждает это измерением; здесь — что
+    формулы стилей этого не нарушают: сумма высот по ним, с запасом на два перенесённых строки подписи и оговорки в
+    каждой ячейке, не больше высоты окна."""
+
+    SLACK = 40  # запас на разницу модели и браузера, px
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.css = _read("site/landing.css")
+        cls.site = _read("site/site.css")
+
+    def _value(self, pattern: str, source: str | None = None) -> str:
+        found = re.search(pattern, source or self.css, re.S)
+        self.assertIsNotNone(found, f"в стилях не нашлось: {pattern}")
+        return found.group(1).strip()
+
+    def _header(self) -> float:
+        """Высота шапки: поля сверху и снизу и самый высокий элемент строки (кнопка меню и ссылки — 44 px)."""
+        padding = float(self._value(r"\.site-header-inner \{[^}]*?padding-block:\s*(\d+)px", self.site))
+        row = float(self._value(r"\.nav-link \{[^}]*?min-height:\s*(\d+)px", self.site))
+        return 2 * padding + row
+
+    def _budget(self, width: int, height: int) -> float:
+        """Сколько пикселей по формулам занимают шапка, обложка и полоса в окне `width`×`height` — с двумя
+        строками в подписи и в оговорке каждого числа."""
+        def length(expr: str, cq: float = 0.0) -> float:
+            expr = re.sub(r"(\d+(?:\.\d+)?)cqw", lambda m: f"({m.group(1)}*{cq}/100)", expr)
+            return _css_length(expr, width, height)
+
+        wide = r"@media \(min-width: 960px\) \{\s*"
+        grid_top, grid_bottom = re.match(
+            r"(clamp\([^)]*\))\s+(clamp\([^)]*\))", self._value(r"\.hero-grid \{[^}]*?padding-block:\s*([^;]+);")).groups()
+        title = _css_length(self._value(wide + r"\.hero-title \{\s*font-size:\s*([^;]+);"), width, height)
+        sub_margin, sub_font = (
+            length(self._value(wide + r"\.hero-sub \{\s*margin-top:\s*([^;]+);")),
+            length(self._value(wide + r"\.hero-sub \{\s*margin-top:[^;]+;\s*font-size:\s*([^;]+);")))
+        actions_margin = length(self._value(wide + r"\.hero-actions \{\s*margin-top:\s*([^;]+);"))
+        button = length(self._value(wide + r"\.hero-actions \{[^}]*\}\s*\.hero-actions \.btn \{\s*min-height:\s*([^;]+);"))
+        eyebrow = 13 * 1.4 + float(self._value(r"\.hero-eyebrow \{\s*margin:\s*0 0 (\d+)px;"))
+        # Левая колонка: метка, заголовок в две строки, подзаголовок в две строки, кнопки.
+        left = eyebrow + 2 * title * 1.02 + sub_margin + 2 * sub_font * 1.2 + actions_margin + button
+        plot = length(self._value(r"\.hero-plot \{[^}]*?height:\s*([^;]+);"))
+        grid = length(grid_top) + max(left, plot) + length(grid_bottom)
+
+        top, side, bottom = re.match(
+            r"(clamp\([^)]*\))\s+(\d+)px\s+(clamp\([^)]*\))", self._value(r"\.stat \{[^}]*?padding:\s*([^;]+);")).groups()
+        # Ширина содержимого ячейки: четыре равные доли обёртки без боковых полей ячеек (у крайних — по одному).
+        cell = (min(width, 1240) - 2 * 32) / 4 - 2 * float(side)
+        number = length(self._value(r"@supports \(width: 1cqw\) \{\s*\.stat-number \{\s*font-size:\s*([^;]+);"), cell)
+        label_margin = length(self._value(r"\.stat-label \{[^}]*?margin-top:\s*([^;]+);"))
+        label_font = length(self._value(r"\.stat-label \{[^}]*?font-size:\s*([^;]+);"))
+        note_font = length(self._value(r"\.stat-note \{[^}]*?font-size:\s*([^;]+);"))
+        strip = (1 + length(top) + number * 1.0 + label_margin + 2 * label_font * 1.35 + 4 + 2 * note_font * 1.35
+                 + length(bottom))
+        return self._header() + grid + strip
+
+    def test_header_height_is_the_one_the_cover_subtracts_from_the_window(self) -> None:
+        # Обложка занимает окно за вычетом шапки: число в стилях обложки — высота шапки из общей темы.
+        self.assertEqual(float(self._value(r"\.hero \{[^}]*?--header-h:\s*(\d+)px")), self._header())
+        self.assertRegex(self.css, r"min-height:\s*calc\(100vh - var\(--header-h\)\);")
+        self.assertRegex(self.css, r"min-height:\s*calc\(100svh - var\(--header-h\)\);")
+
+    def test_cover_and_strip_fit_the_window_in_the_four_laptop_sizes(self) -> None:
+        for width, height in FIRST_SCREENS:
+            with self.subTest(window=f"{width}x{height}"):
+                need = self._budget(width, height)
+                self.assertLessEqual(need + self.SLACK, height,
+                                     f"по формулам шапка, обложка и полоса занимают {need:.0f} px из {height}")
+
+    def test_strip_is_pinned_to_the_bottom_of_the_cover(self) -> None:
+        # Обложка — колонка во всю высоту окна, сетка с заголовком и графиком растёт (flex), полоса — после неё:
+        # на высоком окне полоса стоит у нижнего края, а не сразу под кнопками.
+        hero = self._value(r"\n\.hero \{([^}]*)\}")
+        self.assertRegex(hero, r"display:\s*flex")
+        self.assertRegex(hero, r"flex-direction:\s*column")
+        self.assertRegex(self._value(r"\n\.hero-grid \{([^}]*)\}"), r"flex:\s*1 1 auto")
+
+    def test_numbers_are_sized_by_the_window_height_and_never_wider_than_their_cell(self) -> None:
+        # Размер числа — доля высоты окна, но не больше доли ширины ячейки (cqw): диапазон двух процентов через тире
+        # длиннее одного значения и в узкой ячейке не должен вылезти за край или перенестись по тире.
+        block = self._value(r"@supports \(width: 1cqw\) \{(.*?)\n\}")
+        self.assertRegex(block, r"font-size:\s*clamp\([^;]*min\(\d+(?:\.\d+)?vh,\s*\d+(?:\.\d+)?cqw\)[^;]*\);")
+        comment = self.css[: self.css.index("@supports (width: 1cqw)")].rsplit("/*", 1)[1]
+        self.assertIn("доля высоты окна", comment)
+        self.assertIn("ширины ячейки", comment)
+        self.assertRegex(self._value(r"\.stat-number \{([^}]*)\}"), r"white-space:\s*nowrap")
+
+    def test_first_number_is_amber_and_the_strip_uses_the_night_tokens(self) -> None:
+        self.assertRegex(self._value(r"\.stat-lead \.stat-number \{([^}]*)\}"), r"color:\s*var\(--amber\)")
+        # Цвета полосы — токены ночного блока (обложка — .night в обеих темах), своих цветов в правилах нет.
+        for selector in (r"\.stats", r"\.stat", r"\.stat-label", r"\.stat-note"):
+            with self.subTest(selector=selector):
+                self.assertNotRegex(self._value(rf"\n{selector} \{{([^}}]*)\}}"), r"#[0-9a-fA-F]{3,6}\b|rgba?\(")
+
+    def test_strip_goes_two_by_two_below_a_thousand_pixels_and_the_buttons_stack_on_a_phone(self) -> None:
+        tablet = self._value(r"@media \(max-width: 999px\) \{(.*?)\n\}\n")
+        self.assertRegex(self._value(r"\.stats \{([^}]*)\}", tablet), r"grid-template-columns:\s*repeat\(2,")
+        self.assertRegex(self._value(r"\.stats \{[^}]*grid-template-columns:\s*repeat\((\d),"), r"4")
+        phone = self._value(r"@media \(max-width: 639px\) \{\s*\.hero-grid(.*?)\n\}\n")
+        self.assertRegex(phone, r"\.hero-actions \.btn \{\s*flex:\s*1 1 100%;")
+
+
 class HeroMotionTest(unittest.TestCase):
-    """Движение обложки: «дыхание» медианы со свечением не бесконечное."""
+    """Движение обложки: «дыхание» медианы со свечением не бесконечное; текст, кнопки и полоса проявляются быстро."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -153,41 +267,45 @@ class HeroMotionTest(unittest.TestCase):
         edge = re.search(r"0%, 100% \{\s*opacity:\s*([\d.]+);", frames).group(1)
         self.assertEqual(float(edge), 1.0)
 
-    def test_cover_text_and_search_appear_in_under_a_second(self) -> None:
-        # На 250 мс после загрузки заголовок был почти прозрачным, а поле поиска — невидимым: первая секунда
-        # страницы не показывала ни числа, ни поля. Проявление текста обложки, вместе с полем, — короче секунды.
+    def test_cover_text_buttons_and_strip_appear_in_under_a_second(self) -> None:
+        # Первая секунда страницы показывает заголовок, кнопки и числа, а не пустой тёмный экран: проявление текста
+        # обложки, кнопок и полосы чисел — короче секунды. Пять блоков, пять задержек, и ни одной лишней.
         delays = {name: float(value)
                   for name, value in re.findall(r"\.(d\d) \{ animation-delay: ([\d.]+)s; \}", self.css)}
-        self.assertGreaterEqual(len(delays), 6)
+        self.assertEqual(sorted(delays), ["d1", "d2", "d3", "d4", "d5"])
         duration = float(re.search(r"\.rise \{\s*animation: rise ([\d.]+)s", self.css).group(1))
         self.assertLessEqual(max(delays.values()), 0.3)
         self.assertLess(max(delays.values()) + duration, 1.0)
         template = _read("site/index.template.html")
         used = re.findall(r'class="[^"]*\brise (d\d)\b', template)
-        self.assertGreaterEqual(len(used), 6)
-        self.assertTrue(set(used) <= set(delays), "у блока обложки задержка, которой нет в стилях")
+        self.assertEqual(sorted(used), sorted(delays), "у блока обложки задержка, которой нет в стилях, или наоборот")
 
     def test_reduced_motion_still_switches_the_animation_off(self) -> None:
         block = re.search(r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}\n", self.css, re.S).group(1)
         self.assertRegex(block, r"\.hero-median\s*\{\s*animation:\s*none")
+        self.assertRegex(block, r"\.rise,")
 
 
 class PhoneCoverTest(unittest.TestCase):
-    """Обложка на телефоне: поле «Покажите мой город» — на первом экране вместе со строкой главного числа."""
+    """Обложка на телефоне: заголовок и кнопки — на первом экране, график — иллюстрация следом, числа — ниже."""
 
     @classmethod
     def setUpClass(cls) -> None:
         css = _read("site/landing.css")
         cls.block = re.search(r"@media \(max-width: 639px\) \{(.*?)\n\}", css, re.S).group(1)
 
-    def test_cover_chart_is_short_so_that_the_search_field_is_not_pushed_below_the_first_screen(self) -> None:
-        # Поле стоит после графика, и на 390×844 при графике в двести пикселей оно уходило за нижний край экрана:
-        # видна была одна подпись. График остаётся, но не выше ста шестидесяти пикселей и не ниже, чем он читается.
+    def test_cover_chart_is_short_so_that_the_buttons_are_not_pushed_below_the_first_screen(self) -> None:
+        # Кнопки стоят до графика (порядок разметки), и график на телефоне невысокий: ни выше ста восьмидесяти
+        # пикселей, ни ниже, чем он читается как линии. Он остаётся: иллюстрация обложки не прячется.
         height = re.search(r"\.hero-plot \{\s*height:\s*(\d+)px;", self.block)
         self.assertIsNotNone(height, "у обложки на телефоне нет своей высоты графика")
-        self.assertLessEqual(int(height.group(1)), 160)
+        self.assertLessEqual(int(height.group(1)), 200)
         self.assertGreaterEqual(int(height.group(1)), 120, "график остаётся читаемым")
-        self.assertNotRegex(self.block, r"\.hero-(?:figure|plot)\s*\{[^}]*display:\s*none")
+        self.assertNotRegex(self.block, r"\.hero-plot\s*\{[^}]*display:\s*none")
+
+    def test_buttons_stack_to_the_full_width(self) -> None:
+        # В колонке 280 px (320 px окна) две кнопки рядом не помещаются: они друг под другом, каждая во всю ширину.
+        self.assertRegex(self.block, r"\.hero-actions \.btn \{\s*flex:\s*1 1 100%;")
 
 
 def _rgb(color: str) -> tuple[float, float, float]:
@@ -258,6 +376,19 @@ class ContrastTest(unittest.TestCase):
         rule = re.search(r"\.step:hover \{([^}]*)\}", self.landing).group(1)
         self.assertIn("border-color: var(--ink)", rule)
 
+    def test_cover_strip_and_the_second_button_are_readable_on_the_night_background(self) -> None:
+        # Обложка тёмная в обеих темах: подписи и оговорки полосы чисел, янтарное главное число — не меньше 4,5:1,
+        # рамка второй кнопки («Найти свой город») — граница элемента управления, не меньше 3:1.
+        night = self.tokens["night"]
+        background = night["--bg"]
+        for name, token, minimum in (("подпись", "--ink", 4.5), ("оговорка", "--ink-soft", 4.5),
+                                     ("рамка кнопки", "--field-line", 3.0)):
+            with self.subTest(part=name):
+                self.assertGreaterEqual(_contrast(night[token], background), minimum)
+        self.assertGreaterEqual(_contrast(self.tokens["light"]["--amber"], background), 4.5)
+        # Основная кнопка — янтарная с тёмным текстом ночного блока.
+        self.assertGreaterEqual(_contrast(night["--btn-ink"], night["--btn-bg"]), 4.5)
+
     def test_step_buttons_say_what_they_do(self) -> None:
         template = _read("site/index.template.html")
         hints = re.findall(r'<span class="step-hint" aria-hidden="true">показать →</span>', template)
@@ -307,7 +438,7 @@ class StylesheetCommentsTest(unittest.TestCase):
         page = _read("index.html")
         number = r"\d+(?:\u00a0\d{3})*(?:,\d+)?"
         shown = re.findall(r'<p class="stat-number">(.*?)</p>', page) + re.findall(
-            r'<span class="stat-note stat-note-full">(.*?)</span>', page, re.S)
+            r'<span class="stat-(?:label|note)">(.*?)</span>', page, re.S)
         tokens = {t for text in shown for t in re.findall(number, text)
                   if "," in t or "\u00a0" in t or len(re.sub(r"\D", "", t)) >= 4}
         self.assertGreater(len(tokens), 5, "проверка потеряла числа страницы")
@@ -323,14 +454,15 @@ class StylesheetCommentsTest(unittest.TestCase):
                             f"в комментарии {name} встречается число данных {variant!r}",
                         )
 
-    def test_card_numbers_are_sized_by_the_card_width(self) -> None:
-        # Правило размера описано словами: число занимает долю ширины карточки (cqw) в пределах
-        # от читаемого минимума до размера на широкой карточке.
+    def test_strip_numbers_are_sized_by_the_window_height_and_the_cell_width(self) -> None:
+        # Правило размера описано словами: число — доля высоты окна, но не больше доли ширины ячейки (cqw), в пределах
+        # от читаемого минимума до размера на высоком окне.
         css = _read("site/landing.css")
         block = re.search(r"@supports \(width: 1cqw\) \{(.*?)\n\}", css, re.S).group(1)
-        self.assertRegex(block, r"font-size:\s*clamp\([^)]*\d+cqw[^)]*\)")
+        self.assertRegex(block, r"font-size:\s*clamp\([^;]*\d+cqw[^;]*\)")
         comment = css[: css.index("@supports (width: 1cqw)")].rsplit("/*", 1)[1]
-        self.assertIn("доля ширины карточки", comment)
+        self.assertIn("доля высоты окна", comment)
+        self.assertIn("доли ширины ячейки", comment)
 
 
 class MaterialsTemplateTest(unittest.TestCase):

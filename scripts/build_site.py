@@ -8,14 +8,15 @@
 (`demo/index.html`, `demo/demo.js`, графики) и скрипт главной (`site/landing.js`) —
 рукописные и читают только эти данные.
 
-## Пять чисел главной и фраза об изломах
+## Четыре числа главной и фраза об изломах
 
 Резюме отчёта (`report/report.qmd`) объясняет тот же прогон теми же файлами. Отсюда
 перенесена ЛОГИКА, а не результат: `compute_placeholders` пересчитывает её на текущих
 `results/*.csv`, и при другом прогоне подставит другие, но так же верные числа.
-Помощники форматирования (`rub`, `num`, `on_folds`, `plural`, `and_join`, `in_words`, `in_words_m`)
-и словарь русских названий моделей (`MODEL_LABELS`) — те же самые, что в отчёте
-(`report/report.qmd`, строки 42-102 и 1682-1692), с тем же поведением.
+Помощники форматирования (`rub`, `num`, `plural`, `and_join`, `in_words`) и словарь русских названий
+моделей (`MODEL_LABELS`) — те же самые, что в отчёте (`report/report.qmd`, строки 42-102 и 1682-1692),
+с тем же поведением. Слово «фолд» на сайте не пишется — «окно проверки»: обороты с ним (`on_windows`,
+числа словами в формах «им_с» и «дат») свои у сайта, в отчёте таких нет.
 
 Фраза раздела «Изломы» — пункт резюме отчёта об обнаружении точек структурных изменений
 (`report/report.qmd`, ~строки 545-1060): `changepoint_claim` пересчитывает его условия на
@@ -136,8 +137,8 @@ recommended-модель самого длинного горизонта — tw
               в порядке prophet, naive_last, лучшая основного протокола (summary.csv
               MAE.idxmin()), two_stage — [{id, role, label, note, mae}], mae[i] — MAE
               на горизонте list[i], руб., по horizons_summary.csv (нет — null);
-              notes[i] — пояснение под полосами на горизонте list[i], с числом фолдов этого
-              горизонта (`horizon_folds`).
+              notes[i] — одна фраза под полосами на горизонте list[i], с числом окон проверки
+              этого горизонта словом (`horizon_folds`).
     fact      то же, что demo/data/aggregate.json (одна и та же структура, не пересчёт).
     teaser    {months, items}: три МО из TEASER_MO; items[k] — {id, short, region, fact,
               forecast, known, breaks} теми же значениями, что в demo/data/mo/*.json;
@@ -243,7 +244,7 @@ MEAN_MONTHS = 12
 
 # Наукаст на месячных данных — это горизонт 1 (README, отчёт, configs/horizons.yaml): внутри
 # месяца данных нет, поэтому месяц t прогнозируется по данным до t−1. Год вперёд — горизонт 12,
-# как в `compute_placeholders` (`h12_*`): подпись «Год» на переключателе и оговорка об одном фолде.
+# как в `compute_placeholders` (`h12_*`): подпись «Год» на переключателе и оговорка об одном окне проверки.
 NOWCAST_HORIZON = 1
 YEAR_HORIZON = 12
 
@@ -293,11 +294,15 @@ AGGREGATE_MODEL_LABELS = {
 # значением — отсюда копия функций, а не собственный форматтер.
 # ---------------------------------------------------------------------------
 
+# Окна проверки по номеру (с нуля), предложный падеж: «в первом окне». Номер, которого здесь нет, называется цифрой.
 _ORDINAL = {0: "первом", 1: "втором", 2: "третьем"}
-# Формы числа словом — как в отчёте (`report.qmd::_NUMBER_WORDS`), те, что нужны страницам: «один фолд»,
-# «три независимых шока» (им_м) и «трёхмесячных» (род).
+# Формы числа словом — как в отчёте (`report.qmd::_NUMBER_WORDS`), те, что нужны страницам: «три независимых
+# шока» (им_м) и «трёхмесячных» (род). Две формы — только у сайта, в отчёте таких оборотов нет: «одно окно
+# проверки» (им_с) и «по одному окну проверки» (дат).
 _NUMBER_WORDS = {
     "им_м": ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять"],
+    "им_с": ["ноль", "одно", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять"],
+    "дат": ["нулю", "одному", "двум", "трём", "четырём", "пяти", "шести", "семи", "восьми", "девяти", "десяти"],
     "род": ["нуля", "одного", "двух", "трёх", "четырёх", "пяти", "шести", "семи", "восьми", "девяти", "десяти"],
 }
 MONTH_OF = ["января", "февраля", "марта", "апреля", "мая", "июня",
@@ -323,13 +328,26 @@ def num(value: float, digits: int, sign: bool = False) -> str:
     return text.replace(",", " ").replace(".", ",").replace("-", "−")
 
 
-def on_folds(k: int, n: int) -> str:
-    """«на 2 фолдах из 3»; «все» и «ни одного» — словами (`report.qmd::on_folds`)."""
+def on_windows(k: int, n: int) -> str:
+    """«в 2 окнах проверки из 3»; «все» и «ни одного» — словами. Тот же оборот, что у отчёта в `on_folds`
+    («на 2 фолдах из 3»), но с окном проверки: слова «фолд» на сайте нет."""
     if k == 0:
-        return "ни на одном фолде"
+        return "ни в одном окне проверки"
     if k == n:
-        return "на всех фолдах"
-    return f"на {k} {'фолде' if k == 1 else 'фолдах'} из {n}"
+        return "во всех окнах проверки"
+    return f"в {k} {plural(k, 'окне', 'окнах', 'окнах')} проверки из {n}"
+
+
+def windows_lost_sentence(lost: list[int], shortest: int) -> str:
+    """Где эталон точнее лучшей модели, по номерам окон проверки (с нуля): «В первом окне, с самой короткой
+    историей, эталон точнее.», «Во втором и третьем окнах эталон точнее.»; `shortest` — окно с самой короткой
+    историей обучения, его называют, только если оно единственное. Таких окон нет — пустая строка."""
+    if not lost:
+        return ""
+    ordinals = [_ORDINAL.get(f, f"{f + 1}-м") for f in lost]
+    preposition = "Во" if ordinals[0].startswith("вт") else "В"
+    return (f"{preposition} {and_join(ordinals)} {'окне' if len(ordinals) == 1 else 'окнах'}"
+            + (", с самой короткой историей," if lost == [shortest] else "") + " эталон точнее.")
 
 
 def plural(n: int, one: str, few: str, many: str) -> str:
@@ -350,13 +368,8 @@ def and_join(items) -> str:
 
 def in_words(n: int, form: str) -> str:
     """Малое число в прозе — словом: «три независимых шока», «трёх» (`report.qmd::in_words`, формы «им_м» и
-    «род»); от одиннадцати — цифрами."""
+    «род»), «одно окно», «по одному» (формы «им_с» и «дат» — только у сайта); от одиннадцати — цифрами."""
     return _NUMBER_WORDS[form][n] if 0 <= n <= 10 else str(n)
-
-
-def in_words_m(n: int) -> str:
-    """Малое число мужского рода словом: «один фолд» (`report.qmd::in_words`, форма «им_м»)."""
-    return in_words(n, "им_м")
 
 
 def _date_words(value: dt.date) -> str:
@@ -410,7 +423,7 @@ def _load_penalty() -> float:
 
 
 # ---------------------------------------------------------------------------
-# Пять чисел главной
+# Четыре числа главной
 # ---------------------------------------------------------------------------
 
 
@@ -422,48 +435,39 @@ def compute_placeholders(
     """Считает все подстановки `${имя}` шаблона `site/index.template.html`.
 
     Текст главной живёт в шаблоне, а каждое число в нём — одна из этих
-    подстановок; вписанных руками чисел в шаблоне нет. Пять чисел — те же, что
-    в резюме отчёта: главное число, наукаст, год вперёд, проверка агрегата, панель.
+    подстановок; вписанных руками чисел в шаблоне нет, ни цифрами, ни словами. Четыре числа полосы
+    на обложке — те же, что в резюме отчёта: главное число, наукаст, год вперёд, проверка агрегата;
+    у каждого под подписью одна строка оговорки.
 
     - ``built`` — дата сборки словами, «29 сентября 2026».
-    - ``default_mo`` — МО, на котором открывается страница прогноза по муниципалитету без выбора:
-      пустой запрос в поле обложки ведёт именно на него (`DEFAULT_MO`).
     - ``report_pdf_size`` / ``slides_pdf_size`` / ``forecast_size`` — размеры PDF отчёта, PDF слайдов
       и архива `results/forecast_2025.csv.gz` в подписях карточек материалов, «2,4 МБ» (`file_size_label`).
-    - ``horizon_main`` — горизонт основного протокола, мес. (`configs/full.yaml::split.horizon`).
+    - ``horizon_main_months`` — горизонт основного протокола с единицей, «3 месяца»
+      (`configs/full.yaml::split.horizon`).
     - ``forecast_year`` — год прогноза вперёд, `origin.year + 1` (`configs/forecast_forward.yaml::origin`).
-    - ``prophet_mae`` / ``best_mae`` — MAE эталона (Prophet) и лучшей модели на этом горизонте, ₽.
     - ``best_gain`` — выигрыш лучшей модели к эталону, %, без знака (главное число;
       `_rs["gain"]` отчёта).
-    - ``r2_prophet`` / ``r2_best`` — R² пул эталона и лучшей модели там же.
-    - ``folds_caveat`` — оговорка о фолдах целиком: «(Но )?выигрыш держится на N
-      фолдах из M[: на таком-то эталон точнее]».
+    - ``windows_held`` — оговорка к главному числу: «держится в 2 окнах проверки из 3»; окно проверки —
+      то, что отчёт называет фолдом.
+    - ``windows_lost`` — какие окна эталон выиграл: «В первом окне, с самой короткой историей, эталон
+      точнее.»; пусто, если выигрыш держится во всех окнах. Стоит в пояснении основного горизонта.
     - ``h1_best`` / ``h1_prophet`` / ``h1_gain`` — то же для наукаста, горизонт 1;
       «—», если лучшая модель основного протокола не входит в `configs/horizons.yaml`.
-    - ``h12_gain_naive`` / ``h12_gain_prophet`` — выигрыш лучшей модели года вперёд
-      (горизонт 12, без оракула) к наивной и к эталону, %. Лучшая выбирается минимумом
-      MAE среди моделей, где есть обе, поэтому оба выигрыша не отрицательны.
-    - ``h12_model`` — эта модель: «двухэтапная» или «название» из `MODEL_LABELS`.
-    - ``h12_folds_caveat`` — «, но это один фолд» (число фолдов словом), если у неё
-      зачтено меньше трёх фолдов, иначе пусто: хвост фразы, как в `_rs["h12"]` отчёта.
+    - ``h12_gain_prophet`` — выигрыш лучшей модели года вперёд (горизонт 12, без оракула) к эталону,
+      %. Лучшая выбирается минимумом MAE среди моделей, где есть и наивная, и эталон, поэтому выигрыш
+      не отрицателен.
+    - ``h12_windows`` — сколько окон проверки у этой модели, словом: «одно окно проверки». Столько окон,
+      сколько допускают 24 точки: без их числа процент выигрыша читался бы как устойчивый (та же
+      оговорка, что в резюме отчёта: «но это один фолд»).
     - ``agg_own_pct`` / ``agg_rules_pct`` — ошибка первого этапа двухэтапной модели
       и простых правил, % (диапазон по горизонтам проверки, схлопывается в одно
       число, если границы совпадают после округления).
-    - ``agg_rules`` — названия простых правил из файла проверки, в кавычках и через «и»:
-      `«как в декабре» и «как год назад»`.
-    - ``agg_horizon_range`` — горизонты проверки, «1–12».
     - ``agg_origin_label`` — месяц и год origin словами, «декабря 2024».
-    - ``n_series_rub`` / ``n_months`` — рядов и месяцев панели, из формы матрицы
-      `build_matrix` (`configs/forecast_forward.yaml::data`).
-    - ``panel_shape`` — «N рядов × M месяцев» целиком, слова — через `plural`.
-    - ``panel_span`` — первый и последний месяц панели словами, «январь 2023 — декабрь 2024».
-    - ``folds_short`` — та же оговорка о фолдах одним оборотом, «на 2 фолдах из 3»: для узких
-      экранов, где подпись числа сокращена, и для строки с главным числом на обложке.
-    - ``fold_months`` — длина проверочного окна одного фолда основного протокола, мес.
-      (`index.json::folds`): словарь под карточками объясняет «фолд» этим числом.
+    - ``n_series_rub`` — число рядов панели, из формы матрицы `build_matrix`
+      (`configs/forecast_forward.yaml::data`).
     - ``sample_label`` — «30 случайных муниципалитетов»: выборка обложки с согласованными формами.
     - ``spread_share`` / ``spread_pct`` — не менее чем у `spread_share`% значений по всей панели
-      отклонение от общего движения (медианы по рядам) не больше `spread_pct`%: подпись третьего
+      отклонение от общего движения (медианы по рядам) не больше `spread_pct`%: строка третьего
       шага «Почему это прогноз одного числа». Доля — константа `STORY_SPREAD_SHARE`, ширина полосы —
       её процентиль отклонений, округлённый вверх. Считается на всей матрице, а не на 30
       нарисованных рядах.
@@ -483,47 +487,32 @@ def compute_placeholders(
     origin = pd.Period(forward_cfg["origin"], "M")
     # Год прогноза — origin (декабрь) + 1: настройка forecast_forward.yaml всегда
     # прогнозирует от конца года на следующий целиком, поэтому «год вперёд» — один
-    # календарный год, а не только это число фолдов.
+    # календарный год, а не только это число окон проверки.
     forecast_year = origin.year + 1
 
     placeholders: dict[str, str] = {
         "built": _date_words(today),
-        "default_mo": DEFAULT_MO,
         "report_pdf_size": file_size_label(ROOT / "report" / "report.pdf"),
         "slides_pdf_size": file_size_label(ROOT / "report" / "slides.pdf"),
         "forecast_size": file_size_label(ROOT / "results" / "forecast_2025.csv.gz"),
-        "horizon_main": str(horizon_main),
+        "horizon_main_months": f"{horizon_main} {plural(horizon_main, 'месяц', 'месяца', 'месяцев')}",
         "forecast_year": str(forecast_year),
-        "prophet_mae": rub(summary.loc["prophet", "MAE"]),
-        "best_mae": rub(summary.loc[top, "MAE"]),
         # Выигрыш без знака, как `_rs["gain"]` отчёта: на странице число стоит перед словом
         # «точнее», и минус изменения MAE с ним бы спорил. top — минимум MAE сводки, где есть
         # и эталон, так что выигрыш не бывает отрицательным.
         "best_gain": num(summary.loc[top, "к Prophet, %"], 1),
-        "r2_prophet": num(summary.loc["prophet", "R² пул"], 3),
-        "r2_best": num(summary.loc[top, "R² пул"], 3),
     }
 
-    # Оговорка о фолдах: держится ли выигрыш из summary.csv и на каком фолде, если
+    # Оговорка к главному числу: держится ли выигрыш из summary.csv и в каком окне проверки, если
     # нет, — эталон точнее (report.qmd::_rs["won_short"], логика _vs_lost/_won_mae).
     fold_mae = (ok[ok["model"].isin([top, "prophet"])]
                 .groupby(["fold", "model"])["mae"].mean().unstack())
     r2_folds = list(fold_mae.index)
     won_mae = [f for f in r2_folds if fold_mae.loc[f, top] < fold_mae.loc[f, "prophet"]]
     vs_lost = [f for f in r2_folds if fold_mae.loc[f, top] > fold_mae.loc[f, "prophet"]]
-    vs_first = len(vs_lost) == 1 and vs_lost[0] == min(r2_folds)
-    lead = "Но выигрыш держится " if vs_lost else "Выигрыш держится "
-    # Окно проверки фолда — те же границы, что в index.json::folds (`src.split.rolling_origin`).
-    first_fold = rolling_origin(len(wide), horizon_main, int(full_cfg["split"]["n_folds"]))[0]
-    placeholders["fold_months"] = str(first_fold.test_end - first_fold.test_start)
-    placeholders["folds_short"] = on_folds(len(won_mae), len(r2_folds))
-    placeholders["folds_caveat"] = (
-        lead + on_folds(len(won_mae), len(r2_folds))
-        + (f": на {and_join(_ORDINAL.get(f, str(f)) for f in vs_lost)}"
-           + (", с самой короткой историей," if vs_first else "") + " эталон точнее"
-           if vs_lost else "")
-        + "."
-    )
+    placeholders["windows_held"] = (
+        ("" if won_mae else "не ") + "держится " + on_windows(len(won_mae), len(r2_folds)))
+    placeholders["windows_lost"] = windows_lost_sentence(vs_lost, min(r2_folds))
 
     # Наукаст — горизонт 1 по требованию организаторов (configs/horizons.yaml), не
     # результат прогона: как и в отчёте, число горизонта здесь не выведено из файла.
@@ -535,61 +524,37 @@ def compute_placeholders(
     else:
         placeholders["h1_best"] = placeholders["h1_prophet"] = placeholders["h1_gain"] = "—"
 
-    # Год вперёд — горизонт 12, без оракула two_stage_known (report.qmd::_rs["h12"]). На странице
-    # у числа одна подпись, и оговорка о фолдах — в ней же, поэтому сюда идут части фразы
-    # отчёта, а не она целиком: модель и хвост «, но это один фолд».
+    # Год вперёд — горизонт 12, без оракула two_stage_known (report.qmd::_rs["h12"]). У числа одна
+    # строка оговорки — сколько окон проверки за ним стоит.
     year = horizons_summary[
         (horizons_summary["horizon"] == 12) & horizons_summary["MAE"].notna()
         & (horizons_summary["model"] != "two_stage_known")
     ].set_index("model")
     if len(year) and {"naive_last", "prophet"} <= set(year.index):
         year_top = year["MAE"].idxmin()
-        placeholders["h12_gain_naive"] = num(year.loc[year_top, "к наивной, %"], 0)
         placeholders["h12_gain_prophet"] = num(year.loc[year_top, "к Prophet, %"], 0)
-        placeholders["h12_model"] = ("двухэтапная" if year_top == "two_stage"
-                                     else f"«{MODEL_LABELS.get(year_top, year_top)}»")
-        # Столько фолдов, сколько допускают 24 точки: без их числа процент выигрыша
-        # читался бы как устойчивый (та же оговорка, что в резюме отчёта).
         n_folds_top = int(horizons_folds.loc[
             (horizons_folds["horizon"] == 12) & (horizons_folds["model"] == year_top), "MAE"
         ].notna().sum())
-        placeholders["h12_folds_caveat"] = (
-            f", но это {in_words_m(n_folds_top)} {plural(n_folds_top, 'фолд', 'фолда', 'фолдов')}"
-            if 0 < n_folds_top < 3 else ""
-        )
+        placeholders["h12_windows"] = (
+            f"{in_words(n_folds_top, 'им_с')} {plural(n_folds_top, 'окно', 'окна', 'окон')} проверки")
     else:
-        placeholders["h12_gain_naive"] = placeholders["h12_gain_prophet"] = "—"
-        placeholders["h12_model"] = "—"
-        placeholders["h12_folds_caveat"] = ""
+        placeholders["h12_gain_prophet"] = "—"
+        placeholders["h12_windows"] = ""
 
     # Проверка первого этапа по факту 2025 года (report.qmd::_rs["agg"]).
     agg_mape = agg_check.assign(e=agg_check["error_pct"].abs()).groupby(["method", "horizon"])["e"].mean()
     agg_own, agg_rules = agg_mape.loc["two_stage"], agg_mape.drop(index="two_stage")
-    agg_names = (agg_check.loc[agg_check["method"] != "two_stage"]
-                 .drop_duplicates("method")["aggregate_model"].tolist())
-    agg_hs = sorted(int(h) for h in agg_check["horizon"].unique())
 
     def _range(lo: float, hi: float) -> str:
         return num(lo, 1) if num(lo, 1) == num(hi, 1) else f"{num(lo, 1)}–{num(hi, 1)}"
 
     placeholders["agg_own_pct"] = _range(agg_own.min(), agg_own.max())
     placeholders["agg_rules_pct"] = _range(agg_rules.min(), agg_rules.max())
-    placeholders["agg_rules"] = and_join(f"«{name}»" for name in agg_names)
-    placeholders["agg_horizon_range"] = f"{agg_hs[0]}–{agg_hs[-1]}"
     placeholders["agg_origin_label"] = f"{MONTH_OF[origin.month - 1]} {origin.year}"
 
     # Панель — форма матрицы, а не результат прогона.
-    n_series, n_months = wide.shape[1], wide.shape[0]
-    placeholders["n_series_rub"] = rub(n_series)
-    placeholders["n_months"] = str(n_months)
-    placeholders["panel_shape"] = (
-        f"{rub(n_series)} {plural(n_series, 'ряд', 'ряда', 'рядов')} × "
-        f"{n_months} {plural(n_months, 'месяц', 'месяца', 'месяцев')}"
-    )
-    start, end = wide.index[0], wide.index[-1]
-    placeholders["panel_span"] = (
-        f"{MONTH_NOM[start.month - 1]} {start.year} — {MONTH_NOM[end.month - 1]} {end.year}"
-    )
+    placeholders["n_series_rub"] = rub(wide.shape[1])
 
     placeholders["sample_label"] = (
         f"{LANDING_SAMPLE_SIZE} "
@@ -1420,10 +1385,10 @@ def recommended_note(forecast_rule) -> str:
 
 
 def horizon_folds(horizons_cfg: dict, horizons_summary: pd.DataFrame) -> dict[int, int]:
-    """Число фолдов протокола на каждом горизонте: колонка «фолдов» `horizons_summary.csv`,
+    """Число окон проверки (фолдов протокола) на каждом горизонте: колонка «фолдов» `horizons_summary.csv`,
     сверенная с `n_folds` из `configs/horizons.yaml`.
 
-    Число стоит в пояснении каждого горизонта: средняя по двум фолдам и по девяти — разные
+    Число стоит в строке под полосами каждого горизонта: средняя по двум окнам и по девяти — разные
     по весу утверждения. Файл результатов и конфиг, разошедшиеся в этом числе, — признак
     прогона не с тем конфигом, и сборка падает, а не выбирает одно из двух."""
     counts = horizons_summary.groupby("horizon")["фолдов"].agg(["min", "max"])
@@ -1449,7 +1414,7 @@ def build_horizons(
     Порядок — как в докстринге модуля; модель в двух ролях сразу входит одной строкой
     (роли через «+»), как в `_build_model_roles`. Название и пояснение — из `model_names`, тех же,
     что у таблицы ошибок страницы прогноза по муниципалитету. На годовом горизонте у лучшей по
-    среднему панельной модели MAE нет — ей не хватает истории; об этом говорит подпись горизонта."""
+    среднему панельной модели MAE нет — ей не хватает истории; об этом говорит строка под полосами."""
     horizons = sorted({int(item["horizon"]) for item in horizons_cfg["horizons"]})
     best = summary["MAE"].idxmin()
     roles_by_model: dict[str, list[str]] = {}
@@ -1473,38 +1438,25 @@ def build_horizons(
             "mae": [mae_at(h, model_id) for h in horizons],
         })
 
-    best_label = next(m["label"] for m in models if "best_mean" in m["role"].split("+"))
     horizon_main = int(full_cfg["split"]["horizon"])
     folds = horizon_folds(horizons_cfg, horizons_summary)
     notes = []
     for i, horizon in enumerate(horizons):
+        count = folds[horizon]
         sentences = []
         if horizon == NOWCAST_HORIZON:
             sentences.append("Наукаст — прогноз текущего месяца, пока его данных ещё нет.")
-        elif any(m["mae"][i] is None for m in models):
+        # Число окон проверки — в каждой фразе: полоса «лучшая» по среднему, а на горизонте с двумя окнами и
+        # с одним порядок моделей по окнам может быть другим.
+        sentences.append(
+            f"Средняя ошибка, ₽ на человека в месяц, по {in_words(count, 'дат')} "
+            f"{plural(count, 'окну', 'окнам', 'окнам')} проверки.")
+        # Где эталон выигрывает окно, читатель видит у основного горизонта, открытого по умолчанию: рядом
+        # с полосами, а не только в строке главного числа.
+        if horizon == horizon_main and horizon != NOWCAST_HORIZON and placeholders["windows_lost"]:
+            sentences.append(placeholders["windows_lost"])
+        if any(m["mae"][i] is None for m in models):
             sentences.append("Где полосы нет, модель не удалось обучить: на этом горизонте истории не хватает.")
-        elif horizon == horizon_main:
-            sentences.append("Средняя абсолютная ошибка по фолдам, ₽ на человека в месяц.")
-        else:
-            sentences.append("Средняя абсолютная ошибка по фолдам скользящего origin, ₽ на человека в месяц.")
-        # Основной горизонт открыт по умолчанию: его подпись читатель видит первой, и в ней — слова, которых
-        # дальше не объясняют: фолд (проверочное окно) и скользящий origin.
-        if horizon == horizon_main and horizon != NOWCAST_HORIZON:
-            sentences.append(
-                f"Фолд — проверочное окно в {horizon} мес.: модель учится на месяцах до него и прогнозирует его. "
-                "Origin — месяц, от которого строится прогноз; от фолда к фолду он сдвигается вперёд "
-                "(скользящий origin)."
-            )
-        # Число фолдов — сразу за описанием горизонта: полоса «лучшая» по среднему, а на горизонтах
-        # с двумя фолдами и одним порядок моделей по фолдам может быть другим.
-        sentences.append(f"Фолдов: {folds[horizon]}.")
-        if horizon == NOWCAST_HORIZON and placeholders["h1_gain"] != "—":
-            sentences.append(f"{best_label} точнее эталона на {placeholders['h1_gain']}%.")
-        if horizon == horizon_main and horizon != NOWCAST_HORIZON:
-            sentences.append(f"{best_label} точнее эталона на {placeholders['best_gain']}%.")
-            sentences.append(placeholders["folds_caveat"])
-        if horizon == YEAR_HORIZON and placeholders["h12_model"] != "—":
-            sentences.append(f"Лучшая — {placeholders['h12_model']}{placeholders['h12_folds_caveat']}.")
         notes.append(" ".join(sentences))
 
     return {

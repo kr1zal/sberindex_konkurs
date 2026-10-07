@@ -1,10 +1,9 @@
 """Чистые помощники главной (`site/landing-lib.js`): их запускает node, страница не нужна.
 
 Файл не обращается к `document` и `window`, поэтому грузится так же, как раскладка подписей
-стенда: код читается в пустом контексте, а наружу выходит объект `LandingLib`. Проверяется то,
+страницы прогноза: код читается в пустом контексте, а наружу выходит объект `LandingLib`. Проверяется то,
 что на странице видно глазами и что раньше ломалось незаметно: подписи оси при смене шкалы,
-итоговый текст счёта чисел, ранжирование поиска, кнопка «Открыть прогноз», ширина истории на
-узком графике. Без node проверки пропускаются.
+итоговый текст счёта чисел, ширина истории на узком графике. Без node проверки пропускаются.
 """
 from __future__ import annotations
 
@@ -17,7 +16,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LIB = ROOT / "site" / "landing-lib.js"
-INDEX_JSON = ROOT / "demo" / "data" / "index.json"
 
 NBSP = " "
 
@@ -163,140 +161,6 @@ class CountedTextTest(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "для помощников главной нужен node")
-class SearchRankingTest(unittest.TestCase):
-    """Поиск на обложке: тот же порядок подсказок, что на стенде, и кнопка по набранному запросу."""
-
-    ROWS = [
-        ["внутригородская территория города федерального значения муниципальный округ Горелово",
-         "Санкт-Петербург", None, 0],
-        ["городской округ город Орёл", "Орловская область", None, 1],
-        ["Орловский муниципальный округ", "Орловская область", None, 1],
-        ["городской округ город Казань", "Республика Татарстан", None, 2],
-        ["Михайловский муниципальный район #1", None, None, 3],
-        ["Михайловский муниципальный район #2", None, None, 3],
-    ]
-
-    def ranked(self, query: str, limit: int = 10) -> list[str]:
-        got = run_lib(
-            "const rows = lib.rowsFromIndex(input[0]); return lib.searchRows(rows, input[1], input[2]).matches.map((r) => r.id);",
-            [self.ROWS, query, limit],
-        )
-        return got
-
-    def test_every_word_of_the_query_starting_a_name_word_beats_a_plain_inclusion(self) -> None:
-        # «орел» внутри слова «Горелово» совпадало по алфавиту раньше, чем сам Орёл.
-        got = self.ranked("город орёл")
-        self.assertEqual(got[0], "городской округ город Орёл")
-        self.assertIn("внутригородская территория города федерального значения муниципальный округ Горелово", got)
-        self.assertLess(got.index("городской округ город Орёл"), got.index(self.ROWS[0][0]))
-
-    def test_tiers_name_start_then_word_start_then_inclusion(self) -> None:
-        # «город»: названия, которые им начинаются, — первыми; затем название со словом «города»;
-        # внутри яруса — по алфавиту.
-        self.assertEqual(
-            self.ranked("город"),
-            ["городской округ город Казань", "городской округ город Орёл", self.ROWS[0][0]],
-        )
-        # «орёл»: слово «Орёл» начинается с запроса, «Горелово» — только содержит его.
-        self.assertEqual(self.ranked("орёл"), ["городской округ город Орёл", self.ROWS[0][0]])
-        self.assertEqual(self.ranked("михайловский"),
-                         ["Михайловский муниципальный район #1", "Михайловский муниципальный район #2"])
-        self.assertEqual(self.ranked("городской округ город орёл"), ["городской округ город Орёл"])
-
-    def test_region_words_and_case_and_yo(self) -> None:
-        self.assertEqual(self.ranked("КАЗАНЬ татарстан"), ["городской округ город Казань"])
-        self.assertEqual(self.ranked("  орел  "), self.ranked("Орёл"))
-
-    def test_empty_and_unknown_queries_find_nothing(self) -> None:
-        self.assertEqual(self.ranked(""), [])
-        self.assertEqual(self.ranked("   "), [])
-        self.assertEqual(self.ranked("ъъъъ"), [])
-
-    def test_fewer_extra_letters_go_first_inside_a_tier(self) -> None:
-        # «бе»: оба названия начинаются с запроса; по алфавиту Белозерский раньше Бердска, а по числу
-        # букв сверх набранного — Бердск (шесть букв) раньше Белозерского (одиннадцать).
-        rows = [["Белозерский муниципальный район", "Вологодская область", None, 0],
-                ["Бердск городской округ", "Новосибирская область", None, 1]]
-        got = run_lib(
-            "const rows = lib.rowsFromIndex(input); return lib.searchRows(rows, 'бе', 5).matches.map((r) => r.id);",
-            rows,
-        )
-        self.assertEqual(got, ["Бердск городской округ", "Белозерский муниципальный район"])
-
-    def test_quick_rows_go_before_every_tier(self) -> None:
-        # Город быстрого выбора — выше названия, начинающегося с запроса, хотя сам он во втором ярусе:
-        # «казан» с Enter открывал «Казанский муниципальный район» Тюменской области, а не Казань.
-        rows = [["Казанский муниципальный район", "Тюменская область", None, 0],
-                ["городской округ город Казань", "Республика Татарстан", None, 1],
-                ["Казачинский муниципальный район", "Красноярский край", None, 2]]
-        script = ("const rows = lib.rowsFromIndex(input.rows, input.quick);"
-                  "return lib.searchRows(rows, input.query, 5).matches.map((r) => r.id);")
-        quick = [{"id": "городской округ город Казань", "short": "Казань"}]
-        self.assertEqual(
-            run_lib(script, {"rows": rows, "quick": quick, "query": "каз"}),
-            ["городской округ город Казань", "Казанский муниципальный район", "Казачинский муниципальный район"],
-        )
-        # Без быстрого выбора порядок прежний по ярусам: названия, начинающиеся с запроса, раньше Казани.
-        self.assertEqual(
-            run_lib(script, {"rows": rows, "quick": None, "query": "каз"}),
-            ["Казанский муниципальный район", "Казачинский муниципальный район", "городской округ город Казань"],
-        )
-        # Быстрый выбор не вытаскивает ряд, который под запрос не подходит.
-        self.assertEqual(run_lib(script, {"rows": rows, "quick": quick, "query": "казачин"}),
-                         ["Казачинский муниципальный район"])
-
-    def test_region_label_distinguishes_rows_without_a_region_by_the_mean_with_its_unit_and_period(self) -> None:
-        # Число стоит с единицей и периодом, которые пишет генератор (`mean_unit`): «24,3» без «на человека»
-        # читалось бы как расходы всего района. Слов о периоде скрипт не держит — что передали, то и показывает.
-        rows = [["городской округ город Орёл", "Орловская область", None, 1],
-                ["Михайловский муниципальный район #1", None, None, 3, "23,7"],
-                ["Ардатовский муниципальный район", None, None, 3]]
-        unit = f"тыс.{NBSP}₽ на человека в{NBSP}месяц за{NBSP}2024 год"
-        script = ("const rows = lib.rowsFromIndex(input.rows, null, input.unit);"
-                  "return rows.map((row) => lib.regionLabel(row));")
-        self.assertEqual(run_lib(script, {"rows": rows, "unit": unit}), [
-            "Орловская область",
-            f"регион не определён · 23,7{NBSP}{unit}",
-            "регион не определён",
-        ])
-        # Другой период в данных — другая подпись: слов скрипт не вписывает.
-        other = f"тыс.{NBSP}₽ на человека в{NBSP}месяц за{NBSP}последние 12 месяцев панели"
-        self.assertEqual(run_lib(script, {"rows": rows, "unit": other})[1], f"регион не определён · 23,7{NBSP}{other}")
-        # Без единицы числа без пояснения не показывают.
-        self.assertEqual(run_lib(script, {"rows": rows, "unit": None})[1], "регион не определён")
-
-    def test_ranking_on_the_real_series_list(self) -> None:
-        got = run_lib(
-            "const index = JSON.parse(require('fs').readFileSync(input.path, 'utf8'));"
-            "const rows = lib.rowsFromIndex(index.series);"
-            "return {orel: lib.searchRows(rows, 'город орёл', 3).matches.map((r) => r.id),"
-            " kazan: lib.searchRows(rows, 'казань', 3).matches.map((r) => r.id), n: rows.length};",
-            {"path": str(INDEX_JSON)},
-        )
-        self.assertEqual(got["orel"][0], "городской округ город Орёл")
-        self.assertEqual(got["kazan"], ["городской округ город Казань"])
-        self.assertGreater(got["n"], 1000)
-
-    def test_open_button_goes_where_the_typed_query_points(self) -> None:
-        script = (
-            "const rows = lib.rowsFromIndex(input.rows);"
-            "const pick = (query, highlighted) => { const t = lib.pickTarget(rows, query, highlighted);"
-            " return t && t.id; };"
-            "return {typed: pick('казань', null), highlighted: pick('казань', rows[1]), empty: pick('', null),"
-            " blank: pick('   ', null), none: pick('ъъъъ', null), loading: lib.pickTarget(null, 'казань', null),"
-            " highlightedWhileLoading: lib.pickTarget(null, 'казань', rows[2]).id};"
-        )
-        got = run_lib(script, {"rows": self.ROWS})
-        self.assertEqual(got["typed"], "городской округ город Казань")
-        self.assertEqual(got["highlighted"], self.ROWS[1][0])
-        self.assertIsNone(got["empty"])
-        self.assertIsNone(got["blank"])
-        self.assertIsNone(got["none"])
-        self.assertIsNone(got["loading"])
-        self.assertEqual(got["highlightedWhileLoading"], self.ROWS[2][0])
-
-
-@unittest.skipUnless(shutil.which("node"), "для помощников главной нужен node")
 class HistoryKeepTest(unittest.TestCase):
     """График проверки фактом: на узком экране история короче, чтобы кружки месяцев проверки
     не наползали друг на друга."""
@@ -328,6 +192,20 @@ class HistoryKeepTest(unittest.TestCase):
 
     def test_wide_graph_keeps_everything_and_unknown_width_does_not_cut(self) -> None:
         self.assertEqual(self.keep([2000, 0]), [self.HISTORY, self.HISTORY])
+
+
+@unittest.skipUnless(shutil.which("node"), "для помощников главной нужен node")
+class LibraryExportsTest(unittest.TestCase):
+    def test_every_exported_helper_is_taken_by_the_page_script_or_is_internal(self) -> None:
+        # Помощник, который страница не берёт, — мёртвый код: поле поиска обложки удалено вместе со своими
+        # помощниками (ранжирование, подписи региона, кнопка по запросу), и новые лишние сюда не попадут.
+        exported = set(run_lib("return Object.keys(lib);"))
+        landing = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        taken = {name.strip() for name in re.search(r"const \{(.*?)\} = LandingLib;", landing, re.S).group(1).split(",")
+                 if name.strip()}
+        internal = {"groupDigits", "stepDecimals"}  # их зовут другие помощники и тесты, страница — нет
+        self.assertEqual(exported - internal, taken)
+        self.assertLessEqual(internal, exported)
 
 
 class LibraryFileTest(unittest.TestCase):
