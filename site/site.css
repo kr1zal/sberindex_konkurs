@@ -1,41 +1,199 @@
-/* Общая тема страницы входа и демонстрационного стенда (стенд подключает этот же файл).
-   Без внешних шрифтов и CDN — только системный стек. Сдержанно, как научный отчёт:
-   без градиентов, теней-«карточек» на всё, иконок и анимаций.
+/* Общая тема сайта: главная и стенд (стенд подключает этот же файл).
+   Здесь — шрифты, токены, базовая типографика и компоненты, которые нужны больше чем
+   одной странице. Раскладка и графики главной — в landing.css.
 
-   Переменные названы по ролям, а не по конкретному цвету: стенд добавит к ним цвета
-   графиков (SERIES[1], SERIES[2] из src/charts.py), не трогая эти. Светлая тема —
-   цвета отчёта (src/charts.py: INK, INK_SOFT, GRID, SURFACE, акцент SERIES[0]);
-   тёмная — те же роли, подобранные под контраст WCAG AA. */
+   Без внешних шрифтов и CDN: woff2 лежат в site/fonts/ вместе с текстами лицензий OFL.
+   Подмножества только кириллица и латиница, поэтому знаки вне них («₽», «→») браузер
+   берёт из системных шрифтов — стеки ниже оканчиваются системными гарнитурами.
+
+   Токены названы по ролям, а не по цвету. Светлая тема — основная; тёмная включается
+   по prefers-color-scheme. Обложка, подвал и блок стенда на главной тёмные в обеих
+   темах: им нужен класс .night — он переопределяет те же токены на ночные значения,
+   и компоненты внутри (кнопки, чипы, поле поиска) не знают, на каком они фоне. */
+
+/* -- шрифты ------------------------------------------------------------------ */
+
+@font-face {
+  font-family: "Unbounded";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/unbounded-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "Unbounded";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/unbounded-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Onest";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("fonts/onest-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "Onest";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("fonts/onest-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* -- токены ------------------------------------------------------------------ */
 
 :root {
-  --bg: #fcfcfb;
+  --font-text: "Onest", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Unbounded шире текстовых гарнитур: запасной стек — Onest, а не системный
+     гротеск, чтобы при задержке файла заголовок не менял строку так резко. */
+  --font-display: "Unbounded", "Onest", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* Ночные поверхности — одни и те же в обеих темах. */
+  --night: #0b1020;
+  --night-surface: #121a30;
+  --night-rule: #243050;
+  /* Рамка поля и чипов на ночном фоне: около 3,5:1, как у границы элемента управления. */
+  --night-line: #5a6a96;
+  --night-ink: #eef2fa;
+  --night-ink-2: #c9d2e6;
+  --night-ink-3: #b5c0d6;
+  --night-soft: #9aa6bf;
+  --night-dim: #8591ab;
+  --amber: #ffb547;
+  --amber-hover: #ffc76b;
+
+  /* Светлая тема. */
+  --bg: #f5f6f8;
   --surface: #ffffff;
-  --surface-card: #ffffff; /* подложка под SVG схемы метода — у него тёмный текст на прозрачном фоне */
-  --ink: #0b0b0b;
-  --ink-soft: #52514e;
-  --rule: #e3e2de;
-  /* Акцент текста и кнопок — темнее, чем акцент отчёта (#2a78d6, 4,30:1 к фону, 4,42:1
-     белого текста на нём): оба ниже порога AA для текста 4,5:1. #1f6bc4 — около 5,2:1.
-     Линия прогноза графика — свой var(--chart-forecast) в demo.css, ей порог графики
-     3:1, и её можно было оставить исходным синим. */
+  --surface-card: #ffffff; /* подложка под схемой метода: у неё тёмный текст на прозрачном фоне */
+  --ink: #0b0f1a;
+  --ink-soft: #535c6b;
+  --rule: #e2e6ec;
+  --rule-soft: #eef0f4;
+  /* Акцент текста и кнопок темнее акцента рисунков отчёта (#2a78d6, 4,4:1 к белому): у текста
+     порог 4,5:1. #1f6bc4 — 5,3:1 к белому и 4,9:1 к фону страницы. */
   --accent: #1f6bc4;
+  --accent-hover: #174f93;
   --accent-ink: #ffffff;
-  --focus: #2a78d6;
+  --focus: #1f6bc4;
+  --btn-bg: #1f6bc4;
+  --btn-bg-hover: #174f93;
+  --btn-ink: #ffffff;
+  /* Граница полей ввода — около 3,6:1 к белому: без неё поле на светлом фоне не видно. */
+  --field-line: #7c8799;
+  --step-line: #dce1e8;
+
+  /* Данные: цвета линий — как на рисунках отчёта (src/charts.py), у каждой не ниже 3:1 к карточке. */
+  --chart-fact: #52514e;
+  --chart-forecast: #2a78d6;
+  --chart-known: #eb6834;
+  --chart-third: #17905f;
+  --chart-line: #5c6f8f;
+  /* Медиана на светлой карточке темнее янтаря обложки (#ffb547, на белом 1,9:1). */
+  --chart-median: #d17a00;
+  --chart-grid: #eef0f4;
+  --chart-mark: #b9c0cc; /* вспомогательные вертикали: «конец панели» */
+  --bar-best: #2a78d6;
+  --bar-rest: #7c8799;
+  --bar-track: #f0f2f5;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #15140f;
-    --surface: #1c1b16;
-    --surface-card: #f3f2ee; /* карточка остаётся светлой и в тёмной теме — у схемы тёмный текст */
-    --ink: #eeece5;
-    --ink-soft: #b3b0a6;
-    --rule: #38362e;
-    --accent: #6fa8e8;
-    --accent-ink: #0b0b0b;
-    --focus: #6fa8e8;
+    --bg: var(--night);
+    --surface: var(--night-surface);
+    --surface-card: #f5f6f8; /* схема метода остаётся на светлой подложке и в тёмной теме */
+    --ink: var(--night-ink);
+    --ink-soft: var(--night-soft);
+    --rule: var(--night-rule);
+    --rule-soft: #1b2540;
+    --accent: #7db0f0;
+    --accent-hover: #a3c6f5;
+    --accent-ink: var(--night);
+    --focus: var(--amber);
+    --btn-bg: var(--amber);
+    --btn-bg-hover: var(--amber-hover);
+    --btn-ink: var(--night);
+    --field-line: var(--night-line);
+    --step-line: #2f3c61;
+
+    --chart-fact: #c9d2e6;
+    --chart-forecast: #5b9bf0;
+    --chart-known: #eb8b5e;
+    --chart-third: #34b27f;
+    --chart-line: #8497b8;
+    --chart-median: var(--amber);
+    --chart-grid: #1b2540;
+    --chart-mark: #3a4566;
+    --bar-best: #5b9bf0;
+    --bar-rest: #7a88a6;
+    --bar-track: #1b2540;
   }
 }
+
+/* Ночной блок на любой теме: те же роли, ночные значения. */
+.night {
+  --bg: var(--night);
+  --surface: var(--night-surface);
+  --ink: var(--night-ink);
+  --ink-soft: var(--night-soft);
+  --rule: var(--night-rule);
+  --rule-soft: #1b2540;
+  --accent: var(--amber);
+  --accent-hover: var(--amber-hover);
+  --accent-ink: var(--night);
+  --focus: var(--amber);
+  --btn-bg: var(--amber);
+  --btn-bg-hover: var(--amber-hover);
+  --btn-ink: var(--night);
+  --field-line: var(--night-line);
+  --step-line: #2f3c61;
+
+  --chart-fact: #c9d2e6;
+  --chart-forecast: #5b9bf0;
+  --chart-known: #eb8b5e;
+  --chart-third: #34b27f;
+  --chart-line: #8497b8;
+  --chart-median: var(--amber);
+  --chart-grid: #1b2540;
+  --chart-mark: #3a4566;
+  --bar-best: #5b9bf0;
+  --bar-rest: #7a88a6;
+  --bar-track: #1b2540;
+
+  background: var(--night);
+  color: var(--night-ink);
+}
+
+/* -- основа ------------------------------------------------------------------ */
 
 * {
   box-sizing: border-box;
@@ -43,53 +201,34 @@
 
 html {
   color-scheme: light dark;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-text);
+  font-size: 1rem;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Числа не «прыгают» по ширине цифр — важно там, где рядом стоят несколько подряд. */
-.stat-number, .num {
-  font-variant-numeric: tabular-nums;
-}
-
-.page {
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: 2rem 1rem 3rem;
-}
-
-.eyebrow {
-  margin: 0 0 0.5rem;
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-  letter-spacing: 0.02em;
+h1, h2, h3 {
+  margin: 0 0 1rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
 h1 {
-  margin: 0 0 1rem;
-  font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.1rem);
-  line-height: 1.25;
+  font-size: clamp(1.5rem, 1.2rem + 1.4vw, 2.25rem);
 }
 
 h2 {
   font-size: 1.25rem;
-  margin: 0 0 1rem;
-}
-
-.lead {
-  color: var(--ink);
-  font-size: 1.05rem;
-}
-
-.lead:last-of-type {
-  color: var(--ink-soft);
 }
 
 a {
@@ -97,9 +236,95 @@ a {
   text-underline-offset: 0.15em;
 }
 
-a:focus-visible, button:focus-visible {
+a:hover {
+  color: var(--accent-hover);
+}
+
+a:focus-visible, button:focus-visible, summary:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+/* Цифры в подписях не «прыгают» по ширине. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Крупное число: широкие цифры Unbounded держат «23,0%» как знак. Размер задаёт страница,
+   а цифры одной ширины нужны ещё и счёту: пока число растёт от нуля, строка не дёргается. */
+.stat-number {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -64px;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: var(--amber);
+  color: var(--night);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 12px;
+  color: var(--night);
+}
+
+.amber {
+  color: var(--amber);
+}
+
+/* Подпись данных внутри карточки: тот же моноширинный капс, но цвета текста, не акцента. */
+.mono-label {
+  margin: 0;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+/* Метка раздела и данных: моноширинный капс, «01 · Главный вывод». */
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.lead {
+  font-size: 1.05rem;
+}
+
+.lead:last-of-type {
+  color: var(--ink-soft);
 }
 
 hr.rule {
@@ -108,114 +333,12 @@ hr.rule {
   margin: 2.5rem 0;
 }
 
-/* Пять ключевых чисел: крупное число и подпись в строку; на узком экране подпись
-   переносится под число (flex-wrap, а не отдельная брейкпоинтная раскладка). */
-.stats {
-  display: flex;
-  flex-direction: column;
-  gap: 0.625rem;
-  margin: 2rem 0;
-  padding: 0;
-  list-style: none;
-}
+/* -- страница-колонка (стенд) --------------------------------------------------- */
 
-.stat {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 0.75rem;
-  row-gap: 0.25rem;
-  padding-bottom: 0.625rem;
-  border-bottom: 1px solid var(--rule);
-}
-
-.stat:last-child {
-  border-bottom: none;
-}
-
-.stat-number {
-  flex: 0 0 auto;
-  max-width: 100%;
-  /* <p> по умолчанию несёт 1em полей сверху и снизу — 30,4px при 1,9rem, больше, чем
-     весь ряд отступов вокруг (gap, padding-bottom). Это и разрежало пятёрку чисел,
-     а не gap. */
-  margin: 0;
-  font-size: 1.9rem;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.stat-caption {
-  flex: 1 1 16rem;
-  margin: 0;
-  color: var(--ink);
-}
-
-/* На телефоне подпись — всегда на своей строке под числом: без этого короткая подпись
-   («точнее эталона на наукасте…» у «40%») вставала в одну строку с числом, а у
-   остальных четырёх пунктов — нет, вперемешку. */
-@media (max-width: 479px) {
-  .stat-caption {
-    flex-basis: 100%;
-  }
-}
-
-.method {
-  margin: 2.5rem 0;
-}
-
-.method-figure {
-  background: var(--surface-card);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 1rem;
-}
-
-.method-figure img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-/* На телефоне схема — 324×165px, подписи в ней около 3px и нечитаемы без увеличения;
-   картинка и подпись под ней обёрнуты ссылками на исходный SVG. */
-.method-figure-caption {
-  margin: 0.6rem 0 0;
-  color: var(--ink-soft);
-  font-size: 0.85rem;
-  text-align: right;
-}
-
-/* Кнопки-ссылки: только относительные пути (кроме репозитория). Область нажатия —
-   не ниже 44px даже там, где текст короче. */
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin: 2rem 0;
-}
-
-.action {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0.6rem 1.1rem;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 0.95rem;
-}
-
-.action:hover {
-  border-color: var(--accent);
-}
-
-.action-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 600;
+.page {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
 }
 
 .footer {
@@ -228,4 +351,454 @@ hr.rule {
 
 .footer p {
   margin: 0.4rem 0;
+}
+
+/* -- ширина содержимого (главная) ----------------------------------------------- */
+
+.wrap {
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding-inline: 32px;
+}
+
+@media (max-width: 639px) {
+  .wrap {
+    padding-inline: 20px;
+  }
+}
+
+/* -- шапка с навигацией ---------------------------------------------------------- */
+
+.site-header {
+  position: relative;
+  z-index: 10;
+}
+
+.site-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-block: 18px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: var(--night-ink);
+  font-family: var(--font-display);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+
+.brand:hover {
+  color: var(--night-ink);
+}
+
+.brand-mark {
+  flex: none;
+}
+
+.mark-a, .mark-b, .mark-menu {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.mark-a {
+  stroke: var(--amber);
+  stroke-width: 2.4;
+}
+
+.mark-b {
+  stroke: #5b8cff;
+  stroke-width: 1.6;
+  opacity: 0.7;
+}
+
+.mark-menu {
+  stroke: var(--night-ink);
+  stroke-width: 1.8;
+}
+
+.nav-menu {
+  position: relative;
+}
+
+/* На телефоне меню прячется в <details>; на широком экране ссылки в строку, а кнопку
+   меню не видно — details при этом открыт (атрибут open в разметке), поэтому без
+   скрипта ссылки доступны на любой ширине. */
+.nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--night-line);
+  border-radius: 12px;
+  color: var(--night-ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.nav-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  color: var(--night-ink-2);
+  font-size: 0.9375rem;
+  text-decoration: none;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.nav-link:hover {
+  background: rgba(238, 242, 250, 0.08);
+  color: var(--night-ink);
+}
+
+.nav-link-solid {
+  padding: 0 16px;
+  background: var(--night-ink);
+  color: var(--night);
+  font-weight: 500;
+}
+
+.nav-link-solid:hover {
+  background: #ffffff;
+  color: var(--night);
+}
+
+.site-nav {
+  display: flex;
+  gap: 6px;
+}
+
+@media (max-width: 719px) {
+  .nav-toggle {
+    display: inline-flex;
+  }
+
+  .site-nav {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 20;
+    min-width: 220px;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    background: var(--night-surface);
+    border: 1px solid var(--night-rule);
+    border-radius: 14px;
+  }
+
+  .nav-link, .nav-link-solid {
+    justify-content: flex-start;
+  }
+}
+
+/* -- кнопки ------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0 1.1rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-family: var(--font-text);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.2s, border-color 0.2s;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn-primary {
+  background: var(--btn-bg);
+  color: var(--btn-ink);
+}
+
+.btn-primary:hover {
+  background: var(--btn-bg-hover);
+  color: var(--btn-ink);
+}
+
+.btn-secondary {
+  background: transparent;
+  border-color: var(--field-line);
+  color: var(--ink);
+}
+
+.btn-secondary:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* -- чипы и сегментный переключатель --------------------------------------------- */
+
+.chip {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--field-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.chip:hover {
+  border-color: var(--ink);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 6px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+}
+
+.segmented button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+/* -- поле поиска и список подсказок ----------------------------------------------- */
+
+.search {
+  position: relative;
+}
+
+.search-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.field {
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--field-line);
+  border-radius: 14px;
+}
+
+/* Фокус поля — обводка цветом фокуса в два пикселя: рамка в один пиксель на ночном фоне
+   меняла бы цвет почти незаметно. */
+.field:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-text);
+  /* 16px и больше: меньший размер iOS Safari при фокусе увеличивает страницу. */
+  font-size: 1.0625rem;
+  outline: none;
+}
+
+.field input::placeholder {
+  color: var(--ink-soft);
+  opacity: 1;
+}
+
+/* Видимый фокус даёт рамка поля (:focus-within выше): у самого input обводки нет. */
+.field input:focus-visible {
+  outline: none;
+}
+
+.suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 8;
+  margin: 6px 0 0;
+  padding: 6px;
+  list-style: none;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--field-line);
+  border-radius: 14px;
+}
+
+.suggestions[hidden] {
+  display: none;
+}
+
+.suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2px 12px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.suggestion[aria-selected="true"], .suggestion:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
+.suggestion[aria-selected="true"] {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.suggestion-region {
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+}
+
+.suggestion-status {
+  padding: 10px 12px;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+/* -- карточки ----------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 18px;
+  padding: 24px;
+}
+
+.card-link {
+  position: relative;
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.card-link:hover {
+  border-color: var(--ink);
+  transform: translateY(-2px);
+}
+
+/* -- заголовок раздела ------------------------------------------------------------ */
+
+.section-title {
+  margin: 12px 0 0;
+  font-size: clamp(1.75rem, 1.35rem + 1.6vw, 2.625rem);
+  line-height: 1.12;
+}
+
+/* -- подвал главной --------------------------------------------------------------- */
+
+.site-footer {
+  margin-top: 90px;
+  border-top: 1px solid var(--night-rule);
+  color: var(--night-soft);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.site-footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 20px 40px;
+  padding-block: 40px;
+}
+
+.site-footer p {
+  margin: 0;
+  max-width: 720px;
+}
+
+.site-footer a {
+  color: var(--night-ink-2);
+}
+
+.site-footer a:hover {
+  color: var(--night-ink);
+}
+
+.site-footer .built {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 639px) {
+  .site-footer {
+    margin-top: 56px;
+  }
+
+  .site-footer-inner {
+    padding-block: 26px 40px;
+  }
+}
+
+/* При «уменьшить движение» в системе — без плавных переходов и подъёма кнопок: состояние
+   меняется сразу. Анимации главной (рисование линий, счёт чисел) отключает landing.css
+   и landing.js. */
+@media (prefers-reduced-motion: reduce) {
+  .btn, .chip, .segmented button, .nav-link, .card-link {
+    transition: none;
+  }
+
+  .btn:hover, .card-link:hover {
+    transform: none;
+  }
 }
