@@ -541,7 +541,62 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 04 · Стенд: три муниципалитета, мини-график, ссылка на стенд с выбранным
+  // 04 · Изломы: доля муниципалитетов с изломом по месяцам — найдено задним числом, по полному ряду
+  // ---------------------------------------------------------------------------
+
+  function initBreaks(breaks) {
+    const plot = byId("breaks-plot");
+    const cols = byId("breaks-cols");
+    const ticks = byId("breaks-ticks");
+    const axis = byId("breaks-axis");
+    if (!breaks || !plot || !cols || !ticks || !axis) return;
+
+    const count = breaks.months.length;
+    const scale = niceScale(0, Math.max.apply(null, breaks.share), 4);
+    setTicks(ticks, scale, (value) => `${formatTick(value, scale.step)}%`, false);
+
+    // Столбец месяца — доля от верха шкалы; месяцы массового согласия подсвечены и подписаны долей.
+    // Подпись стоит над серединой столбца, поэтому положение в процентах считается по центру ячейки.
+    breaks.share.forEach((value, index) => {
+      const height = `${((value / scale.hi) * 100).toFixed(2)}%`;
+      const col = node("div", "breaks-col", null, cols);
+      col.style.height = height;
+      const rank = breaks.top.indexOf(breaks.months[index]);
+      if (rank < 0) return;
+      col.classList.add("is-top");
+      const label = node("span", "breaks-value", breaks.top_labels[rank], cols);
+      label.style.left = `${(((index + 0.5) / count) * 100).toFixed(2)}%`;
+      label.style.bottom = `calc(${height} + 4px)`;
+    });
+
+    // Подписи месяцев: у левого края, у каждого января и у правого.
+    breaks.months.forEach((month, index) => {
+      const first = index === 0;
+      const last = index === count - 1;
+      if (!(first || last || month.slice(5, 7) === "01")) return;
+      const span = node("span", null, monthLabel(month), axis);
+      if (first) {
+        span.style.left = "0";
+      } else if (last) {
+        span.style.right = "0";
+      } else {
+        span.style.left = `${(((index + 0.5) / count) * 100).toFixed(2)}%`;
+        span.style.transform = "translateX(-50%)";
+      }
+    });
+
+    const monthName = (ym) => `${MONTH_NOM[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+    const ranked = breaks.top
+      .map((month, rank) => ({ month, label: breaks.top_labels[rank], share: breaks.share[breaks.months.indexOf(month)] }))
+      .sort((a, b) => b.share - a.share);
+    plot.setAttribute("aria-label",
+      `Доля муниципалитетов, у которых найден излом, по месяцам с ${monthLabel(breaks.months[0])} ` +
+      `по ${monthLabel(breaks.months[count - 1])}; больше всего — ` +
+      ranked.map((item) => `${monthName(item.month)}, ${item.label}`).join("; "));
+  }
+
+  // ---------------------------------------------------------------------------
+  // 05 · Стенд: три муниципалитета, мини-график, ссылка на стенд с выбранным
   // ---------------------------------------------------------------------------
 
   // Подпись пунктира короткая: что это за линия, объясняет лид блока; полное название — заголовок столбца стенда.
@@ -958,6 +1013,7 @@
     ["история", () => initStory(data.story)],
     ["горизонты", () => initHorizons(data.horizons)],
     ["факт", () => initFact(data.fact)],
+    ["изломы", () => initBreaks(data.breaks)],
     ["стенд", () => initTeaser(data.teaser)],
     ["поиск", initSearch],
   ].forEach((block) => {

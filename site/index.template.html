@@ -299,11 +299,41 @@
   </div>
 </section>
 
+<section class="section" id="breaks" aria-labelledby="breaks-title">
+  <div class="wrap">
+    <p class="eyebrow">04 · Изломы</p>
+    <h2 class="section-title" id="breaks-title">Изломы — точки структурных изменений</h2>
+    <p class="section-lead" id="breaks-lead">
+      Помимо прогноза, работа ищет точки структурных изменений — изломы: месяцы, когда динамика расходов
+      меняется. Детекторы проверены на стенде с врезками: в реальные ряды вносят сдвиг известной величины
+      и смотрят, найдёт ли его метод и не тревожит ли он нетронутые ряды.
+    </p>
+    <p class="breaks-claim" id="breaks-claim">${cp_claim}</p>
+
+    <div class="plot-card breaks-card">
+      <p class="chart-unit">Доля муниципалитетов с изломом в месяце, %</p>
+      <div class="plot breaks-plot" id="breaks-plot" role="img" aria-label="График долей муниципалитетов с изломом по месяцам">
+        <div class="ticks" id="breaks-ticks"></div>
+        <div class="breaks-cols" id="breaks-cols"></div>
+      </div>
+      <div class="plot-axis" id="breaks-axis" aria-hidden="true"></div>
+      <p class="plot-caption" id="breaks-caption">
+        Найдено задним числом, по полному ряду (${cp_method}, штраф ${cp_penalty}): это не сигнал в реальном
+        времени. Штраф — настройка детектора: чем он выше, тем меньше изломов находится.
+      </p>
+    </div>
+
+    <p class="breaks-more">
+      <a href="report/report.html#sec-cp" target="_blank" rel="noopener">Обнаружение изломов — в отчёте<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
+    </p>
+  </div>
+</section>
+
 <section class="section" id="city" aria-labelledby="city-title">
   <div class="wrap">
     <div class="stand night">
       <div class="stand-copy">
-        <p class="eyebrow">04 · Стенд</p>
+        <p class="eyebrow">05 · Стенд</p>
         <h2 class="section-title" id="city-title">Покажите мой город</h2>
         <p class="stand-lead" id="stand-lead">
           Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год,
@@ -336,7 +366,7 @@
 
 <section class="section" id="method" aria-labelledby="method-title">
   <div class="wrap">
-    <p class="eyebrow">05 · Метод</p>
+    <p class="eyebrow">06 · Метод</p>
     <h2 class="section-title" id="method-title">Как устроено решение</h2>
 
     <ul class="method-cards">
@@ -366,7 +396,7 @@
 
 <section class="section" id="report" aria-labelledby="report-title">
   <div class="wrap">
-    <p class="eyebrow">06 · Материалы</p>
+    <p class="eyebrow">07 · Материалы</p>
     <h2 class="section-title" id="report-title">Отчёт, слайды, код и данные</h2>
 
     <ul class="materials">

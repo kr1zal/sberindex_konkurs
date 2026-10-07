@@ -20,6 +20,7 @@ import re
 import sys
 import tempfile
 import unittest
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote
@@ -49,7 +50,8 @@ AGGREGATE_JSON_KEYS = {
     "unit", "origin", "horizon", "model", "model_label",
     "history", "check", "rule_names", "mape",
 }
-LANDING_JSON_KEYS = {"story", "horizons", "fact", "teaser"}
+LANDING_JSON_KEYS = {"story", "horizons", "fact", "teaser", "breaks"}
+BREAKS_KEYS = {"months", "share", "top", "top_labels"}
 STORY_KEYS = {"months", "base_months", "ids", "series", "median", "n_total", "n_sample"}
 HORIZONS_KEYS = {"list", "main", "labels", "unit", "models", "notes"}
 TEASER_ITEM_KEYS = {"id", "short", "region", "fact", "forecast", "known", "breaks"}
@@ -1049,6 +1051,7 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual(set(self.landing["story"]), STORY_KEYS)
         self.assertEqual(set(self.landing["horizons"]), HORIZONS_KEYS)
         self.assertEqual(set(self.landing["teaser"]), {"months", "items"})
+        self.assertEqual(set(self.landing["breaks"]), BREAKS_KEYS)
 
     def test_landing_json_size_is_under_the_module_threshold(self) -> None:
         size = len(self.landing_raw.encode("utf-8"))
@@ -1387,7 +1390,7 @@ class BuildSiteTest(unittest.TestCase):
         collector.feed(template)
         text = " ".join(collector.chunks)
         text = re.sub(r"\$\{[a-z_0-9]+\}", " ", text)
-        text = re.sub(r"\b0[1-6]\b", " ", text)
+        text = re.sub(r"\b0[1-7]\b", " ", text)
         text = text.replace("CC BY-SA 4.0", " ")
         leftovers = re.findall(r".{0,20}\d.{0,20}", text)
         self.assertEqual(leftovers, [], "в шаблоне вписаны числа; вынесите их в подстановки генератора")
@@ -1505,12 +1508,90 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIn(anchor, report.ids)
         self.assertIn(f'<h3 class="anchored" data-anchor-id="{anchor}">Механизм: ошибка состоит из двух частей', report_html)
 
+    # -- раздел «Изломы» ---------------------------------------------------------------------------------
+
+    @staticmethod
+    def _report_summary_items() -> list[str]:
+        """Пункты списка «Остальные результаты» резюме отчёта — текстом, без разметки и ссылок на разделы."""
+        report = (ROOT / "report" / "report.html").read_text(encoding="utf-8")
+        start = report.index("<strong>Остальные результаты.</strong>")
+        block = report[start:report.index("</ol>", start)]
+        return [_collapse(unescape(re.sub(r"<[^>]+>", "", item))) for item in re.findall(r"<li>(.*?)</li>", block, re.S)]
+
+    def test_breaks_claim_is_the_eighth_summary_item_of_the_report(self) -> None:
+        # Фраза раздела «Изломы» — пункт 8 резюме отчёта слово в слово, без ссылки «(об обнаружении)»:
+        # условия «решает преобразование», «скромный», «раннего предупреждения не показано» генератор
+        # пересчитал на тех же файлах, и если прогон или отчёт изменились, расхождение видно здесь.
+        items = self._report_summary_items()
+        self.assertEqual(len(items), 8)
+        item = items[7]
+        self.assertTrue(item.startswith("Точки структурных изменений:"))
+        self.assertTrue(item.endswith(" (об обнаружении)."))
+        expected = item[: -len(" (об обнаружении).")] + "."
+        self.assertEqual(_IdsOf(self.html).text("breaks-claim"), expected)
+        # Жирным идёт начало фразы, как в резюме.
+        self.assertIn("<strong>Точки структурных изменений: ", self.html)
+
+    def test_breaks_data_are_the_offline_shares_at_the_offline_penalty_and_protocol(self) -> None:
+        cp_cfg = yaml.safe_load((ROOT / "configs" / "changepoints.yaml").read_text(encoding="utf-8"))
+        protocol = f"v{cp_cfg['protocol_version']}"
+        nes_spec = importlib.util.spec_from_file_location("news_event_study", ROOT / "scripts" / "news_event_study.py")
+        nes = importlib.util.module_from_spec(nes_spec)
+        nes_spec.loader.exec_module(nes)
+        penalty = float(nes.PENALTY)
+        offline = read_results(ROOT / "results" / "cp_offline.csv")
+        picture = offline[(offline["protocol"] == protocol) & np.isclose(offline["penalty"], penalty)].set_index("month")["share"]
+
+        breaks = self.landing["breaks"]
+        self.assertEqual(breaks["months"], [m.strftime("%Y-%m") for m in self.wide.index])
+        self.assertEqual(breaks["share"], [round(float(picture[m]), 2) for m in breaks["months"]])
+        # Штраф важен: при другом штрафе сетки доли другие, и страница не должна взять чужой.
+        other = offline[(offline["protocol"] == protocol) & ~np.isclose(offline["penalty"], penalty)]
+        for other_penalty, group in other.groupby("penalty"):
+            with self.subTest(other_penalty=other_penalty):
+                self.assertNotEqual(list(group.set_index("month")["share"].reindex(breaks["months"])), list(picture))
+        # Месяцы массового согласия — столько наибольших долей, сколько событий в конфиге, по порядку месяцев.
+        top = sorted(picture.nlargest(len(cp_cfg["realtime"]["events"])).index)
+        self.assertEqual(breaks["top"], top)
+        labels = []
+        for month in top:
+            text = _fmt(picture[month], 1)
+            labels.append(f"{text[:-2] if text.endswith(',0') else text}%")
+        self.assertEqual(breaks["top_labels"], labels)
+
+    def test_breaks_section_says_what_the_bars_are_and_what_they_are_not(self) -> None:
+        nodes = _IdsOf(self.html)
+        caption = nodes.text("breaks-caption")
+        # Подпись: найдено задним числом, не сигнал в реальном времени; метод и штраф — из конфига и PENALTY.
+        self.assertIn("Найдено задним числом, по полному ряду (PELT на темпах роста, штраф 1)", caption)
+        self.assertIn("это не сигнал в реальном времени", caption)
+        self.assertIn("Штраф — настройка детектора: чем он выше, тем меньше изломов находится.", caption)
+        # Изломы названы точками структурных изменений — термином задания.
+        self.assertEqual(nodes.text("breaks-title"), "Изломы — точки структурных изменений")
+        self.assertIn("точки структурных изменений — изломы", nodes.text("breaks-lead"))
+        # Раздел стоит после проверки фактом и перед блоком прогноза по муниципалитету; ссылка ведёт
+        # в раздел отчёта об обнаружении (якорь проверяет тест ссылок), в новой вкладке.
+        self.assertLess(self.html.index('id="fact"'), self.html.index('id="breaks"'))
+        self.assertLess(self.html.index('id="breaks"'), self.html.index('id="city"'))
+        link = re.search(r'<a href="(report/report\.html#sec-cp)" target="_blank" rel="noopener">', self.html)
+        self.assertIsNotNone(link, "нет ссылки на раздел отчёта об обнаружении")
+        report_ids = _IdCollector()
+        report_ids.feed((ROOT / "report" / "report.html").read_text(encoding="utf-8"))
+        self.assertIn("sec-cp", report_ids.ids)
+
+    def test_sections_are_numbered_in_page_order(self) -> None:
+        # Разделы нумеруются подряд, в порядке на странице: новый раздел «Изломы» сдвинул три следующих.
+        labels = re.findall(r'<p class="eyebrow">(\d\d) · ([^<]+)</p>', self.html)
+        self.assertEqual([number for number, _ in labels], [f"{n:02d}" for n in range(1, len(labels) + 1)])
+        self.assertEqual(len(labels), 7)
+        self.assertEqual(labels[3][1], "Изломы")
+
     # -- разметка главной ---------------------------------------------------------------------------
 
     def test_page_has_landmarks_sections_and_accessible_controls(self) -> None:
         ids = _IdCollector()
         ids.feed(self.html)
-        for section in ("why", "horizons", "fact", "city", "method", "report"):
+        for section in ("why", "horizons", "fact", "breaks", "city", "method", "report"):
             with self.subTest(section=section):
                 self.assertEqual(ids.ids[section]["tag"], "section")
                 self.assertEqual(ids.ids[section]["aria-labelledby"], f"{section}-title")
@@ -1524,7 +1605,7 @@ class BuildSiteTest(unittest.TestCase):
             with self.subTest(live=live):
                 self.assertEqual(ids.ids[live]["aria-live"], "polite")
         # Графики с данными — картинки с названием; декоративный график обложки скрыт.
-        for chart in ("story-plot", "fact-plot", "t-plot"):
+        for chart in ("story-plot", "fact-plot", "breaks-plot", "t-plot"):
             with self.subTest(chart=chart):
                 self.assertEqual(ids.ids[chart]["role"], "img")
                 self.assertTrue(ids.ids[chart]["aria-label"])
@@ -1553,6 +1634,82 @@ class BuildSiteTest(unittest.TestCase):
                      "https://github.com/kr1zal/sberindex_konkurs"):
             with self.subTest(link=link):
                 self.assertIn(link, collector.links)
+
+
+class ChangepointClaimTest(unittest.TestCase):
+    """Условия фразы об изломах на таблицах, которые подставляют ветки отчёта, не встречающиеся в текущем
+    прогоне: тезис не держится, лучший J выше пятой части шкалы, пороги переходят не все события или только
+    в декабре. Таблицы — синтетические, генератор не запускается."""
+
+    DETECTORS = ["pelt", "binseg", "window", "bottomup", "kernel_rbf", "cusum"]
+    CFG = {
+        "realtime": {"detector": "pelt", "mode": "ratio", "events": ["2023-10", "2024-01", "2024-10"]},
+        "bench": {"detectors": DETECTORS},
+    }
+
+    def frames(self, *, ratio_fa=0.0, raw_fa=60.0, ratio_j=12.0, raw_j=-50.0, crossed=None, delay=0.0,
+               ratio_overrides=None):
+        """cp_summary и cp_realtime_events: у методов со штрафом (все, кроме CUSUM) — выбранный штраф."""
+        rows = []
+        for detector in self.DETECTORS:
+            own = detector == "cusum"
+            for mode, fa, j in (("raw", raw_fa, raw_j), ("ratio", ratio_fa, ratio_j), ("deseason", 90.0, -80.0)):
+                if mode == "ratio" and ratio_overrides and detector in ratio_overrides:
+                    fa, j = ratio_overrides[detector]
+                rows.append({"protocol": "v2", "detector": detector, "mode": mode,
+                             "penalty": float("nan") if own else 5.0, "J Юдена": j, "ложных на чистых, %": fa})
+        events = []
+        crossed = crossed or {}
+        for event in self.CFG["realtime"]["events"]:
+            month = crossed.get(event)
+            events.append({"protocol": "v2", "penalty": 5.0, "selected": True, "event": event,
+                           "crossed_month": month if month else float("nan"),
+                           "delay": delay if month else float("nan")})
+        return pd.DataFrame(rows), pd.DataFrame(events)
+
+    def claim(self, **kwargs) -> str:
+        head, body = build_site.changepoint_claim(*self.frames(**kwargs), self.CFG)
+        return f"{head} {body}"
+
+    def test_thesis_holds_when_every_method_gains_and_the_spread_is_small(self) -> None:
+        text = self.claim()
+        self.assertEqual(text, (
+            "Точки структурных изменений: решает преобразование ряда, а не алгоритм. На сырых значениях методы "
+            "со штрафом тревожат на 60% нетронутых рядов, на темпах роста — ни разу. Уровень обнаружения "
+            "скромный, и раннего предупреждения на двух годах данных не показано."))
+
+    def test_false_alarms_on_ratio_are_named_when_nonzero(self) -> None:
+        text = self.claim(ratio_fa=3.3)
+        self.assertIn("На сырых значениях методы со штрафом тревожат на 60% нетронутых рядов, "
+                      "на темпах роста — на 3,3%.", text)
+
+    def test_thesis_names_only_the_unmet_condition(self) -> None:
+        # У одного метода преобразование не снижает ложные тревоги — тезис не подтверждён, и фраза говорит именно это.
+        text = self.claim(ratio_overrides={"window": (70.0, 12.0)})
+        self.assertTrue(text.startswith("Точки структурных изменений: преобразование ряда решает не всё. "))
+        self.assertIn("Тезис «решает преобразование, а не алгоритм» этим прогоном не подтверждается: "
+                      "у Window на темпах роста ложных тревог не меньше или J не выше, чем на сырых значениях.", text)
+        # Разброс J между методами со штрафом не меньше наименьшего выигрыша от смены преобразования — второе условие.
+        spread = self.claim(ratio_overrides={"window": (0.0, 100.0)})
+        self.assertTrue(spread.startswith("Точки структурных изменений: преобразование ряда решает не всё. "))
+        self.assertIn("разброс J между методами со штрафом на темпах роста, 88,0 пункта, "
+                      "не меньше наименьшего выигрыша от смены преобразования, 62,0", spread)
+
+    def test_level_is_modest_until_the_best_j_reaches_a_fifth_of_the_scale(self) -> None:
+        self.assertIn("Уровень обнаружения скромный", self.claim(ratio_j=19.9))
+        self.assertIn("Уровень обнаружения заметный", self.claim(ratio_j=20.0, ratio_overrides={"pelt": (0.0, 20.0)}))
+
+    def test_early_warning_depends_on_where_the_threshold_was_crossed(self) -> None:
+        none = self.claim()
+        self.assertIn("и раннего предупреждения на двух годах данных не показано", none)
+        # Все переходы — в декабре позже месяца события: сам декабрьский скачок, раннего предупреждения нет.
+        december = self.claim(crossed={"2023-10": "2023-12", "2024-01": "2024-12"}, delay=2.0)
+        self.assertIn("и раннего предупреждения на двух годах данных не показано", december)
+        # Переход в месяц события или не в декабре — предупреждение есть: видны все события или часть.
+        every = self.claim(crossed={"2023-10": "2023-11", "2024-01": "2024-02", "2024-10": "2024-10"}, delay=1.0)
+        self.assertIn("а в реальном времени видны все события", every)
+        part = self.claim(crossed={"2023-10": "2023-11", "2024-01": "2024-02"}, delay=1.0)
+        self.assertIn("а в реальном времени видно 2 из 3 событий", part)
 
 
 if __name__ == "__main__":

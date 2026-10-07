@@ -8,7 +8,7 @@
 (`demo/index.html`, `demo/demo.js`, графики) и скрипт главной (`site/landing.js`) —
 рукописные и читают только эти данные.
 
-## Пять чисел главной
+## Пять чисел главной и фраза об изломах
 
 Резюме отчёта (`report/report.qmd`) объясняет тот же прогон теми же файлами. Отсюда
 перенесена ЛОГИКА, а не результат: `compute_placeholders` пересчитывает её на текущих
@@ -16,6 +16,11 @@
 Помощники форматирования (`rub`, `num`, `on_folds`, `plural`, `and_join`, `in_words_m`)
 и словарь русских названий моделей (`MODEL_LABELS`) — те же самые, что в отчёте
 (`report/report.qmd`, строки 42-102 и 1682-1692), с тем же поведением.
+
+Фраза раздела «Изломы» — пункт резюме отчёта об обнаружении точек структурных изменений
+(`report/report.qmd`, ~строки 545-1060): `changepoint_claim` пересчитывает его условия на
+`results/cp_*.csv` и пишет ту же фразу без ссылки «[об обнаружении]». Совпадение с отрисованным
+резюме отчёта проверяет тест.
 
 ## Формат данных стенда — контракт с `demo/demo.js`
 
@@ -127,6 +132,13 @@ recommended-модель самого длинного горизонта — tw
     teaser    {months, items}: три МО из TEASER_MO; items[k] — {id, short, region, fact,
               forecast, known, breaks} теми же значениями, что в demo/data/mo/*.json;
               months — 24 месяца панели и 12 месяцев прогноза подряд.
+    breaks    {months, share, top, top_labels}: раздел «Изломы». share[t] — доля муниципалитетов
+              (%, два знака), у которых по полному ряду, задним числом, найден излом в месяце
+              months[t]: `results/cp_offline.csv` на протоколе `v{changepoints.yaml::protocol_version}`
+              и штрафе `scripts/news_event_study.py::PENALTY` — той же офлайновой картине, что
+              изломы стенда. top — месяцы массового согласия (столько наибольших долей, сколько
+              событий в `changepoints.yaml::realtime.events`, по порядку месяцев, как `_cp_top`
+              отчёта), top_labels — их доли готовыми строками, «85,8%».
 
 Размер данных главной ограничен `MAX_LANDING_BYTES` — как и размер данных стенда, он проверяется
 до записи.
@@ -135,6 +147,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import html
 import importlib.util
 import json
 import math
@@ -409,7 +422,9 @@ def compute_placeholders(
       «2023 год» (первые `STORY_BASE_MONTHS` месяцев панели — календарный год) или
       «первые 12 месяцев панели».
     - ``landing_json`` — данные главной (формат — докстринг модуля); добавляет `main` после
-      сборки, сюда он не входит.
+      сборки, сюда он не входит. Так же `main` добавляет ``cp_claim`` (HTML фразы об изломах,
+      `changepoint_claim`), ``cp_method`` («PELT на темпах роста») и ``cp_penalty`` (штраф
+      офлайновой картины): они считаются не здесь, а `build_breaks` из файлов стенда разладок.
     """
     top = summary["MAE"].idxmin()
     horizon_main = int(full_cfg["split"]["horizon"])
@@ -535,6 +550,187 @@ def compute_placeholders(
     placeholders["spread_pct"] = str(math.ceil(round(spread, 6)))
     placeholders["story_base"] = story_base_label(wide)
     return placeholders
+
+
+# ---------------------------------------------------------------------------
+# Изломы — точки структурных изменений: фраза резюме отчёта и доли территорий с изломом
+# ---------------------------------------------------------------------------
+
+# Названия детекторов и режимов — как в отчёте (`report/report.qmd`: `_CP_DET`, `_CP_DET_GEN`, `_CP_ON`,
+# ~строки 617-623): тот же текст обязан стоять и там, и здесь.
+CP_DETECTOR = {"pelt": "PELT", "binseg": "BinSeg", "window": "Window", "bottomup": "BottomUp",
+               "kernel_rbf": "ядровой (RBF)", "cusum": "CUSUM"}
+CP_DETECTOR_GEN = {**CP_DETECTOR, "kernel_rbf": "ядрового (RBF)"}
+CP_MODE_ON = {"ratio": "на темпах роста", "raw": "на сырых значениях", "deseason": "без профиля месяца"}
+
+# Таблицы стенда разладок, которые читает раздел: сводка по детекторам, потоковая доля по месяцам, события
+# потокового сигнала и изломы по полному ряду. Остальные файлы стенда нужны отчёту, а не странице.
+CP_TABLES = ("cp_summary", "cp_realtime", "cp_realtime_events", "cp_offline")
+
+
+def _cp_true(column: pd.Series) -> pd.Series:
+    """Флаг из CSV: True/False читаются булевыми, но колонка с пропусками становится строковой
+    (`report.qmd::_cp_true`)."""
+    return column.astype(str).str.lower() == "true"
+
+
+def _cp_pct(value: float) -> str:
+    """Процент с одним знаком; «100%», а не «100,0%»: ноль после запятой лишний (`report.qmd::_cp_pct`)."""
+    text = num(value, 1)
+    return f"{text[:-2] if text.endswith(',0') else text}%"
+
+
+def _cp_range(values) -> str:
+    """Диапазон процентов «53,3–73,3%»; при совпавших краях — одно число (`report.qmd::_cp_range`)."""
+    lo, hi = _cp_pct(min(values)), _cp_pct(max(values))
+    return hi if lo == hi else f"{lo[:-1]}–{hi}"
+
+
+def _cp_pen(value: float) -> str:
+    """Штраф в тексте: «3», «1», «2,5» (`report.qmd::_cp_pen`)."""
+    return num(value, 0 if float(value).is_integer() else 1)
+
+
+def load_cp_tables(cp_cfg: dict, root: Path = ROOT) -> dict[str, pd.DataFrame]:
+    """`CP_TABLES` из `results/` — только версии протокола `changepoints.yaml::protocol_version` и на сетке
+    штрафов конфига (`report.qmd::_cp_table` и проверка сетки там же). Файл другой версии или другой сетки
+    страница не принимает: числа прежнего прогона в раздел действующего молча не встанут."""
+    protocol = f"v{cp_cfg['protocol_version']}"
+    grid = sorted(float(p) for p in cp_cfg["bench"]["penalties"])
+    tables = {}
+    for name in CP_TABLES:
+        kwargs = {"dtype": {"crossed_month": object}} if name == "cp_realtime_events" else {}
+        frame = read_results(root / "results" / f"{name}.csv", **kwargs)
+        if "protocol" not in frame or set(frame["protocol"]) != {protocol}:
+            raise ValueError(
+                f"results/{name}.csv — не версии протокола {protocol}: запустите scripts/changepoints.py")
+        if sorted(set(frame["penalty"].dropna().astype(float))) != grid:
+            raise ValueError(
+                f"results/{name}.csv посчитан на другой сетке штрафов, чем configs/changepoints.yaml: "
+                "перезапустите scripts/changepoints.py")
+        tables[name] = frame
+    return tables
+
+
+def changepoint_claim(cps: pd.DataFrame, cpe: pd.DataFrame, cp_cfg: dict) -> tuple[str, str]:
+    """Фраза о точках структурных изменений — пункт резюме отчёта (`report/report.qmd`, `_cp_summary`,
+    ~строки 790-1060), условия которого пересчитаны здесь на тех же файлах, без ссылки «[об обнаружении]».
+    Возвращает (жирное начало, остальное). Тезис «решает преобразование ряда, а не алгоритм» держится, если у
+    каждого метода преобразование снижает ложные тревоги и поднимает J Юдена, а разброс J между методами
+    со штрафом меньше выигрыша любого из них; иначе фраза называет только невыполненное условие.
+
+    - `cps` — `cp_summary.csv`, `cpe` — `cp_realtime_events.csv` (оба версии протокола конфига);
+    - число обнаружения не называется без оговорки: «скромный» — пока лучший J не дотягивает до пятой
+      части шкалы; «раннего предупреждения не показано» — если при выбранном штрафе порог не перейдён
+      или все переходы пришлись на декабрь позже месяца события."""
+    realtime, bench = cp_cfg["realtime"], cp_cfg["bench"]
+    detector, mode = realtime["detector"], realtime["mode"]
+    events = sorted(str(e) for e in realtime["events"])
+    p_sel = float(cpe.loc[_cp_true(cpe["selected"]), "penalty"].iloc[0])
+    event_table = cpe.set_index(["penalty", "event"])
+    crossed = {
+        p: [e for e in events if isinstance(event_table.loc[(p, e), "crossed_month"], str)]
+        for p in sorted(set(cpe["penalty"]))
+    }
+
+    # Стенд при выбранном штрафе; CUSUM — со своим порогом, штраф у него пуст.
+    selected_rows = cps[(cps["penalty"] == p_sel) | cps["penalty"].isna()]
+    by_method = selected_rows.set_index(["detector", "mode"])
+    youden, false_alarm = by_method["J Юдена"], by_method["ложных на чистых, %"]
+    own = set(cps.loc[cps["penalty"].isna(), "detector"])
+    dets = [d for d in bench["detectors"] if (d, "raw") in by_method.index and (d, mode) in by_method.index]
+    pen_dets = [d for d in dets if d not in own]
+    gain = {d: youden[(d, mode)] - youden[(d, "raw")] for d in pen_dets}
+    ratio_j = [youden[(d, mode)] for d in pen_dets]
+    spread = max(ratio_j) - min(ratio_j) if ratio_j else np.nan
+
+    worse = [d for d in dets
+             if not (youden[(d, mode)] > youden[(d, "raw")] and false_alarm[(d, mode)] < false_alarm[(d, "raw")])]
+    why_not = "; ".join(
+        ([f"у {and_join(CP_DETECTOR_GEN[d] for d in worse)} {CP_MODE_ON[mode]} ложных тревог не меньше "
+          f"или J не выше, чем {CP_MODE_ON['raw']}"] if worse else [])
+        + ([f"разброс J между методами со штрафом {CP_MODE_ON[mode]}, {num(spread, 1)} пункта, "
+            f"не меньше наименьшего выигрыша от смены преобразования, {num(min(gain.values()), 1)}"]
+           if gain and not spread < min(gain.values()) else [])
+        + (["методов со штрафом при этом штрафе в сводке нет"] if not gain else []))
+    thesis = not why_not
+
+    # Лучший по J — с ничьими: у PELT и BinSeg на одних рядах числа бывают одинаковы, и лучший по первой
+    # строке файла был бы одним из двух наугад. Первым — детектор потокового сигнала.
+    best_j = selected_rows["J Юдена"].round(9)
+    order = {d: i for i, d in enumerate(bench["detectors"])}
+    best_keys = sorted(
+        selected_rows.loc[best_j == best_j.max(), ["detector", "mode"]].itertuples(index=False, name=None),
+        key=lambda k: (k != (detector, mode), order.get(k[0], len(order)), k[1]))
+    level = "скромный" if by_method.loc[best_keys[0]]["J Юдена"] < 20 else "заметный"
+
+    def december_only(p: float) -> bool:
+        """Все переходы порога при штрафе p пришлись на декабрь позже месяца события."""
+        return bool(crossed[p]) and all(
+            event_table.loc[(p, e), "crossed_month"].endswith("-12") and event_table.loc[(p, e), "delay"] > 0
+            for e in crossed[p])
+
+    no_early = not crossed[p_sel] or december_only(p_sel)
+    raw_pen = [false_alarm[(d, "raw")] for d in pen_dets]
+    ratio_pen = [false_alarm[(d, mode)] for d in pen_dets]
+    head = ("Точки структурных изменений: "
+            + ("решает преобразование ряда, а не алгоритм" if thesis else "преобразование ряда решает не всё") + ".")
+    body = (
+        (f"{CP_MODE_ON['raw'][:1].upper() + CP_MODE_ON['raw'][1:]} методы со штрафом тревожат на "
+         f"{_cp_range(raw_pen)} нетронутых рядов, {CP_MODE_ON[mode]} — "
+         + ("ни разу" if max(ratio_pen) == 0 else f"на {_cp_range(ratio_pen)}") + ". "
+         if thesis else
+         f"Тезис «решает преобразование, а не алгоритм» этим прогоном не подтверждается: {why_not}. ")
+        + f"Уровень обнаружения {level}"
+        + (", и раннего предупреждения на двух годах данных не показано" if no_early else
+           ", а в реальном времени видны все события" if len(crossed[p_sel]) == len(events) else
+           f", а в реальном времени видно {len(crossed[p_sel])} из {len(events)} событий")
+        + "."
+    )
+    return head, body
+
+
+class BreaksBuild(NamedTuple):
+    """Раздел «Изломы»: фраза резюме (HTML и текст), подписи графика и его данные."""
+
+    claim_html: str
+    claim_text: str
+    method: str
+    penalty: str
+    data: dict
+
+
+def build_breaks(tables: dict[str, pd.DataFrame], cp_cfg: dict, penalty: float) -> BreaksBuild:
+    """Раздел «Изломы» главной: фраза резюме отчёта и доли территорий с изломом по месяцам
+    (`landing-data.breaks`, формат — докстринг модуля).
+
+    Доли — офлайновая картина отчёта: изломы по полному ряду, найденные задним числом, на протоколе конфига
+    и штрафе `penalty` (`scripts/news_event_study.py::PENALTY`) — те же, что изломы на стенде прогноза
+    по муниципалитету. Это не сигнал в реальном времени: так сказано и в подписи графика."""
+    head, body = changepoint_claim(tables["cp_summary"], tables["cp_realtime_events"], cp_cfg)
+    realtime = cp_cfg["realtime"]
+    cpe, cpr, cpo = tables["cp_realtime_events"], tables["cp_realtime"], tables["cp_offline"]
+    p_sel = float(cpe.loc[_cp_true(cpe["selected"]), "penalty"].iloc[0])
+    months = list(cpr.loc[cpr["penalty"] == p_sel, "month"])
+    offline = cpo.pivot(index="month", columns="penalty", values="share").reindex(months)
+    if float(penalty) not in offline.columns or offline[float(penalty)].isna().any():
+        raise ValueError(
+            f"в results/cp_offline.csv нет долей изломов при штрафе {_cp_pen(penalty)} на все месяцы панели")
+    share = offline[float(penalty)]
+    # Месяцы массового согласия — столько наибольших долей, сколько событий в конфиге стенда, по порядку месяцев.
+    top = sorted(share.nlargest(len(realtime["events"])).index, key=months.index)
+    return BreaksBuild(
+        claim_html=f"<strong>{html.escape(head, quote=False)}</strong> {html.escape(body, quote=False)}",
+        claim_text=f"{head} {body}",
+        method=f"{CP_DETECTOR[realtime['detector']]} {CP_MODE_ON[realtime['mode']]}",
+        penalty=_cp_pen(penalty),
+        data={
+            "months": months,
+            "share": [round(float(v), 2) for v in share],
+            "top": top,
+            "top_labels": [_cp_pct(share[m]) for m in top],
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1083,9 +1279,9 @@ def build_teaser(demo: DemoBuild, wide: pd.DataFrame, forward_cfg: dict) -> dict
 def build_landing_data(
     *, wide: pd.DataFrame, summary: pd.DataFrame, full_cfg: dict, forward_cfg: dict,
     horizons_cfg: dict, horizons_summary: pd.DataFrame, aggregate: dict, demo: DemoBuild,
-    placeholders: dict[str, str],
+    placeholders: dict[str, str], breaks: BreaksBuild,
 ) -> dict:
-    """Все данные главной одним словарём: `story`, `horizons`, `fact`, `teaser`."""
+    """Все данные главной одним словарём: `story`, `horizons`, `fact`, `teaser`, `breaks`."""
     return {
         "story": build_story(wide),
         "horizons": build_horizons(
@@ -1094,6 +1290,7 @@ def build_landing_data(
         ),
         "fact": aggregate,
         "teaser": build_teaser(demo, wide, forward_cfg),
+        "breaks": breaks.data,
     }
 
 
@@ -1179,21 +1376,27 @@ def main(argv: list[str] | None = None) -> int:
         aggregate=aggregate, built=today.isoformat(),
     )
 
+    # Раздел «Изломы»: фраза резюме отчёта и доли территорий с изломом — из файлов стенда разладок.
+    breaks = build_breaks(load_cp_tables(cp_cfg), cp_cfg, penalty)
+    placeholders.update({
+        "cp_claim": breaks.claim_html, "cp_method": breaks.method, "cp_penalty": breaks.penalty,
+    })
+
     landing = build_landing_data(
         wide=wide, summary=summary, full_cfg=full_cfg, forward_cfg=forward_cfg,
         horizons_cfg=horizons_cfg, horizons_summary=horizons_summary, aggregate=aggregate,
-        demo=demo, placeholders=placeholders,
+        demo=demo, placeholders=placeholders, breaks=breaks,
     )
     placeholders["landing_json"] = landing_json(landing)
 
     template_path = ROOT / "site" / "index.template.html"
-    html = Template(template_path.read_text(encoding="utf-8")).substitute(placeholders)
+    page_html = Template(template_path.read_text(encoding="utf-8")).substitute(placeholders)
 
     # Пороги и подстановки проверены выше, в памяти: на диск идёт только собранное целиком.
     write_demo_data(demo, data_dir)
     out.mkdir(parents=True, exist_ok=True)
     index_path = out / "index.html"
-    index_path.write_text(html, encoding="utf-8")
+    index_path.write_text(page_html, encoding="utf-8")
 
     print(f"написано: {index_path}")
     print(f"данные стенда: {data_dir} — {demo.total_bytes} байт (порог {MAX_DEMO_BYTES})")
