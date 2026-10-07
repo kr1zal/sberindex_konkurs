@@ -42,6 +42,8 @@
                          без пары, и счёт по имени (n_homonym_*) такой ряд омонимом
                          больше не считает
     default_mo           МО, которое стенд открывает по умолчанию
+    quick                [{id, short}, …] — быстрые кнопки под полем поиска: ряд (series_id) и
+                         короткая подпись кнопки, порядок как у STAND_QUICK_MO
     forecast_rule        [{from, to, model, horizon, label}, …] — отрезки месяцев
                          прогноза подряд с одной моделью и горизонтом; label — как
                          в models[].label (или сырой model, если такой модели там нет)
@@ -184,6 +186,20 @@ TEASER_MO = [
     (DEFAULT_MO, "Орёл"),
     ("городской округ город Казань", "Казань"),
     ("Михайловский муниципальный район #2", "Михайловский р-н #2"),
+]
+
+# Быстрые кнопки под полем поиска на стенде: ряд (series_id панели) и короткая подпись кнопки.
+# Набор подобран так, чтобы с первого нажатия были видны все случаи стенда: города с регионом
+# и ОКТМО, ряд-омоним с номером «#N» (в адресе он идёт закодированным) и ряды без региона,
+# у которых стенд объясняет, почему регион не приписан. Подписи общих с блоком «Стенд» главной
+# рядов совпадают с TEASER_MO. Ряд, которого нет в панели, роняет сборку (`build_quick`).
+STAND_QUICK_MO = [
+    (DEFAULT_MO, "Орёл"),
+    ("городской округ город Казань", "Казань"),
+    ("городской округ город Новосибирск", "Новосибирск"),
+    ("городской округ город Екатеринбург", "Екатеринбург"),
+    ("Михайловский муниципальный район #2", "Михайловский р-н #2"),
+    ("Ардатовский муниципальный район", "Ардатовский р-н"),
 ]
 
 # Наукаст на месячных данных — это горизонт 1 (README, отчёт, configs/horizons.yaml): внутри
@@ -590,6 +606,18 @@ def _load_breaks(cp_cfg: dict, penalty: float) -> dict[str, list[str]]:
     return {series: sorted(months) for series, months in subset.groupby("series_id")["month"]}
 
 
+def build_quick(series_ids) -> list[dict[str, str]]:
+    """Поле `quick` файла `demo/data/index.json`: быстрые кнопки стенда из `STAND_QUICK_MO`.
+
+    Ряд, которого нет среди `series_ids`, роняет сборку: кнопка на несуществующий ряд
+    открыла бы стенд с МО по умолчанию и сообщением «в данных стенда нет»."""
+    available = set(series_ids)
+    missing = [series_id for series_id, _ in STAND_QUICK_MO if series_id not in available]
+    if missing:
+        raise ValueError(f"МО быстрых кнопок стенда нет среди рядов панели: {', '.join(missing)}")
+    return [{"id": series_id, "short": short} for series_id, short in STAND_QUICK_MO]
+
+
 class DemoBuild(NamedTuple):
     """Данные стенда, собранные в памяти: что писать, сколько это весит и то, что нужно главной."""
 
@@ -713,6 +741,7 @@ def build_demo_data(
         "n_hash_names": int(hash_names.nunique()),
         "n_hash_series": int(len(hash_series)),
         "default_mo": DEFAULT_MO,
+        "quick": build_quick(wide.columns),
         "forecast_rule": forecast_rule,
         "known_model": forward_cfg["known_aggregate"],
         "breaks": {

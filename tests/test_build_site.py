@@ -40,7 +40,7 @@ _spec.loader.exec_module(build_site)
 INDEX_JSON_KEYS = {
     "built", "unit", "origin", "panel_months", "forecast_months", "n_series",
     "n_no_region", "n_homonym_names", "n_homonym_series", "n_hash_names", "n_hash_series",
-    "default_mo", "forecast_rule", "known_model", "breaks", "folds", "models",
+    "default_mo", "quick", "forecast_rule", "known_model", "breaks", "folds", "models",
     "panel_mae", "series",
 }
 AGGREGATE_JSON_KEYS = {
@@ -316,6 +316,39 @@ class BuildSiteTest(unittest.TestCase):
         names = {re.sub(r" #\d+$", "", s) for s in suffixed}
         self.assertEqual(self.index_json["n_hash_series"], len(suffixed))
         self.assertEqual(self.index_json["n_hash_names"], len(names))
+
+    def test_quick_buttons_point_at_panel_series_with_short_labels(self) -> None:
+        # Быстрые кнопки стенда: каждая — ряд панели (иначе кнопка открыла бы МО по умолчанию
+        # с сообщением «в данных стенда нет»), подписи короткие и не повторяются.
+        quick = self.index_json["quick"]
+        self.assertGreaterEqual(len(quick), 3)
+        columns = set(self.wide.columns)
+        for item in quick:
+            with self.subTest(series=item["id"]):
+                self.assertEqual(set(item), {"id", "short"})
+                self.assertIn(item["id"], columns)
+                self.assertTrue(item["short"].strip())
+                self.assertLess(len(item["short"]), len(item["id"]))
+        ids = [item["id"] for item in quick]
+        self.assertEqual(len(set(ids)), len(ids), "ряд встречается среди кнопок дважды")
+        shorts = {item["id"]: item["short"] for item in quick}
+        self.assertEqual(len(set(shorts.values())), len(quick), "две кнопки с одной подписью")
+        # Страница без ?mo= открывается на МО по умолчанию — его кнопка должна быть в списке.
+        self.assertIn(self.index_json["default_mo"], ids)
+        # В наборе есть и ряд с регионом, и ряд без региона, и ряд-омоним с номером «#N».
+        regions = {row[0]: row[1] for row in self.index_json["series"]}
+        self.assertTrue(any(regions[i] for i in ids), "нет ряда с регионом")
+        self.assertTrue(any(not regions[i] for i in ids), "нет ряда без региона")
+        self.assertTrue(any(re.search(r" #\d+$", i) for i in ids), "нет ряда с номером «#N»")
+        # Общие с блоком «Стенд» главной ряды подписаны там так же.
+        for series_id, short in build_site.TEASER_MO:
+            if series_id in shorts:
+                self.assertEqual(shorts[series_id], short)
+
+    def test_build_quick_rejects_series_missing_from_the_panel(self) -> None:
+        with self.assertRaises(ValueError):
+            build_site.build_quick([build_site.STAND_QUICK_MO[0][0]])
+        self.assertEqual(build_site.build_quick(self.wide.columns), self.index_json["quick"])
 
     def test_aggregate_json_top_level_keys(self) -> None:
         self.assertEqual(set(self.aggregate_json), AGGREGATE_JSON_KEYS)
