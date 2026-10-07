@@ -60,6 +60,8 @@ _MONTH_OF = ["января", "февраля", "марта", "апреля", "м
              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
 _MONTH_NOM = ["январь", "февраль", "март", "апрель", "май", "июнь",
               "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+_MONTH_IN = ["январе", "феврале", "марте", "апреле", "мае", "июне",
+             "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"]
 _ORDINAL = {0: "первом", 1: "втором", 2: "третьем"}
 
 
@@ -1682,7 +1684,8 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIn("это не сигнал в реальном времени", caption)
         self.assertIn("Штраф — настройка детектора: чем он выше, тем меньше изломов находится.", caption)
         # Изломы названы точками структурных изменений — термином конкурса.
-        self.assertEqual(nodes.text("breaks-title"), "Изломы — точки структурных изменений")
+        # Неразрывный пробел перед тире: на узком экране заголовок не переносится так, чтобы строка начиналась с тире.
+        self.assertEqual(nodes.text("breaks-title"), "Изломы\u00a0— точки структурных изменений")
         self.assertIn("точки структурных изменений — изломы", nodes.text("breaks-lead"))
         # Раздел стоит после проверки фактом и перед блоком прогноза по муниципалитету; ссылка ведёт
         # в раздел отчёта об обнаружении (якорь проверяет тест ссылок), в новой вкладке.
@@ -1693,6 +1696,124 @@ class BuildSiteTest(unittest.TestCase):
         report_ids = _IdCollector()
         report_ids.feed((ROOT / "report" / "report.html").read_text(encoding="utf-8"))
         self.assertIn("sec-cp", report_ids.ids)
+
+    @staticmethod
+    def _report_text() -> str:
+        """Весь текст отчёта без разметки: пробелы разметки схлопнуты, неразрывные остаются."""
+        report = (ROOT / "report" / "report.html").read_text(encoding="utf-8")
+        return _collapse(unescape(re.sub(r"<[^>]+>", "", report)))
+
+    def test_breaks_caveats_repeat_the_reports_words_next_to_the_numbers_recomputed_from_the_csv(self) -> None:
+        # Столбики 50,5 / 63,7 / 85,8% — картина при штрафе, который стенд отвергает; отчёт нигде не ставит эти числа
+        # без двух оговорок: пики — концы одного отрезка с декабрём внутри, а не отдельные шоки, и при выбранном штрафе
+        # излом в любой месяц находится не больше чем у малой доли территорий. Числа пересчитаны здесь из CSV своими
+        # выражениями, слова сверены с отрисованным отчётом.
+        cp_cfg = yaml.safe_load((ROOT / "configs" / "changepoints.yaml").read_text(encoding="utf-8"))
+        protocol = f"v{cp_cfg['protocol_version']}"
+        nes_spec = importlib.util.spec_from_file_location("news_event_study", ROOT / "scripts" / "news_event_study.py")
+        nes = importlib.util.module_from_spec(nes_spec)
+        nes_spec.loader.exec_module(nes)
+        offline_penalty = float(nes.PENALTY)
+        events = sorted(str(e) for e in cp_cfg["realtime"]["events"])
+        detector, mode = cp_cfg["realtime"]["detector"], cp_cfg["realtime"]["mode"]
+
+        def table(name: str, **kwargs) -> pd.DataFrame:
+            frame = read_results(ROOT / "results" / f"{name}.csv", **kwargs)
+            return frame[frame["protocol"] == protocol]
+
+        stand_events = table("cp_realtime_events", dtype={"crossed_month": object})
+        selected = float(stand_events.loc[stand_events["selected"].astype(str).str.lower() == "true", "penalty"].iloc[0])
+        self.assertNotEqual(selected, offline_penalty, "штрафы равны: оговорки о штрафе на странице быть не должно")
+        offline = table("cp_offline")
+        ceiling = float(offline.loc[np.isclose(offline["penalty"], selected), "share"].max())
+        summary = table("cp_summary")
+        false_alarm = float(summary.loc[
+            (summary["detector"] == detector) & (summary["mode"] == mode) & np.isclose(summary["penalty"], offline_penalty),
+            "ложных на чистых, %"].iloc[0])
+        series = table("cp_offline_series")
+        series = series[np.isclose(series["penalty"], offline_penalty)]
+        first, second, last = events[0], events[1], events[-1]
+        with_first = set(series.loc[series["month"] == first, "series_id"])
+        pair = len(with_first & set(series.loc[series["month"] == second, "series_id"]))
+        self.assertGreaterEqual(pair / len(with_first), 0.9)
+        self.assertEqual(self.landing["breaks"]["top"], events, "пики — те же месяцы, что события конфига")
+
+        gap = int((pd.Period(second, "M") - pd.Period(first, "M")).n)
+        segment = [str(pd.Period(first, "M") + i) for i in range(gap)]
+        tail = [str(m) for m in pd.period_range(last, self.wide.index[-1].strftime("%Y-%m"), freq="M")]
+        self.assertTrue(any(m.endswith("-12") for m in segment) and any(m.endswith("-12") for m in tail))
+        self.assertEqual(len(segment), len(tail))
+        last_ids = set(series.loc[series["month"] == last, "series_id"])
+        self.assertTrue(series[series["series_id"].isin(last_ids) & (series["month"] > last)].empty)
+
+        def pct(value: float) -> str:
+            text = _fmt(value, 1)
+            return f"{text[:-2] if text.endswith(',0') else text}%"
+
+        def pen(value: float) -> str:
+            return _fmt(value, 0 if float(value).is_integer() else 1)
+
+        def nom(month: str) -> str:
+            year, number = month.split("-")
+            return f"{_MONTH_NOM[int(number) - 1]} {year}"
+
+        def prepositional(month: str) -> str:
+            year, number = month.split("-")
+            return f"{_MONTH_IN[int(number) - 1]} {year}"
+
+        def span(months: list[str]) -> str:
+            return f"{_MONTH_NOM[int(months[0][5:]) - 1]}–{nom(months[-1])}"
+
+        nominative = {2: "два", 3: "три", 4: "четыре"}
+        genitive = {2: "двух", 3: "трёх", 4: "четырёх"}
+        ceiling_up = math.ceil(ceiling * 10 - 1e-9) / 10  # верхняя граница «не больше»: округление вверх
+        shocks = f"{nominative[len(events)]} независимых {_plural(len(events), 'шок', 'шока', 'шоков')}"
+        evidence = (
+            f"У {_fmt(pair, 0)} из {_fmt(len(with_first), 0)} {_plural(len(with_first), 'ряда', 'рядов', 'рядов')} "
+            f"с изломом в {prepositional(first)} есть излом и в {prepositional(second)}, ровно через {gap} "
+            f"{_plural(gap, 'месяц', 'месяца', 'месяцев')}: это начало и конец отрезка {span(segment)}. "
+            f"{nom(last).capitalize()} открывает такой же отрезок в конце панели — {span(tail)}.")
+        segments_paragraph = (
+            f"Подсвеченные столбики — не {shocks}, а концы {genitive[len(segment)]}месячных отрезков с декабрём "
+            f"внутри. {evidence}")
+        penalty_paragraph = (
+            f"Штраф {pen(offline_penalty)} стенд отвергает: при нём потоковый {detector.upper()} тревожит на "
+            f"{pct(false_alarm)} нетронутых рядов. При выбранном по стенду штрафе {pen(selected)} и по полному ряду "
+            f"излом в любой месяц находится не больше чем у {pct(ceiling_up)} территорий.")
+
+        text = _IdsOf(self.html).text("breaks-caveats")
+        self.assertEqual(text, f"{segments_paragraph} {penalty_paragraph}")
+        block = re.search(r'<div class="breaks-caveats" id="breaks-caveats">(.*?)</div>', self.html, re.S).group(1)
+        self.assertEqual(len(re.findall(r"<p>", block)), 2, "каждая оговорка — свой абзац")
+
+        # Слова — отчёта: тот же тезис, те же два предложения про отрезки, та же оговорка про штраф.
+        report = self._report_text()
+        for fragment in (
+            f"не {shocks}, а концы {genitive[len(segment)]}месячных отрезков с декабрём внутри",
+            evidence,
+            f"при штрафе, который стенд отвергает: при нём потоковый {detector.upper()} тревожит на "
+            f"{pct(false_alarm)} нетронутых рядов",
+            f"при штрафе {pen(selected)} и по полному ряду излом в любой месяц находится не больше чем у "
+            f"{pct(ceiling_up)} территорий",
+        ):
+            with self.subTest(fragment=fragment[:60]):
+                self.assertIn(fragment, report)
+
+    def test_breaks_caveats_sit_under_the_caption_of_the_bars_before_the_link_to_the_report(self) -> None:
+        # Оговорки стоят в карточке с графиком, сразу под подписью, а не отдельным разделом: столбики и их оговорки
+        # читаются вместе. Ссылка на отчёт идёт после карточки.
+        self.assertEqual(self.html.count('<div class="plot-card breaks-card">'), 1)
+        start = self.html.index('<div class="plot-card breaks-card">')
+        depth, end = 0, None
+        for match in re.finditer(r"<div\b|</div>", self.html[start:]):
+            depth += 1 if match.group(0) == "<div" else -1
+            if depth == 0:
+                end = start + match.end()
+                break
+        caption = self.html.index('id="breaks-caption"')
+        caveats = self.html.index('id="breaks-caveats"')
+        link = self.html.index('href="report/report.html#sec-cp"')
+        self.assertTrue(start < caption < caveats < end < link, (start, caption, caveats, end, link))
 
     def test_sections_are_numbered_in_page_order(self) -> None:
         # Разделы нумеруются подряд, в порядке на странице: новый раздел «Изломы» сдвинул три следующих.
@@ -1949,6 +2070,132 @@ class ChangepointClaimTest(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             build_site.build_breaks(tables, self.CFG, 1.0)
         self.assertIn("двух годах данных", str(caught.exception))
+
+
+class ChangepointCaveatsTest(unittest.TestCase):
+    """Оговорки к столбикам раздела «Изломы» на таблицах, которые подставляют ветки отчёта, не встречающиеся в
+    текущем прогоне: хвост без декабря, пики не одного отрезка, равные штрафы, верхняя граница «не больше».
+    Таблицы синтетические, генератор не запускается."""
+
+    MONTHS = [f"{2023 + i // 12}-{i % 12 + 1:02d}" for i in range(24)]
+    EVENTS = ["2023-10", "2024-01", "2024-10"]
+    CFG = {"realtime": {"detector": "pelt", "mode": "ratio", "events": EVENTS}, "bench": {"detectors": ["pelt"]}}
+
+    SEGMENTS = (
+        "Подсвеченные столбики — не три независимых шока, а концы трёхмесячных отрезков с декабрём внутри. "
+        "У 10 из 10 рядов с изломом в октябре 2023 есть излом и в январе 2024, ровно через 3 месяца: "
+        "это начало и конец отрезка октябрь–декабрь 2023. Октябрь 2024 открывает такой же отрезок в конце панели — "
+        "октябрь–декабрь 2024.")
+    ONE_SEGMENT = (
+        "Подсвеченные столбики — не три независимых шока. "
+        "У 10 из 10 рядов с изломом в октябре 2023 есть излом и в январе 2024, ровно через 3 месяца: "
+        "октябрь 2023 и январь 2024 — начало и конец одного отрезка, а не два независимых события.")
+
+    def tables(self, *, offline=1.0, selected=5.0, ceiling=0.14, together=10, alone=0, tail_breaks=(),
+               false_alarm=100.0):
+        """Пять таблиц стенда: картина при штрафе `offline`, выбранный стендом штраф `selected`; у `together` рядов
+        излом и в октябре 2023, и в январе 2024, ещё у `alone` — только в октябре 2023; `tail_breaks` — месяцы,
+        в которые у ряда с изломом в октябре 2024 есть ещё излом."""
+        grid = sorted({offline, selected})
+        shares, summary, realtime, stand_events, rows = [], [], [], [], []
+        for penalty in grid:
+            for month in self.MONTHS:
+                if penalty == selected:
+                    share = ceiling if month == "2024-10" else 0.0
+                else:
+                    share = {"2023-10": 50.5, "2024-01": 63.7, "2024-10": 85.8}.get(month, 1.0)
+                shares.append({"protocol": "v2", "penalty": penalty, "month": month, "share": share})
+                realtime.append({"protocol": "v2", "penalty": penalty, "month": month, "share": 0.0})
+            summary.append({"protocol": "v2", "detector": "pelt", "mode": "ratio", "penalty": penalty,
+                            "ложных на чистых, %": false_alarm if penalty == offline else 13.9})
+            for event in self.EVENTS:
+                stand_events.append({"protocol": "v2", "penalty": penalty, "selected": penalty == selected,
+                                     "event": event, "crossed_month": float("nan"), "delay": float("nan")})
+        summary.append({"protocol": "v2", "detector": "cusum", "mode": "ratio", "penalty": float("nan"),
+                        "ложных на чистых, %": 0.0})
+
+        def add(series_id: str, *months: str) -> None:
+            rows.extend({"protocol": "v2", "penalty": offline, "series_id": series_id, "month": m} for m in months)
+
+        for i in range(together):
+            add(f"вместе {i}", "2023-10", "2024-01")
+        for i in range(alone):
+            add(f"один {i}", "2023-10")
+        for i in range(5):
+            add(f"хвост {i}", "2024-10", *(tail_breaks if i == 0 else ()))
+        return {"cp_summary": pd.DataFrame(summary), "cp_realtime": pd.DataFrame(realtime),
+                "cp_realtime_events": pd.DataFrame(stand_events), "cp_offline": pd.DataFrame(shares),
+                "cp_offline_series": pd.DataFrame(rows)}
+
+    def caveats(self, offline=1.0, cfg=None, **kwargs) -> list[str]:
+        return build_site.changepoint_caveats(self.tables(offline=offline, **kwargs), cfg or self.CFG, offline)
+
+    def test_both_caveats_when_the_peaks_are_ends_of_one_segment_and_the_stand_rejects_the_penalty(self) -> None:
+        got = self.caveats()
+        self.assertEqual(got, [
+            self.SEGMENTS,
+            "Штраф 1 стенд отвергает: при нём потоковый PELT тревожит на 100% нетронутых рядов. При выбранном по "
+            "стенду штрафе 5 и по полному ряду излом в любой месяц находится не больше чем у 0,2% территорий."])
+
+    def test_ceiling_is_rounded_up_so_that_not_more_than_stays_true(self) -> None:
+        # Максимум 0,14%: обычное округление дало бы «0,1%» — меньше самого максимума.
+        self.assertIn("не больше чем у 0,2% территорий", self.caveats(ceiling=0.14)[-1])
+        self.assertIn("не больше чем у 0,1% территорий", self.caveats(ceiling=0.0986)[-1])
+        self.assertIn("не больше чем у 0,1% территорий", self.caveats(ceiling=0.1)[-1])
+        self.assertIn("не больше чем у 0% территорий", self.caveats(ceiling=0.0)[-1])
+
+    def test_false_alarm_rate_comes_from_the_summary_at_the_offline_penalty(self) -> None:
+        self.assertIn("тревожит на 53,3% нетронутых рядов", self.caveats(false_alarm=53.3)[-1])
+
+    def test_short_wording_when_the_tail_has_no_december_of_its_own(self) -> None:
+        # У ряда с изломом в октябре 2024 есть ещё излом в ноябре: хвост — не такой же отрезок, и фраза про
+        # «концы трёхмесячных отрезков с декабрём» не подходит; остаётся про начало и конец одного отрезка.
+        got = self.caveats(tail_breaks=("2024-11",))
+        self.assertEqual(got[0], self.ONE_SEGMENT)
+        self.assertEqual(len(got), 2)
+
+    def test_no_segment_caveat_when_the_peaks_are_not_the_ends_of_one_segment(self) -> None:
+        # Из рядов с изломом в октябре 2023 в январе 2024 он есть у половины, меньше девяти десятых: отрезка нет.
+        got = self.caveats(together=5, alone=5)
+        self.assertEqual(len(got), 1)
+        self.assertTrue(got[0].startswith("Штраф 1 стенд отвергает"))
+        # Девять десятых — граница включительно.
+        self.assertIn("У 9 из 10 рядов с изломом в октябре 2023", self.caveats(together=9, alone=1)[0])
+
+    def test_no_penalty_caveat_when_the_picture_is_taken_at_the_penalty_the_stand_chose(self) -> None:
+        got = self.caveats(offline=5.0, selected=5.0)
+        self.assertEqual(got, [self.SEGMENTS])
+
+    def test_nothing_to_say_when_both_conditions_fail(self) -> None:
+        self.assertEqual(self.caveats(offline=5.0, selected=5.0, together=3, alone=7), [])
+
+    def test_unknown_events_and_a_missing_summary_row_stop_the_build(self) -> None:
+        other_events = {**self.CFG, "realtime": {**self.CFG["realtime"], "events": ["2022-01", "2024-01", "2024-10"]}}
+        with self.assertRaises(ValueError) as caught:
+            self.caveats(cfg=other_events)
+        self.assertIn("2022-01", str(caught.exception))
+        tables = self.tables()
+        summary = tables["cp_summary"]
+        tables["cp_summary"] = summary[~np.isclose(summary["penalty"], 1.0)]
+        with self.assertRaises(ValueError):
+            build_site.changepoint_caveats(tables, self.CFG, 1.0)
+
+    def test_build_breaks_puts_the_paragraphs_into_the_page_block(self) -> None:
+        tables = self.tables()
+        tables["cp_summary"] = self._summary_for_the_claim(tables["cp_summary"])
+        built = build_site.build_breaks(tables, {**self.CFG, "bench": {"detectors": ["pelt", "cusum"]}}, 1.0)
+        self.assertEqual(built.caveats_html.count("<p>"), 2)
+        self.assertTrue(built.caveats_html.startswith("<p>Подсвеченные столбики"))
+
+    @staticmethod
+    def _summary_for_the_claim(summary: pd.DataFrame) -> pd.DataFrame:
+        """К строкам оговорок — строки, которые читает фраза резюме: raw и ratio у PELT и CUSUM, J Юдена."""
+        rows = []
+        for _, row in summary.iterrows():
+            for mode, fa, j in (("raw", 60.0, -50.0), ("ratio", 0.0, 12.0)):
+                rows.append({**row.to_dict(), "mode": mode, "ложных на чистых, %":
+                             fa if mode == "raw" else row["ложных на чистых, %"], "J Юдена": j})
+        return pd.DataFrame(rows)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@
 Резюме отчёта (`report/report.qmd`) объясняет тот же прогон теми же файлами. Отсюда
 перенесена ЛОГИКА, а не результат: `compute_placeholders` пересчитывает её на текущих
 `results/*.csv`, и при другом прогоне подставит другие, но так же верные числа.
-Помощники форматирования (`rub`, `num`, `on_folds`, `plural`, `and_join`, `in_words_m`)
+Помощники форматирования (`rub`, `num`, `on_folds`, `plural`, `and_join`, `in_words`, `in_words_m`)
 и словарь русских названий моделей (`MODEL_LABELS`) — те же самые, что в отчёте
 (`report/report.qmd`, строки 42-102 и 1682-1692), с тем же поведением.
 
@@ -21,6 +21,11 @@
 (`report/report.qmd`, ~строки 545-1060): `changepoint_claim` пересчитывает его условия на
 `results/cp_*.csv` и пишет ту же фразу без ссылки «[об обнаружении]». Совпадение с отрисованным
 резюме отчёта проверяет тест.
+
+К столбикам того же раздела — две оговорки, которые отчёт ставит к этим же числам (`report/report.qmd`,
+раздел об обнаружении, ~строки 4938-4955, и «Что нашли в самих данных»): пики — концы одного отрезка, а
+не отдельные шоки, и штраф, при котором они сняты, стенд отвергает. `changepoint_caveats` пересчитывает
+их условия и числа на `results/cp_*.csv` (в том числе на `cp_offline_series.csv`), слова — отчёта.
 
 ## Формат данных стенда — контракт с `demo/demo.js`
 
@@ -285,10 +290,16 @@ AGGREGATE_MODEL_LABELS = {
 # ---------------------------------------------------------------------------
 
 _ORDINAL = {0: "первом", 1: "втором", 2: "третьем"}
-_NUMBER_WORDS_M = ["ноль", "один", "два", "три", "четыре", "пять",
-                    "шесть", "семь", "восемь", "девять", "десять"]
+# Формы числа словом — как в отчёте (`report.qmd::_NUMBER_WORDS`), те, что нужны страницам: «один фолд»,
+# «три независимых шока» (им_м) и «трёхмесячных» (род).
+_NUMBER_WORDS = {
+    "им_м": ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять"],
+    "род": ["нуля", "одного", "двух", "трёх", "четырёх", "пяти", "шести", "семи", "восьми", "девяти", "десяти"],
+}
 MONTH_OF = ["января", "февраля", "марта", "апреля", "мая", "июня",
             "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+MONTH_IN = ["январе", "феврале", "марте", "апреле", "мае", "июне",
+            "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"]
 MONTH_NOM = ["январь", "февраль", "март", "апрель", "май", "июнь",
              "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
 
@@ -333,9 +344,15 @@ def and_join(items) -> str:
     return ", ".join(items[:-1]) + " и " + items[-1]
 
 
+def in_words(n: int, form: str) -> str:
+    """Малое число в прозе — словом: «три независимых шока», «трёх» (`report.qmd::in_words`, формы «им_м» и
+    «род»); от одиннадцати — цифрами."""
+    return _NUMBER_WORDS[form][n] if 0 <= n <= 10 else str(n)
+
+
 def in_words_m(n: int) -> str:
     """Малое число мужского рода словом: «один фолд» (`report.qmd::in_words`, форма «им_м»)."""
-    return _NUMBER_WORDS_M[n] if 0 <= n <= 10 else str(n)
+    return in_words(n, "им_м")
 
 
 def _date_words(value: dt.date) -> str:
@@ -451,7 +468,8 @@ def compute_placeholders(
       «первые 12 месяцев панели».
     - ``landing_json`` — данные главной (формат — докстринг модуля); добавляет `main` после
       сборки, сюда он не входит. Так же `main` добавляет ``cp_claim`` (HTML фразы об изломах,
-      `changepoint_claim`), ``cp_method`` («PELT на темпах роста») и ``cp_penalty`` (штраф
+      `changepoint_claim`), ``cp_caveats`` (HTML абзацев с оговорками отчёта к столбикам,
+      `changepoint_caveats`), ``cp_method`` («PELT на темпах роста») и ``cp_penalty`` (штраф
       офлайновой картины): они считаются не здесь, а `build_breaks` из файлов стенда разладок.
       Так же — ``recommended_note``: какая модель строит прогноз на год вперёд и почему она не
       «лучшая в среднем» (`recommended_note`, по `forecast_rule` данных стенда).
@@ -586,7 +604,7 @@ def compute_placeholders(
 
 
 # ---------------------------------------------------------------------------
-# Изломы — точки структурных изменений: фраза резюме отчёта и доли территорий с изломом
+# Изломы — точки структурных изменений: фраза резюме отчёта, доли территорий с изломом и оговорки к ним
 # ---------------------------------------------------------------------------
 
 # Названия детекторов и режимов — как в отчёте (`report/report.qmd`: `_CP_DET`, `_CP_DET_GEN`, `_CP_ON`,
@@ -601,9 +619,18 @@ CP_MODE_ON = {"ratio": "на темпах роста", "raw": "на сырых �
 # останавливает сборку, а не печатает их молча.
 CP_CLAIM_PANEL_MONTHS = 24
 
+# Два месяца события — концы одного отрезка, если излом в первом из них и во втором тоже есть не менее чем у этой
+# доли рядов с изломом в первом (`_cp_one_segment` отчёта, `report/report.qmd`, ~строка 953).
+CP_ONE_SEGMENT_SHARE = 0.9
+
 # Таблицы стенда разладок, которые читает раздел: сводка по детекторам, потоковая доля по месяцам, события
 # потокового сигнала и изломы по полному ряду. Остальные файлы стенда нужны отчёту, а не странице.
 CP_TABLES = ("cp_summary", "cp_realtime", "cp_realtime_events", "cp_offline")
+
+# Изломы по рядам — какой ряд в каком месяце: нужны оговорке «концы одного отрезка». В файле только ряды с
+# изломом, поэтому штраф, при котором не нашёл ничего ни один ряд, в нём не встречается, и сетку штрафов у него,
+# как и у отчёта, не сверяют.
+CP_SERIES_TABLES = ("cp_offline_series",)
 
 
 def _cp_true(column: pd.Series) -> pd.Series:
@@ -624,25 +651,64 @@ def _cp_range(values) -> str:
     return hi if lo == hi else f"{lo[:-1]}–{hi}"
 
 
+def _cp_pct_up(value: float) -> str:
+    """Процент для оборота «не больше чем у …»: округление вверх до десятых, а не к ближайшему. У 0,14%
+    обычное округление дало бы «0,1%» — меньше самого максимума, и «не больше» стало бы неверным
+    (`report.qmd::num_up`)."""
+    return _cp_pct(math.ceil(float(value) * 10 - 1e-9) / 10)
+
+
 def _cp_pen(value: float) -> str:
     """Штраф в тексте: «3», «1», «2,5» (`report.qmd::_cp_pen`)."""
     return num(value, 0 if float(value).is_integer() else 1)
 
 
+def _cp_ym(month: str, case: str = "им") -> str:
+    """«2023-10» → «октябрь 2023»; «пр» — «октябре 2023», «род» — «октября 2023» (`report.qmd::_cp_ym`)."""
+    year, number = str(month).split("-")
+    names = {"им": MONTH_NOM, "пр": MONTH_IN, "род": MONTH_OF}[case]
+    return f"{names[int(number) - 1]} {year}"
+
+
+def _cp_span(months: list[str]) -> str:
+    """Месяцы подряд: «октябрь–декабрь 2024», через год — «ноябрь 2023 – январь 2024» (`report.qmd::_cp_span`)."""
+    first, last = months[0], months[-1]
+    if first == last:
+        return _cp_ym(first)
+    if first[:4] == last[:4]:
+        return f"{MONTH_NOM[int(first[5:]) - 1]}–{_cp_ym(last)}"
+    return f"{_cp_ym(first)} – {_cp_ym(last)}"
+
+
+def _cp_cap(text: str) -> str:
+    """Первая буква заглавная (`report.qmd::_cp_cap`)."""
+    return text[:1].upper() + text[1:]
+
+
+def _cp_mw(value: float) -> str:
+    """«2 месяца», «5 месяцев», «1,5 месяца»: дробное число — в родительном единственного (`report.qmd::_cp_mw`)."""
+    value = float(value)
+    if not np.isfinite(value):
+        return "—"
+    if value.is_integer():
+        return f"{num(value, 0)} {plural(int(value), 'месяц', 'месяца', 'месяцев')}"
+    return f"{num(value, 1)} месяца"
+
+
 def load_cp_tables(cp_cfg: dict, root: Path = ROOT) -> dict[str, pd.DataFrame]:
-    """`CP_TABLES` из `results/` — только версии протокола `changepoints.yaml::protocol_version` и на сетке
-    штрафов конфига (`report.qmd::_cp_table` и проверка сетки там же). Файл другой версии или другой сетки
-    страница не принимает: числа прежнего прогона в раздел действующего молча не встанут."""
+    """`CP_TABLES` и `CP_SERIES_TABLES` из `results/` — только версии протокола `changepoints.yaml::protocol_version`,
+    а `CP_TABLES` ещё и на сетке штрафов конфига (`report.qmd::_cp_table` и проверка сетки там же). Файл другой
+    версии или другой сетки страница не принимает: числа прежнего прогона в раздел действующего молча не встанут."""
     protocol = f"v{cp_cfg['protocol_version']}"
     grid = sorted(float(p) for p in cp_cfg["bench"]["penalties"])
     tables = {}
-    for name in CP_TABLES:
+    for name in CP_TABLES + CP_SERIES_TABLES:
         kwargs = {"dtype": {"crossed_month": object}} if name == "cp_realtime_events" else {}
         frame = read_results(root / "results" / f"{name}.csv", **kwargs)
         if "protocol" not in frame or set(frame["protocol"]) != {protocol}:
             raise ValueError(
                 f"results/{name}.csv — не версии протокола {protocol}: запустите scripts/changepoints.py")
-        if sorted(set(frame["penalty"].dropna().astype(float))) != grid:
+        if name in CP_TABLES and sorted(set(frame["penalty"].dropna().astype(float))) != grid:
             raise ValueError(
                 f"results/{name}.csv посчитан на другой сетке штрафов, чем configs/changepoints.yaml: "
                 "перезапустите scripts/changepoints.py")
@@ -728,25 +794,19 @@ def changepoint_claim(cps: pd.DataFrame, cpe: pd.DataFrame, cp_cfg: dict) -> tup
     return head, body
 
 
-class BreaksBuild(NamedTuple):
-    """Раздел «Изломы»: фраза резюме (HTML и текст), подписи графика и его данные."""
+class OfflinePicture(NamedTuple):
+    """Офлайновая картина изломов — доли территорий по месяцам, найденные задним числом по полному ряду."""
 
-    claim_html: str
-    claim_text: str
-    method: str
-    penalty: str
-    data: dict
+    p_sel: float  # штраф, который выбрал стенд (`cp_realtime_events.csv::selected`)
+    months: list  # месяцы панели стенда, по порядку
+    offline: pd.DataFrame  # доли изломов (%): месяцы — строки, штрафы сетки — колонки (`cp_offline.csv`)
+    share: pd.Series  # доли при штрафе офлайновой картины — столбики раздела
+    top: list  # месяцы массового согласия: столько наибольших долей, сколько событий, по порядку месяцев
 
 
-def build_breaks(tables: dict[str, pd.DataFrame], cp_cfg: dict, penalty: float) -> BreaksBuild:
-    """Раздел «Изломы» главной: фраза резюме отчёта и доли территорий с изломом по месяцам
-    (`landing-data.breaks`, формат — докстринг модуля).
-
-    Доли — офлайновая картина отчёта: изломы по полному ряду, найденные задним числом, на протоколе конфига
-    и штрафе `penalty` (`scripts/news_event_study.py::PENALTY`) — те же, что изломы на стенде прогноза
-    по муниципалитету. Это не сигнал в реальном времени: так сказано и в подписи графика."""
-    head, body = changepoint_claim(tables["cp_summary"], tables["cp_realtime_events"], cp_cfg)
-    realtime = cp_cfg["realtime"]
+def _offline_picture(tables: dict[str, pd.DataFrame], cp_cfg: dict, penalty: float) -> OfflinePicture:
+    """Доли изломов по месяцам при штрафе `penalty` (`scripts/news_event_study.py::PENALTY`) на протоколе
+    конфига. Панель не двухлетняя — отказ: слова «на двух годах данных» из резюме отчёта стали бы неверными."""
     cpe, cpr, cpo = tables["cp_realtime_events"], tables["cp_realtime"], tables["cp_offline"]
     p_sel = float(cpe.loc[_cp_true(cpe["selected"]), "penalty"].iloc[0])
     months = list(cpr.loc[cpr["penalty"] == p_sel, "month"])
@@ -760,17 +820,121 @@ def build_breaks(tables: dict[str, pd.DataFrame], cp_cfg: dict, penalty: float) 
             f"в results/cp_offline.csv нет долей изломов при штрафе {_cp_pen(penalty)} на все месяцы панели")
     share = offline[float(penalty)]
     # Месяцы массового согласия — столько наибольших долей, сколько событий в конфиге стенда, по порядку месяцев.
-    top = sorted(share.nlargest(len(realtime["events"])).index, key=months.index)
+    top = sorted(share.nlargest(len(cp_cfg["realtime"]["events"])).index, key=months.index)
+    return OfflinePicture(p_sel=p_sel, months=months, offline=offline, share=share, top=top)
+
+
+def changepoint_caveats(tables: dict[str, pd.DataFrame], cp_cfg: dict, penalty: float) -> list[str]:
+    """Оговорки к столбикам раздела «Изломы» — абзацы, без которых картину нельзя читать как результат. Отчёт
+    ставит их к тем же числам (`report/report.qmd`: раздел об обнаружении, ~строки 4938-4955, и «Что нашли в
+    самих данных», ~строки 1103-1140): условия и слова те же, числа пересчитаны на `results/cp_*.csv`.
+
+    - «не три независимых шока»: у почти всех рядов с изломом в первом месяце события он есть и во втором
+      (`CP_ONE_SEGMENT_SHARE`), и месяцы пиков — концы одного отрезка. Полная формулировка — «концы
+      трёхмесячных отрезков с декабрём внутри» — только если декабрь есть и в отрезке между первыми двумя
+      событиями, и в хвосте от последнего, а длины отрезков равны; иначе — короткая, про начало и конец
+      одного отрезка. Условие не выполнено — абзаца нет;
+    - «штраф, который стенд отвергает»: офлайновая картина снята при штрафе `penalty`, не равном выбранному
+      стендом; при нём потоковый детектор тревожит на `X%` нетронутых рядов, а при выбранном излом
+      по полному ряду в любой месяц находится не больше чем у `Y%` территорий. Штрафы равны — абзаца нет.
+
+    Порядок — как в отчёте: сначала отрезки, затем штраф."""
+    picture = _offline_picture(tables, cp_cfg, penalty)
+    realtime = cp_cfg["realtime"]
+    events = sorted(str(e) for e in realtime["events"])
+    months, top = picture.months, picture.top
+    position = {month: i for i, month in enumerate(months)}
+    outside = [e for e in events if e not in position]
+    if outside:
+        raise ValueError(
+            f"события {', '.join(outside)} из configs/changepoints.yaml нет среди месяцев стенда разладок")
+    paragraphs: list[str] = []
+
+    # Концы одного отрезка: ряды с изломом в первом месяце события, у которых он есть и во втором.
+    series = tables["cp_offline_series"]
+    series = series[np.isclose(series["penalty"], float(penalty))]
+    if len(events) >= 2:
+        first, second = events[0], events[1]
+        with_first = set(series.loc[series["month"] == first, "series_id"])
+        pair = len(with_first & set(series.loc[series["month"] == second, "series_id"]))
+        if with_first and pair / len(with_first) >= CP_ONE_SEGMENT_SHARE:
+            segment = months[position[first]:position[second]]
+            last = top[-1]
+            tail = months[position[last]:]
+            last_ids = set(series.loc[series["month"] == last, "series_id"])
+            decembers = [m for m in tail if m.endswith("-12")]
+            # У рядов последнего события между изломом и декабрём другого излома нет.
+            tail_has_december = bool(decembers) and bool(last_ids) and series[
+                series["series_id"].isin(last_ids) & (series["month"] > last) & (series["month"] <= decembers[-1])
+            ].empty
+            shocks = f"{in_words(len(top), 'им_м')} независимых {plural(len(top), 'шок', 'шока', 'шоков')}"
+            of_first = f"{rub(pair)} из {rub(len(with_first))} {plural(len(with_first), 'ряда', 'рядов', 'рядов')}"
+            gap = _cp_mw(position[second] - position[first])
+            both = (f"У {of_first} с изломом в {_cp_ym(first, 'пр')} есть излом и в {_cp_ym(second, 'пр')}, "
+                    f"ровно через {gap}")
+            if any(m.endswith("-12") for m in segment) and tail_has_december and len(segment) == len(tail):
+                paragraphs.append(
+                    f"Подсвеченные столбики — не {shocks}, а концы {in_words(len(segment), 'род')}месячных отрезков "
+                    f"с декабрём внутри. {both}: это начало и конец отрезка {_cp_span(segment)}. "
+                    f"{_cp_cap(_cp_ym(last))} открывает такой же отрезок в конце панели — {_cp_span(tail)}.")
+            else:
+                paragraphs.append(
+                    f"Подсвеченные столбики — не {shocks}. {both}: {_cp_ym(first)} и {_cp_ym(second)} — начало "
+                    "и конец одного отрезка, а не два независимых события.")
+
+    # Штраф картины не тот, что выбрал стенд: при нём детектор тревожит на нетронутых рядах, а при выбранном
+    # изломов по полному ряду почти нет.
+    p_sel = picture.p_sel
+    if not np.isclose(p_sel, float(penalty)):
+        detector, mode = realtime["detector"], realtime["mode"]
+        cps = tables["cp_summary"]
+        rule_rows = cps[(cps["detector"] == detector) & (cps["mode"] == mode)
+                        & cps["penalty"].notna()].set_index("penalty")
+        if float(penalty) not in rule_rows.index:
+            raise ValueError(
+                f"в results/cp_summary.csv нет строки {detector} {mode} при штрафе {_cp_pen(penalty)}: "
+                "оговорка о штрафе отвергнутой картины не из чего считать")
+        paragraphs.append(
+            f"Штраф {_cp_pen(penalty)} стенд отвергает: при нём потоковый {CP_DETECTOR[detector]} тревожит на "
+            f"{_cp_pct(rule_rows.loc[float(penalty), 'ложных на чистых, %'])} нетронутых рядов. "
+            f"При выбранном по стенду штрафе {_cp_pen(p_sel)} и по полному ряду излом в любой месяц находится "
+            f"не больше чем у {_cp_pct_up(picture.offline[p_sel].max())} территорий.")
+    return paragraphs
+
+
+class BreaksBuild(NamedTuple):
+    """Раздел «Изломы»: фраза резюме (HTML и текст), оговорки к столбикам (HTML), подписи графика и его данные."""
+
+    claim_html: str
+    claim_text: str
+    caveats_html: str
+    method: str
+    penalty: str
+    data: dict
+
+
+def build_breaks(tables: dict[str, pd.DataFrame], cp_cfg: dict, penalty: float) -> BreaksBuild:
+    """Раздел «Изломы» главной: фраза резюме отчёта, доли территорий с изломом по месяцам
+    (`landing-data.breaks`, формат — докстринг модуля) и оговорки отчёта к ним (`changepoint_caveats`).
+
+    Доли — офлайновая картина отчёта: изломы по полному ряду, найденные задним числом, на протоколе конфига
+    и штрафе `penalty` (`scripts/news_event_study.py::PENALTY`) — те же, что изломы на стенде прогноза
+    по муниципалитету. Это не сигнал в реальном времени: так сказано и в подписи графика."""
+    head, body = changepoint_claim(tables["cp_summary"], tables["cp_realtime_events"], cp_cfg)
+    picture = _offline_picture(tables, cp_cfg, penalty)
+    caveats = changepoint_caveats(tables, cp_cfg, penalty)
+    realtime = cp_cfg["realtime"]
     return BreaksBuild(
         claim_html=f"<strong>{html.escape(head, quote=False)}</strong> {html.escape(body, quote=False)}",
         claim_text=f"{head} {body}",
+        caveats_html="\n".join(f"<p>{html.escape(text, quote=False)}</p>" for text in caveats),
         method=f"{CP_DETECTOR[realtime['detector']]} {CP_MODE_ON[realtime['mode']]}",
         penalty=_cp_pen(penalty),
         data={
-            "months": months,
-            "share": [round(float(v), 2) for v in share],
-            "top": top,
-            "top_labels": [_cp_pct(share[m]) for m in top],
+            "months": picture.months,
+            "share": [round(float(v), 2) for v in picture.share],
+            "top": picture.top,
+            "top_labels": [_cp_pct(picture.share[m]) for m in picture.top],
         },
     )
 
@@ -1458,7 +1622,8 @@ def main(argv: list[str] | None = None) -> int:
     # Раздел «Изломы»: фраза резюме отчёта и доли территорий с изломом — из файлов стенда разладок.
     breaks = build_breaks(load_cp_tables(cp_cfg), cp_cfg, penalty)
     placeholders.update({
-        "cp_claim": breaks.claim_html, "cp_method": breaks.method, "cp_penalty": breaks.penalty,
+        "cp_claim": breaks.claim_html, "cp_caveats": breaks.caveats_html,
+        "cp_method": breaks.method, "cp_penalty": breaks.penalty,
         "recommended_note": recommended_note(demo.forecast_rule),
     })
 
