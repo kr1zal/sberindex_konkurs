@@ -133,6 +133,8 @@ python -m venv .venv
 Без флага `run.py` гоняет полную панель (`configs/full.yaml`); пилот на выборке
 из 300 рядов — `--config configs/baseline.yaml`, пишет в `results/baseline/`.
 Тесты — `.venv/bin/python -m unittest discover -s tests -v`, модели они не гоняют.
+Одна проверка раскладки подписей графика стенда (`tests/test_site_layout.py`) запускает `node`;
+если его нет, она пропускается.
 
 Тяжёлые прогоны запускать в фоне и не пропускать вывод через `grep` или `tail` —
 они буферизуют, и лог остаётся пустым до самого конца.

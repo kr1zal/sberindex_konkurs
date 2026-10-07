@@ -259,10 +259,15 @@
   stroke-dasharray: 5 4;
 }
 
+/* Обводка цвета карточки под буквами: линия соседней отметки не перечёркивает подпись. */
 .chart-marker-label {
   fill: var(--ink-soft);
   font-family: var(--font-mono);
   font-size: 11px;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 
 .chart-marker-label-break {

@@ -82,11 +82,27 @@
   color: var(--night-soft);
 }
 
+/* Кегль подогнан под колонку: «одного числа» (в Unbounded около 8,5 кегля) целиком в
+   одной строке, заголовок — в две строки, а не в три. На телефоне колонка — вся ширина
+   за вычетом полей, на планшете заголовок целиком влезает в одну строку, на широком
+   экране колонка — доля обёртки. */
 .hero-title {
   margin: 0;
-  font-size: clamp(2.375rem, 5.6vw, 5rem);
+  font-size: min(2.375rem, calc((100vw - 40px) / 8.8));
   line-height: 1.02;
   letter-spacing: -0.02em;
+}
+
+@media (min-width: 640px) {
+  .hero-title {
+    font-size: clamp(2.375rem, 5.6vw, 5rem);
+  }
+}
+
+@media (min-width: 960px) {
+  .hero-title {
+    font-size: clamp(3rem, calc(6vw - 8px), 4.125rem);
+  }
 }
 
 .hero-sub {
@@ -197,9 +213,12 @@
 }
 
 @media (max-width: 959px) {
+  /* stretch: иначе align-items: center из сетки выше центрирует колонку блоков по ширине
+     содержимого, и на планшете у заголовка, графика и поиска три разных левых края. */
   .hero-grid {
     display: flex;
     flex-direction: column;
+    align-items: stretch;
     gap: 0;
     padding-top: 8px;
   }
@@ -1274,13 +1293,23 @@
   border-left: 1px dashed rgba(255, 181, 71, 0.7);
 }
 
+/* Подпись — на подложке цвета карточки и над линиями соседних изломов: изломы бывают
+   в нескольких месяцах друг от друга, и без подложки линия следующего перечёркивала бы
+   конец подписи. Линия ряда лежит выше подписи (см. .stand-plot .plot-svg). */
 .vline-break > span {
   position: absolute;
-  left: 4px;
+  left: 2px;
+  z-index: 1;
+  padding: 0 2px;
+  background: var(--night-surface);
   color: var(--amber);
   font-family: var(--font-mono);
   font-size: 0.6875rem;
   white-space: nowrap;
+}
+
+.stand-plot .plot-svg {
+  z-index: 2;
 }
 
 .stand-line {
@@ -1454,6 +1483,12 @@
   display: inline-block;
   margin: -12px -10px;
   padding: 12px 10px;
+}
+
+/* «HTML и PDF» переносится целиком: ссылка — блок со своими отступами, и перед ним браузер
+   рвёт строку, даже если поставить неразрывный пробел, — остаётся «HTML и» и одинокий «PDF». */
+.material-pair {
+  white-space: nowrap;
 }
 
 @media (max-width: 639px) {

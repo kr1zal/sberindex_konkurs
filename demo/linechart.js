@@ -25,6 +25,8 @@
  *   });
  *   chart.update(newSpec);   // пересобрать с новыми данными на том же контейнере
  *   chart.destroy();         // снять ResizeObserver и обработчики
+ *   LineChart.assignMarkerRows(boxes, rows, gap);  // строки подписей отметок; вынесено,
+ *                            // чтобы проверять раскладку без браузера
  *
  * Числа графика — не единственный способ их прочитать: подсказка дополняет таблицу
  * под графиком, а не заменяет её (таблицу строит demo.js из тех же данных).
@@ -45,6 +47,12 @@ const LineChart = (() => {
 
   const DASH = { dashed: "8 5", dotted: "2 4" };
 
+  // Подписи отметок: первая строка — на 10 px ниже верхнего края поля графика, следующие
+  // — через 12 px, строк не больше трёх (дальше подпись остаётся в последней).
+  const MARKER_LABEL_TOP = 10;
+  const MARKER_LABEL_STEP = 12;
+  const MARKER_LABEL_ROWS = 3;
+
   function parseYM(ym) {
     const [y, m] = ym.split("-").map(Number);
     return { y, m };
@@ -54,6 +62,25 @@ const LineChart = (() => {
   function formatMonthShort(ym, withYear) {
     const { y, m } = parseYM(ym);
     return withYear ? `${MONTH_SHORT[m - 1]} ${y}` : MONTH_SHORT[m - 1];
+  }
+
+  /**
+   * Строки подписей отметок. boxes — горизонтальные границы подписей по порядку X
+   * ({ left, right }). Подпись встаёт в первую из rows строк, где она не ближе gap к уже
+   * поставленным; если свободной строки нет — остаётся в последней. Возвращает номера
+   * строк, по одному на подпись.
+   */
+  function assignMarkerRows(boxes, rows, gap) {
+    const taken = [];
+    return boxes.map(({ left, right }) => {
+      let row = 0;
+      while (row < rows - 1
+        && taken.some((t) => t.row === row && left < t.right + gap && t.left < right + gap)) {
+        row += 1;
+      }
+      taken.push({ row, left, right });
+      return row;
+    });
   }
 
   function svgEl(tag, attrs) {
@@ -372,39 +399,51 @@ const LineChart = (() => {
       });
 
       // Отметки: конец панели (тонкая сплошная) и изломы (штрих, с подписью месяца).
-      // Соседние по времени отметки (излом рядом с концом панели — обычное дело)
-      // чередуют высоту подписи через одну по порядку X, иначе текст накладывается.
+      // Сначала все линии, затем все подписи: подпись лежит над линиями соседних отметок,
+      // а не под ними.
       const markerGroup = svgEl("g", { class: "chart-markers" });
       const orderedMarkers = (currentSpec.markers || [])
         .map((marker) => ({ marker, idx: months.indexOf(marker.atMonth) }))
         .filter(({ idx }) => idx >= 0)
         .sort((a, b) => a.idx - b.idx);
-      orderedMarkers.forEach(({ marker, idx }, order) => {
+      orderedMarkers.forEach(({ marker, idx }) => {
         const x = scaleX(idx);
         markerGroup.appendChild(svgEl("line", {
           x1: x, x2: x, y1: margin.top, y2: margin.top + ph,
           class: `chart-marker chart-marker-${marker.kind}`,
         }));
+      });
+      const markerLabels = orderedMarkers.map(({ marker, idx }) => {
+        const x = scaleX(idx);
         const anchor = x > margin.left + pw * 0.75 ? "end" : "start";
         // Вид отметки — в классе подписи: у изломов подпись своего цвета, как и сама линия.
         const labelText = svgEl("text", {
-          x: x + (anchor === "end" ? -4 : 4), y: margin.top + 10 + (order % 2) * 12,
+          x: x + (anchor === "end" ? -4 : 4), y: margin.top + MARKER_LABEL_TOP,
           class: `chart-marker-label chart-marker-label-${marker.kind}`, "text-anchor": anchor,
         });
         labelText.textContent = marker.label;
         markerGroup.appendChild(labelText);
+        return labelText;
       });
       svg.appendChild(markerGroup);
 
-      // Подпись, которой не хватает места справа от отметки (моноширинный шрифт шире
-      // обычного, а отметка «конец панели» стоит близко к правому краю), переходит
-      // налево от неё: иначе правый край графика обрезал бы её на середине.
-      markerGroup.querySelectorAll("text").forEach((node) => {
-        const box = node.getBBox();
+      // Ширина подписи известна только после рендера (моноширинный шрифт шире обычного),
+      // поэтому раскладка — по факту. Подпись, которой не хватает места справа от отметки
+      // («конец панели» стоит близко к правому краю), переходит налево от неё: иначе правый
+      // край графика обрезал бы её на середине. Затем подпись встаёт в первую строку, где не
+      // задевает уже поставленные: изломы идут с шагом в несколько месяцев, а на телефоне
+      // график втрое уже, и подписи соседних отметок сходятся в одной строке.
+      const labelBoxes = markerLabels.map((node) => {
+        let box = node.getBBox();
         if (node.getAttribute("text-anchor") === "start" && box.x + box.width > width - 4) {
           node.setAttribute("text-anchor", "end");
           node.setAttribute("x", Number(node.getAttribute("x")) - 8);
+          box = node.getBBox();
         }
+        return { left: box.x, right: box.x + box.width };
+      });
+      assignMarkerRows(labelBoxes, MARKER_LABEL_ROWS, 4).forEach((row, i) => {
+        markerLabels[i].setAttribute("y", margin.top + MARKER_LABEL_TOP + row * MARKER_LABEL_STEP);
       });
 
       // Ряды: путь на каждую непрерывную пробежку точек, чтобы пропуск не рисовал линию.
@@ -485,5 +524,5 @@ const LineChart = (() => {
     };
   }
 
-  return { create, formatMonthShort };
+  return { create, formatMonthShort, assignMarkerRows };
 })();
