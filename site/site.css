@@ -119,6 +119,10 @@
   --chart-line: #5c6f8f;
   /* Медиана на светлой карточке темнее янтаря обложки (#ffb547, на белом 1,9:1). */
   --chart-median: #d17a00;
+  /* Изломы ряда на светлой карточке: янтарь обложки на белом даёт 1,9:1, поэтому линия темнее
+     (3,3:1 к белому), а подпись ещё темнее (4,7:1). */
+  --chart-break: #bf8217;
+  --chart-break-ink: #9a6a12;
   --chart-grid: #eef0f4;
   --chart-mark: #b9c0cc; /* вспомогательные вертикали: «конец панели» */
   --bar-best: #2a78d6;
@@ -151,6 +155,8 @@
     --chart-third: #34b27f;
     --chart-line: #8497b8;
     --chart-median: var(--amber);
+    --chart-break: var(--amber);
+    --chart-break-ink: var(--amber);
     --chart-grid: #1b2540;
     --chart-mark: #3a4566;
     --bar-best: #5b9bf0;
@@ -183,6 +189,8 @@
   --chart-third: #34b27f;
   --chart-line: #8497b8;
   --chart-median: var(--amber);
+  --chart-break: var(--amber);
+  --chart-break-ink: var(--amber);
   --chart-grid: #1b2540;
   --chart-mark: #3a4566;
   --bar-best: #5b9bf0;
@@ -319,41 +327,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   text-transform: uppercase;
 }
 
-.lead {
-  font-size: 1.05rem;
-}
-
-.lead:last-of-type {
-  color: var(--ink-soft);
-}
-
-hr.rule {
-  border: none;
-  border-top: 1px solid var(--rule);
-  margin: 2.5rem 0;
-}
-
-/* -- страница-колонка (стенд) --------------------------------------------------- */
-
-.page {
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: 2rem 1rem 3rem;
-}
-
-.footer {
-  margin-top: 2.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--rule);
-  color: var(--ink-soft);
-  font-size: 0.88rem;
-}
-
-.footer p {
-  margin: 0.4rem 0;
-}
-
-/* -- ширина содержимого (главная) ----------------------------------------------- */
+/* -- ширина содержимого (главная и стенд) ---------------------------------------- */
 
 .wrap {
   width: 100%;

@@ -1,6 +1,6 @@
-/* demo/demo.js — демонстрационный стенд: загрузка данных, поиск МО, адрес страницы,
- * сборка блоков. Числа и подписи графиков рисует общий demo/linechart.js — этот файл
- * отвечает за то, ОТКУДА берутся ряды для него и что написано на странице.
+/* demo/demo.js — демонстрационный стенд: загрузка данных, поиск МО и быстрые кнопки,
+ * адрес страницы, сборка блоков. Числа и подписи графиков рисует общий demo/linechart.js —
+ * этот файл отвечает за то, ОТКУДА берутся ряды для него и что написано на странице.
  *
  * Видимый текст живёт в двух местах: разметка demo/index.html (то, что не зависит
  * от данных) и функции ниже с суффиксом Text (то, что зависит — числа, названия
@@ -23,7 +23,7 @@ function groupThousands(digitsStr) {
     s = s.slice(0, -3);
   }
   groups.unshift(s);
-  return groups.join(" ");
+  return groups.join("\u00a0");
 }
 
 function numFmt(value, digits, opts) {
@@ -263,9 +263,11 @@ function introText(index) {
   const forecastYear = parseYM(index.forecast_months[0]).y;
   const firstFold = index.folds[0];
   const lastFold = index.folds[index.folds.length - 1];
-  return `Расходы выбранного муниципального образования по месяцам, их прогноз на ${forecastYear} год, ` +
-    "изломы ряда и ошибки моделей на нём в проверке на истории — " +
-    `${monthSpanText(firstFold.test_from, lastFold.test_to)}.`;
+  const total = index.n_series;
+  return `Любой из ${rubFmt(total)} ` +
+    `${pluralRu(total, "муниципалитета", "муниципалитетов", "муниципалитетов")} панели: ` +
+    `расходы по месяцам, прогноз на ${forecastYear} год, изломы ряда и то, как модели ошибались ` +
+    `на нём при проверке на истории — ${monthSpanText(firstFold.test_from, lastFold.test_to)}.`;
 }
 
 function searchHintText(index) {
@@ -353,7 +355,7 @@ function errorsCaptionText(index) {
   const testLen = monthsBetweenInclusive(index.folds[0].test_from, index.folds[0].test_to);
   return `Средняя абсолютная ошибка (MAE), ${index.unit}. Столбцы — фолды, проверочные окна ` +
     `по ${testLen} ${pluralRu(testLen, "месяцу", "месяца", "месяцев")}: модель учится на всех месяцах ` +
-    "до окна и прогнозирует его. Жирным — лучшая модель в столбце; мельче под числом — " +
+    "до окна и прогнозирует его. Крупно — этот муниципалитет, мелко под числом — " +
     "MAE той же модели в среднем по всей панели.";
 }
 
@@ -518,9 +520,8 @@ function renderErrorsTable(index, mo) {
     (fold) => `${monthRangeAxis(fold.test_from, fold.test_to)} · обучение ${fold.train_months} мес.`
   );
 
-  // display: block на телефоне (demo.css) снимает встроенную табличную семантику —
-  // явные role восстанавливают её для скринридера и на широком экране ничего не меняют,
-  // там она и так есть у настоящего <table>.
+  // display: grid и block (demo.css) снимают встроенную табличную семантику — явные role
+  // восстанавливают её для скринридера и ничего не меняют там, где браузер сохранил её сам.
   const thead = document.createElement("thead");
   thead.setAttribute("role", "rowgroup");
   const headRow = document.createElement("tr");
@@ -559,9 +560,9 @@ function renderErrorsTable(index, mo) {
     const rowTh = document.createElement("th");
     rowTh.setAttribute("scope", "row");
     rowTh.setAttribute("role", "rowheader");
-    // Короткая роль — первой, жирной строкой; полное название модели — второй,
-    // приглушённой (на узком экране скрыта стилем, см. demo.css) — без прежнего
-    // дублирования, когда роль повторялась и в названии модели, и в скобках.
+    // Короткая роль — первой, крупной строкой; полное название модели — второй,
+    // приглушённой — без прежнего дублирования, когда роль повторялась и в названии
+    // модели, и в скобках.
     const primary = document.createElement("span");
     primary.className = "role-primary";
     primary.textContent = roleShortLabel(model.role);
@@ -593,7 +594,7 @@ function errorCell(value, panelValue, isBest, narrowLabel) {
   if (isBest) classes.push("cell-best");
   if (value === null) classes.push("cell-dash");
   if (classes.length) td.className = classes.join(" ");
-  // На узком экране таблица становится карточками (demo.css): data-label — это
+  // Ниже 900 px строка таблицы становится карточкой (demo.css): data-label — это
   // подпись столбца у ячейки, которую иначе показывал бы скрытый <thead>.
   td.dataset.label = narrowLabel;
   td.textContent = value === null ? "—" : rubFmt(value);
@@ -771,6 +772,7 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
 
   document.getElementById("mo-search").value = seriesId;
   document.getElementById("mo-name").textContent = seriesId;
+  markQuickChip(seriesId);
   // Заголовок вкладки — с названием текущего МО: у ссылки с ?mo= иначе был бы всегда
   // один и тот же заголовок вне зависимости от того, что на ней открыто.
   document.title = `${seriesId} — прогноз расходов по муниципалитету`;
@@ -778,7 +780,18 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
   const metaEl = document.getElementById("mo-meta");
   const noteEl = document.getElementById("mo-no-region-note");
   if (entry.region) {
-    metaEl.textContent = entry.oktmo ? `${entry.region}, ОКТМО ${entry.oktmo}` : entry.region;
+    metaEl.textContent = entry.region;
+    if (entry.oktmo) {
+      // Код ОКТМО — группы через дефис: на узком экране он идёт отдельной строкой целиком
+      // (demo.css), а не рвётся посередине, и разделитель перед ним не нужен.
+      const separator = document.createElement("span");
+      separator.className = "meta-separator";
+      separator.textContent = " · ";
+      const code = document.createElement("span");
+      code.className = "oktmo";
+      code.textContent = `ОКТМО ${entry.oktmo}`;
+      metaEl.append(separator, code);
+    }
     noteEl.hidden = true;
   } else {
     metaEl.textContent = "Регион не определён";
@@ -800,7 +813,9 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
   renderMoNumbersTable(index, mo);
   renderErrorsTable(index, mo);
 
-  if (pushUrl) pushMoParam(seriesId);
+  // Повторный выбор того же МО (кнопка и поиск это допускают) не добавляет в историю ещё
+  // одну запись: иначе «назад» оставалось бы на той же странице.
+  if (pushUrl && getMoParam() !== seriesId) pushMoParam(seriesId);
 }
 
 function selectMoSafe(index, seriesId, opts) {
@@ -808,6 +823,61 @@ function selectMoSafe(index, seriesId, opts) {
   // выбору); здесь — журнал для отладки, второй раз DOM не трогаем.
   selectMo(index, seriesId, opts).catch((error) => {
     console.error("Не удалось показать муниципальное образование", error);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Быстрые кнопки: несколько МО одним нажатием. Список и подписи — index.quick (константа
+// генератора), выбор — тем же путём, что из поиска, поэтому адрес ?mo=, кнопка «назад»
+// и защита от гонки работают так же.
+// ---------------------------------------------------------------------------
+
+function setupQuickChips(index) {
+  const box = document.getElementById("quick-chips");
+  (index.quick || []).forEach((item) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = item.short;
+    // Полное название — подсказкой при наведении: короткая подпись («Михайловский р-н #2»)
+    // не говорит, какой именно ряд за ней стоит.
+    chip.title = item.id;
+    chip.dataset.mo = item.id;
+    chip.setAttribute("aria-pressed", "false");
+    chip.addEventListener("click", () => selectMoSafe(index, item.id, { pushUrl: true }));
+    box.appendChild(chip);
+  });
+}
+
+/** Нажатой выглядит кнопка того МО, которое показано сейчас, — а не того, что выбрано
+ * и ещё грузится: вызывается из selectMo после смены содержимого страницы. */
+function markQuickChip(seriesId) {
+  document.getElementById("quick-chips").querySelectorAll(".chip").forEach((chip) => {
+    chip.setAttribute("aria-pressed", String(chip.dataset.mo === seriesId));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Шапка: на телефоне меню свёрнуто, на широком экране ссылки всегда видны. Та же логика,
+// что в site/landing.js: скрипты страниц друг друга не подключают.
+// ---------------------------------------------------------------------------
+
+function setupNav() {
+  const menu = document.getElementById("nav-menu");
+  if (!menu || !window.matchMedia) return;
+  const narrow = window.matchMedia("(max-width: 719px)");
+  const sync = () => { menu.open = !narrow.matches; };
+  sync();
+  if (narrow.addEventListener) narrow.addEventListener("change", sync);
+  menu.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && narrow.matches && menu.open) {
+      menu.open = false;
+      const toggle = menu.querySelector("summary");
+      if (toggle) toggle.focus();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (narrow.matches && menu.open && !menu.contains(event.target)) menu.open = false;
   });
 }
 
@@ -882,7 +952,7 @@ function setupCombobox(index) {
 
     if (!matches.length) {
       const li = document.createElement("li");
-      li.className = "listbox-status";
+      li.className = "suggestion-status";
       // role="option" + aria-disabled, а не текст без роли внутри role="listbox" —
       // так строка остаётся допустимым потомком listbox. currentOptions пуст,
       // поэтому ни стрелки, ни Enter её всё равно не выберут.
@@ -899,11 +969,12 @@ function setupCombobox(index) {
       li.id = `mo-option-${i}`;
       li.setAttribute("role", "option");
       li.setAttribute("aria-selected", "false");
-      li.className = "listbox-option";
+      li.className = "suggestion";
       const name = document.createElement("span");
+      name.className = "suggestion-name";
       name.textContent = row.seriesId;
       const region = document.createElement("span");
-      region.className = "option-region";
+      region.className = "suggestion-region";
       region.textContent = row.region || "регион не определён";
       li.append(name, region);
       li.addEventListener("click", () => commitSelection(row.seriesId));
@@ -913,7 +984,7 @@ function setupCombobox(index) {
     if (total > matches.length) {
       const rest = total - matches.length;
       const li = document.createElement("li");
-      li.className = "listbox-status";
+      li.className = "suggestion-status";
       li.setAttribute("role", "option");
       li.setAttribute("aria-disabled", "true");
       li.textContent = `И ещё ${rubFmt(rest)} ${pluralRu(rest, "совпадение", "совпадения", "совпадений")} — уточните запрос`;
@@ -927,6 +998,9 @@ function setupCombobox(index) {
 
   input.addEventListener("input", () => renderOptions(input.value));
   input.addEventListener("focus", () => { if (input.value.trim()) renderOptions(input.value); });
+  // Уход с поля клавишей Tab закрывает список: следом идут быстрые кнопки, и открытый
+  // список закрывал бы их от глаз. Выбор мышью поле не покидает — см. mousedown выше.
+  input.addEventListener("blur", closeListbox);
 
   input.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown") {
@@ -947,7 +1021,7 @@ function setupCombobox(index) {
   });
 
   document.addEventListener("click", (event) => {
-    if (!event.target.closest(".combobox")) closeListbox();
+    if (!event.target.closest(".search")) closeListbox();
   });
 }
 
@@ -962,9 +1036,10 @@ async function init() {
 
   document.getElementById("intro-text").textContent = introText(index);
   document.getElementById("search-hint").textContent = searchHintText(index);
-  document.getElementById("footer-built").textContent = `Собрано ${dateWordsFromISO(index.built)}.`;
+  document.getElementById("footer-built").textContent = `собрано ${dateWordsFromISO(index.built)}`;
 
   setupCombobox(index);
+  setupQuickChips(index);
 
   window.addEventListener("popstate", (event) => {
     const seriesId = (event.state && event.state.mo) || getMoParam() || index.default_mo;
@@ -980,6 +1055,9 @@ async function init() {
   });
   selectMoSafe(index, getMoParam() || index.default_mo, { pushUrl: false });
 }
+
+// Меню шапки не ждёт данных: сбой загрузки не должен оставлять его раскрытым на телефоне.
+setupNav();
 
 init().catch((error) => {
   console.error("Не удалось инициализировать стенд", error);

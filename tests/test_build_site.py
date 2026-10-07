@@ -91,6 +91,16 @@ def _fmt_rub_or_dash(value: float) -> str:
     return "—" if not np.isfinite(value) else _fmt(value, digits=0)
 
 
+def _written_forms(token: str) -> set[str]:
+    """Как число могли бы вписать в код: как есть, с точкой вместо запятой и целое — ещё и
+    с разрядами через обычный или неразрывный пробел."""
+    forms = {token, token.replace(",", ".")}
+    if token.isdigit() and len(token) >= 4:
+        grouped = f"{int(token):,}"
+        forms.update({grouped.replace(",", " "), grouped.replace(",", "\u00a0")})
+    return forms
+
+
 def _plural(n: int, one: str, few: str, many: str) -> str:
     n = abs(int(n)) % 100
     if 11 <= n <= 14:
@@ -735,17 +745,32 @@ class BuildSiteTest(unittest.TestCase):
         collector.feed(self.demo_html)
         self.assertTrue(collector.links, "в demo/index.html не нашлось ни одной ссылки")
 
+        own_ids = _IdCollector()
+        own_ids.feed(self.demo_html)
         for link in collector.links:
             if link.startswith(("http://", "https://", "mailto:", "data:")):
                 continue
             with self.subTest(link=link):
+                path_part, _, fragment = link.partition("#")
+                if not path_part:
+                    # Якорь внутри самого стенда («К содержанию»): ищем элемент с таким id.
+                    self.assertIn(fragment, own_ids.ids, f"{link}: на странице нет такого id")
+                    continue
                 # demo/index.html лежит в demo/, относительные ссылки — от этой папки
                 # (а не от корня репозитория, как у index.html на верхнем уровне).
-                target = (self.demo_html_path.parent / link).resolve()
+                target = (self.demo_html_path.parent / path_part).resolve()
                 if target.is_dir():
-                    self.assertTrue((target / "index.html").exists(), f"{link}: нет index.html внутри")
+                    target_page = target / "index.html"
+                    self.assertTrue(target_page.exists(), f"{link}: нет index.html внутри")
                 else:
+                    target_page = target
                     self.assertTrue(target.exists(), f"{link}: файла {target} нет")
+                if fragment:
+                    # Ссылка на раздел другой страницы («../#fact» — «Проверка фактом» на
+                    # главной): раздел с таким id там должен быть.
+                    ids = _IdCollector()
+                    ids.feed(target_page.read_text(encoding="utf-8"))
+                    self.assertIn(fragment, ids.ids, f"{link}: в {target_page.name} нет такого id")
 
     def test_no_page_loads_external_scripts_or_stylesheets(self) -> None:
         # Ни одна страница не грузит внешних скриптов и стилей — ни index.html
@@ -762,6 +787,97 @@ class BuildSiteTest(unittest.TestCase):
                         f"{page}: внешний ресурс <{tag}> -> {value}",
                     )
 
+    # -- стенд: разметка, скрипт и стили -----------------------------------------------------
+
+    def test_demo_markup_provides_every_element_id_the_script_reads(self) -> None:
+        js = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
+        wanted = set(re.findall(r'getElementById\("([^"]+)"\)', js))
+        self.assertGreater(len(wanted), 15, "проверка потеряла обращения скрипта к странице")
+        ids = _IdCollector()
+        ids.feed(self.demo_html)
+        self.assertEqual(sorted(wanted - set(ids.ids)), [], "скрипт ждёт элементов, которых нет в разметке")
+
+    def test_demo_page_has_landmarks_accessible_search_and_site_links(self) -> None:
+        ids = _IdCollector()
+        ids.feed(self.demo_html)
+        links = _LinkCollector()
+        links.feed(self.demo_html)
+        for fragment in ('lang="ru"', 'name="viewport"', 'name="description"', '<link rel="icon" href="data:,">'):
+            self.assertIn(fragment, self.demo_html)
+        self.assertEqual(ids.ids["main"]["tag"], "main")
+        self.assertIn("#main", links.links, "нет ссылки «К содержанию»")
+        # Поле поиска — ARIA-комбобокс со списком и живой областью; быстрые кнопки — группа
+        # с названием, сообщение об ошибке — alert.
+        combo = ids.ids["mo-search"]
+        self.assertEqual(combo["role"], "combobox")
+        self.assertEqual(combo["aria-controls"], "mo-listbox")
+        self.assertEqual(ids.ids["mo-listbox"]["role"], "listbox")
+        self.assertEqual(ids.ids["mo-search-status"]["aria-live"], "polite")
+        self.assertEqual(ids.ids["quick-chips"]["role"], "group")
+        self.assertTrue(ids.ids["quick-chips"]["aria-label"])
+        self.assertEqual(ids.ids["mo-invalid-note"]["role"], "alert")
+        # Часть того же сайта: общая тема и шрифты, шапка с теми же ссылками, что на главной,
+        # и переход к интерактивной версии блока агрегата («Проверка фактом»).
+        for link in ("../site/site.css", "demo.css", "linechart.js", "demo.js", "../", "../report/report.html",
+                     "https://github.com/kr1zal/sberindex_konkurs", "../#fact"):
+            with self.subTest(link=link):
+                self.assertIn(link, links.links)
+        for licence in ("unbounded", "onest", "jetbrains-mono"):
+            self.assertIn(f"../site/fonts/{licence}-OFL.txt", links.links)
+
+    def test_demo_page_has_no_hand_typed_numbers(self) -> None:
+        # Как в шаблоне главной: число на странице приходит из данных (его подставляет скрипт),
+        # в разметке цифр нет. Исключение — название лицензии «CC BY-SA 4.0».
+        collector = _TextCollector()
+        collector.feed(self.demo_html)
+        text = " ".join(collector.chunks).replace("CC BY-SA 4.0", " ")
+        leftovers = re.findall(r".{0,20}\d.{0,20}", text)
+        self.assertEqual(leftovers, [], "в разметке стенда вписаны числа; их должен подставлять скрипт из данных")
+
+    def test_demo_scripts_have_no_hand_typed_data_numbers(self) -> None:
+        # Те же «данные-подобные» числа, что проверяются у скрипта главной: с десятичной запятой,
+        # с неразрывным пробелом разрядов или из четырёх и более цифр — число рядов, проценты
+        # агрегата, средние ошибки моделей по панели. Короткие целые («8» в лимите подсказок)
+        # совпали бы с константами кода и только шумели бы.
+        tokens: set[str] = {str(self.index_json["n_series"])}
+        tokens.update(self.aggregate_json["mape"].values())
+        for row in self.index_json["panel_mae"].values():
+            tokens.update(str(v) for v in row if v is not None)
+
+        def data_like(token: str) -> bool:
+            return "," in token or "\u00a0" in token or len(re.sub(r"\D", "", token)) >= 4
+
+        forbidden = sorted(t for t in tokens if data_like(t))
+        self.assertGreater(len(forbidden), 8, "проверка потеряла числа страницы")
+        for name in ("demo/demo.js", "demo/linechart.js"):
+            js = (ROOT / name).read_text(encoding="utf-8")
+            for token in forbidden:
+                for variant in _written_forms(token):
+                    with self.subTest(file=name, number=variant):
+                        self.assertIsNone(
+                            re.search(r"(?<![\w.,])" + re.escape(variant) + r"(?![\w.,])", js),
+                            f"в {name} вписано число данных {variant!r}",
+                        )
+            # И сами ряды: массив из шести и более чисел подряд — вписанные данные.
+            self.assertIsNone(
+                re.search(r"\[\s*-?\d+(?:\.\d+)?\s*(?:,\s*-?\d+(?:\.\d+)?\s*){5,}\]", js),
+                f"в {name} есть числовой массив — данные должны приходить из demo/data",
+            )
+
+    def test_demo_chart_uses_only_theme_tokens_of_site_css(self) -> None:
+        # Цвета рядов графика у стенда и главной одни и те же в обеих темах: стенд не держит
+        # своих копий --chart-*, а каждый токен, на который он ссылается, объявлен в site.css
+        # трижды — для светлой темы, для тёмной и для ночных блоков (.night).
+        demo_css = (ROOT / "demo" / "demo.css").read_text(encoding="utf-8")
+        self.assertNotRegex(demo_css, r"--chart-[a-z-]+\s*:", "demo.css объявляет свой токен графика")
+        site_css = (ROOT / "site" / "site.css").read_text(encoding="utf-8")
+        sources = demo_css + (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
+        used = set(re.findall(r"var\((--chart-[a-z-]+)\)", sources))
+        self.assertTrue({"--chart-fact", "--chart-forecast", "--chart-known", "--chart-grid"} <= used)
+        for token in sorted(used):
+            with self.subTest(token=token):
+                self.assertEqual(len(re.findall(re.escape(token) + r"\s*:", site_css)), 3,
+                                 f"{token} должен быть объявлен для светлой, тёмной темы и .night")
 
     # -- данные главной: <script id="landing-data"> --------------------------------------
 
@@ -981,15 +1097,24 @@ class BuildSiteTest(unittest.TestCase):
             with self.subTest(file=name):
                 self.assertNotRegex(css, r"url\(\s*['\"]?(?:https?:)?//", "внешний url() в стилях")
                 self.assertNotIn("@import", css)
-        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
-        # Единственный «http» в скрипте — пространство имён SVG, это не ресурс.
-        urls = [u for u in re.findall(r"https?://[^\s\"'`)]+", js) if u != "http://www.w3.org/2000/svg"]
-        self.assertEqual(urls, [], "landing.js не должен ходить за пределы сайта")
-        for forbidden in ("XMLHttpRequest", "WebSocket", "sendBeacon", "import("):
-            self.assertNotIn(forbidden, js)
+        for name in ("site/landing.js", "demo/demo.js", "demo/linechart.js"):
+            js = (ROOT / name).read_text(encoding="utf-8")
+            with self.subTest(file=name):
+                # Единственный «http» в скрипте — пространство имён SVG, это не ресурс.
+                urls = [u for u in re.findall(r"https?://[^\s\"'`)]+", js) if u != "http://www.w3.org/2000/svg"]
+                self.assertEqual(urls, [], f"{name} не должен ходить за пределы сайта")
+                for forbidden in ("XMLHttpRequest", "WebSocket", "sendBeacon", "import("):
+                    self.assertNotIn(forbidden, js)
+        # Стенд читает только свои файлы данных, и только по относительным путям.
+        demo_js = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
+        fetched = re.findall(r"fetchJson\(\s*[`\"']([^`\"']+)", demo_js)
+        self.assertTrue(fetched, "проверка потеряла обращения стенда к данным")
+        for path in fetched:
+            with self.subTest(fetch=path):
+                self.assertTrue(path.startswith("data/"), f"{path}: данные стенда лежат в demo/data/")
 
     def test_local_assets_referenced_by_stylesheets_exist(self) -> None:
-        for name in ("site/site.css", "site/landing.css"):
+        for name in ("site/site.css", "site/landing.css", "demo/demo.css"):
             css_path = ROOT / name
             for url in re.findall(r"url\(\s*['\"]?([^'\")\s]+)", css_path.read_text(encoding="utf-8")):
                 with self.subTest(file=name, url=url):

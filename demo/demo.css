@@ -1,222 +1,208 @@
-/* Стили демонстрационного стенда поверх общей темы ../site/site.css. Страницу входа
-   не трогаем — здесь только то, что нужно стенду: цвета графиков, поиск-комбобокс,
-   график и подсказка, таблицы. Как и в общей теме — без градиентов и теней-«карточек»,
-   только рамка-волосок и заливка var(--surface). */
+/* Стенд поверх общей темы ../site/site.css. Шрифты, токены (в том числе цвета рядов графика
+   --chart-*), шапка, поле поиска, чипы, кнопки и подвал — оттуда: у стенда и главной они одни
+   и те же в обеих темах. Здесь — раскладка стенда, график с подсказкой, таблицы и четыре
+   собственных токена: заливка и текст пояснения «регион не определён», заливка и текст
+   лучшей в столбце модели.
+
+   Своих анимаций и переходов у стенда нет; плавные переходы кнопок и чипов из site.css
+   отключаются при prefers-reduced-motion. */
 
 :root {
-  /* Цвета рядов графика — как в отчёте (src/charts.py): факт — INK_SOFT, прогноз —
-     SERIES[0], разнос известного агрегата и первое из простых правил — SERIES[1],
-     третий ряд (только агрегат) — SERIES[2]. Тёмная тема ниже — те же роли, подобранные
-     под контраст и различимость на тёмном фоне (см. dataviz-навык), а не автоинверсия. */
-  --chart-fact: #52514e;
-  --chart-forecast: #2a78d6;
-  --chart-known: #eb6834;
-  /* #1baf7a давал 2,82:1 к белому — ниже 3:1, порога WCAG для графики; тот же тон
-     темнее, 3,8:1. */
-  --chart-third: #179468;
+  --note-bg: #fff4e0;
+  --note-ink: #6b4a12;
+  --best-bg: #e8f1fc;
+  --best-ink: #174f93;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --chart-fact: #83806f;
-    --chart-forecast: #4488d2;
-    --chart-known: #c96f3d;
-    --chart-third: #1f9d6f;
+    --note-bg: #2a2518;
+    --note-ink: #f2d9a6;
+    --best-bg: #1c2d4d;
+    --best-ink: #a3c6f5;
   }
 }
 
-/* -- шапка стенда -------------------------------------------------------- */
+/* -- обложка: заголовок, поле поиска, быстрые кнопки ---------------------------------- */
 
-.back-link {
-  margin: 0 0 1rem;
+.stand-hero {
+  padding: 30px 0 76px;
 }
 
-section + section {
-  margin-top: 2.5rem;
+.stand-title {
+  margin: 14px 0 0;
+  font-size: clamp(2.25rem, 4.4vw, 3.75rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
 }
 
-h2 {
-  margin-top: 0;
+.stand-intro {
+  max-width: 720px;
+  margin: 18px 0 0;
+  color: var(--night-ink-3);
+  font-size: 1.125rem;
+  line-height: 1.6;
 }
 
-.section-note {
-  color: var(--ink-soft);
-  font-size: 0.92rem;
-}
-
-/* -- поиск: комбобокс + listbox ------------------------------------------ */
-
-.search-section {
-  margin: 2rem 0;
-}
-
-.search-label {
-  display: block;
-  margin-bottom: 0.4rem;
-  font-weight: 600;
-}
-
-.combobox {
+/* Поиск выше карточки выбранного МО: список подсказок выходит за нижний край обложки.
+   Поле и текст под ним держат читаемую ширину, а кнопки идут в одну строку шире поля. */
+.stand-search {
   position: relative;
-  max-width: 32rem;
+  z-index: 5;
+  margin-top: 28px;
 }
 
-#mo-search {
-  width: 100%;
-  min-height: 44px;
-  padding: 0.6rem 0.8rem;
-  font: inherit;
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
+.stand-search .search, .search-hint, .stand-alert {
+  max-width: 720px;
 }
 
-#mo-search:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+.quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
 }
 
-.listbox {
-  position: absolute;
-  z-index: 20;
-  left: 0;
-  right: 0;
-  margin: 4px 0 0;
-  padding: 0.25rem 0;
-  max-height: 60vh;
-  overflow-y: auto;
-  list-style: none;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
+.search-hint {
+  margin: 14px 0 0;
+  color: var(--night-dim);
+  font-size: 0.8125rem;
+  line-height: 1.55;
 }
 
-.listbox[hidden] {
+.stand-alert {
+  margin: 14px 0 0;
+  padding: 12px 16px;
+  background: var(--night-surface);
+  border: 1px solid var(--night-rule);
+  border-left: 3px solid var(--amber);
+  border-radius: 12px;
+  color: var(--night-ink);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.stand-alert[hidden] {
   display: none;
 }
 
-.listbox-option {
-  min-height: 44px;
-  padding: 0.5rem 0.8rem;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  cursor: pointer;
+/* -- карточка выбранного МО: заходит на обложку снизу ------------------------------------ */
+
+.mo-wrap {
+  position: relative;
+  z-index: 1;
+  margin-top: -36px;
 }
 
-/* Фон активного пункта и наведения — заметный тонированный, не почти-неотличимый
-   var(--bg) (был 1,03:1 к поверхности списка); у активного вдобавок обводка цветом
-   фокуса, чтобы клавиатурный выбор было видно без наведения мышью. */
-.listbox-option[aria-selected="true"], .listbox-option:hover {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+.mo-card {
+  padding: 30px 32px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 24px;
 }
-
-.listbox-option[aria-selected="true"] {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-
-.option-region {
-  color: var(--ink-soft);
-  font-size: 0.85em;
-}
-
-.listbox-status {
-  padding: 0.5rem 0.8rem;
-  color: var(--ink-soft);
-  font-size: 0.9em;
-}
-
-/* Число совпадений поиска — скринридеру через aria-live, глазу не нужно: список
-   результатов и так на экране. Стандартный приём «спрятать
-   визуально, оставить для программ чтения с экрана» — не display:none, его screen reader
-   тоже пропускает. */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* -- выбранный МО --------------------------------------------------------- */
 
 .mo-name {
-  font-size: 1.3rem;
-  font-weight: 600;
-  margin: 0 0 0.25rem;
+  margin: 10px 0 0;
+  font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.125rem);
+  line-height: 1.15;
 }
 
 .mo-meta {
+  margin: 8px 0 0;
   color: var(--ink-soft);
-  margin: 0 0 1rem;
+  font-size: 1rem;
+}
+
+.mo-meta:empty {
+  display: none;
+}
+
+.oktmo {
+  white-space: nowrap;
 }
 
 .mo-note {
-  padding: 0.75rem 1rem;
-  margin: 0 0 1.5rem;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-left: 3px solid var(--ink-soft);
-  border-radius: 4px;
-  color: var(--ink-soft);
-  font-size: 0.92rem;
+  margin: 16px 0 0;
+  padding: 12px 16px;
+  background: var(--note-bg);
+  border-radius: 12px;
+  color: var(--note-ink);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 
 .mo-note[hidden] {
   display: none;
 }
 
-/* -- фигура графика: рамка-волосок, без тени ------------------------------ */
+.mo-card .chart-legend {
+  margin-top: 26px;
+}
 
-.chart-figure {
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 1rem;
-  margin: 1rem 0;
+.chart-notes {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.chart-notes .chart-caption:first-child {
+  margin-top: 0;
+}
+
+/* -- график: контейнер, легенда, подписи -------------------------------------------------- */
+
+/* Легенда — строка над графиком: ряды слева, единица измерения справа (на телефоне она
+   переходит на следующую строку). */
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 24px;
+  min-width: 0;
+  margin-bottom: 12px;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
 }
 
 .chart-legend-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem 1.1rem;
-  margin: 0 0 0.75rem;
+  gap: 6px 18px;
+  margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 0.9rem;
 }
 
 .chart-legend-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 8px;
 }
 
 .chart-legend-key {
   --legend-color: var(--ink-soft);
-  width: 18px;
+  flex: none;
+  width: 22px;
   height: 0;
-  border-top: 2px solid var(--legend-color);
-  flex: 0 0 auto;
+  border-top: 2.5px solid var(--legend-color);
 }
 
 .chart-legend-key-dashed {
   border-top-style: dashed;
+  border-top-width: 2px;
 }
 
 .chart-legend-key-dotted {
   border-top-style: dotted;
+  border-top-width: 2px;
 }
 
 .chart-legend-unit {
-  color: var(--ink-soft);
-  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .chart-container {
@@ -227,7 +213,7 @@ h2 {
 
 @media (min-width: 560px) {
   .chart-container {
-    min-height: 300px;
+    min-height: 340px;
   }
 }
 
@@ -236,15 +222,16 @@ h2 {
 }
 
 .chart-caption {
+  margin: 12px 0 0;
   color: var(--ink-soft);
-  font-size: 0.88rem;
-  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
 }
 
-/* SVG — цвета через CSS, чтобы тема менялась без перерисовки. */
+/* SVG: цвета через токены, чтобы тема менялась без перерисовки. */
 
 .chart-gridline {
-  stroke: var(--rule);
+  stroke: var(--chart-grid);
   stroke-width: 1;
 }
 
@@ -255,30 +242,45 @@ h2 {
 
 .chart-axis-label {
   fill: var(--ink-soft);
+  font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
 .chart-marker-end {
-  stroke: var(--ink-soft);
-  stroke-width: 1;
-}
-
-.chart-marker-break {
-  stroke: var(--ink-soft);
+  stroke: var(--chart-mark);
   stroke-width: 1;
   stroke-dasharray: 4 4;
 }
 
+.chart-marker-break {
+  stroke: var(--chart-break);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
 .chart-marker-label {
   fill: var(--ink-soft);
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.chart-marker-label-break {
+  fill: var(--chart-break-ink);
 }
 
 .chart-line {
-  stroke-width: 2;
+  stroke-width: 2.2;
   stroke-linejoin: round;
   stroke-linecap: round;
+}
+
+.chart-line-forecast, .chart-line-two_stage {
+  stroke-width: 3;
+}
+
+.chart-line-known, .chart-line-naive, .chart-line-seasonal_naive {
+  stroke-width: 2;
 }
 
 .chart-dot, .chart-end-dot {
@@ -287,28 +289,31 @@ h2 {
 }
 
 .chart-cursor {
-  stroke: var(--ink-soft);
-  stroke-width: 1;
+  stroke: var(--ink);
+  stroke-opacity: 0.35;
+  stroke-width: 1.5;
 }
 
 .chart-hit-area {
   cursor: crosshair;
 }
 
+/* Подсказка — тёмная плашка в обеих темах: класс night у неё ставит linechart.js, он же даёт
+   ключам рядов цвета, подобранные под тёмный фон. */
 .chart-tooltip {
   position: absolute;
   z-index: 5;
-  pointer-events: none;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 0.5rem 0.65rem;
-  font-size: 0.85rem;
-  min-width: 10rem;
-  /* Ряд «известного» пунктира на графике МО подписан длинной фразой («Если
-     федеральный индекс за месяц уже опубликован») — без потолка подсказка
-     на узком графике вставала шире контейнера и уезжала за край страницы. */
+  min-width: 11.5rem;
+  /* Подпись «известного» ряда длинная — без потолка плашка на узком графике выходила бы
+     за край страницы. */
   max-width: calc(100% - 8px);
+  padding: 12px 14px;
+  background: var(--night);
+  border: 1px solid var(--night-rule);
+  border-radius: 12px;
+  color: var(--night-ink);
+  font-size: 0.875rem;
+  pointer-events: none;
 }
 
 .chart-tooltip[hidden] {
@@ -316,88 +321,111 @@ h2 {
 }
 
 .chart-tooltip-month {
-  font-weight: 600;
-  margin-bottom: 0.3rem;
+  color: var(--night-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .chart-tooltip-row {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  white-space: nowrap;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 .chart-tooltip-key {
-  --legend-color: var(--ink-soft);
+  --legend-color: var(--night-soft);
+  flex: none;
   width: 14px;
   height: 0;
-  border-top: 2px solid var(--legend-color);
-  flex: 0 0 auto;
+  border-top: 2.5px solid var(--legend-color);
 }
 
 .chart-tooltip-key-dashed {
   border-top-style: dashed;
+  border-top-width: 2px;
 }
 
 .chart-tooltip-key-dotted {
   border-top-style: dotted;
+  border-top-width: 2px;
 }
 
+/* Только подпись ряда переносится по словам; число и ключ остаются в одной строке. */
 .chart-tooltip-label {
-  color: var(--ink-soft);
   flex: 1 1 auto;
-  /* Единственная часть строки подсказки, которой можно переноситься: число
-     (tabular-nums) и цветной ключ — в одну строку, а длинная подпись серии
-     переносится сама, а не раздвигает всю подсказку (см. max-width выше). */
-  white-space: normal;
+  color: var(--night-ink-3);
 }
 
 .chart-tooltip-value {
-  font-weight: 700;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-details.numbers-details {
-  margin: 1rem 0 2rem;
+.numbers-details {
+  margin-top: 14px;
 }
 
-details.numbers-details summary {
-  cursor: pointer;
+.numbers-details summary {
+  padding: 10px 0;
   color: var(--accent);
   font-weight: 600;
-  padding: 0.4rem 0;
+  cursor: pointer;
 }
 
-/* -- таблицы: на телефоне прокручиваются в своём контейнере, не страница --- */
+/* -- разделы под карточкой --------------------------------------------------------------- */
+
+.stand-section {
+  padding-top: 70px;
+}
+
+.stand-section + .stand-section {
+  padding-top: 56px;
+}
+
+.stand-section .section-title {
+  font-size: clamp(1.625rem, 3vw, 2.375rem);
+}
+
+.stand-section-lead {
+  max-width: 820px;
+  margin: 14px 0 0;
+  color: var(--ink-soft);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* -- таблицы с числами: на телефоне прокручиваются в своей рамке, не вся страница ----------- */
 
 .table-scroll {
+  margin: 14px 0 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--rule);
-  border-radius: 4px;
-  margin: 0.75rem 0;
+  border-radius: 14px;
 }
 
 table.data-table {
-  border-collapse: collapse;
   width: 100%;
   min-width: 30rem;
-  font-size: 0.9rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
 }
 
 table.data-table th, table.data-table td {
-  padding: 0.5rem 0.7rem;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule-soft);
   text-align: right;
-  border-bottom: 1px solid var(--rule);
   font-variant-numeric: tabular-nums;
 }
 
-/* Только данные держим в одну строку (числа не переносятся) — заголовку, в
-   отличие от числа под ним, ничего не мешает занять две строки, если длинная
-   подпись правила («как в декабре», %) не помещается в ширину колонки: без
-   этого таблица агрегата на 1280 px не влезала в свой контейнер на ~16px
-   и последняя колонка обрезалась бортом .table-scroll. */
+/* Числа не переносятся; подпись столбца — может: длинное название правила в заголовке иначе
+   растягивало бы таблицу. */
 table.data-table td {
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 
@@ -406,132 +434,288 @@ table.data-table th:first-child, table.data-table td:first-child {
   white-space: normal;
 }
 
+/* Месяц («янв 2023») не переносится по словам: иначе на телефоне каждая строка занимает две. */
+table.data-table tbody th:first-child {
+  white-space: nowrap;
+}
+
 table.data-table thead th {
   color: var(--ink-soft);
-  font-weight: 600;
+  font-size: 0.8125rem;
+  font-weight: 500;
   vertical-align: bottom;
 }
 
-table.data-table tbody tr:last-child td {
-  border-bottom: none;
+table.data-table tbody th {
+  font-weight: 500;
 }
 
-.cell-best {
-  font-weight: 700;
-  color: var(--ink);
-  border-left: 3px solid var(--accent);
-  padding-left: calc(0.7rem - 3px);
+table.data-table tbody tr:last-child th, table.data-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
-.cell-sub {
-  display: block;
-  margin-top: 2px;
-  font-size: 0.82em;
-  font-weight: 400;
-  color: var(--ink-soft);
+/* Последняя строка таблицы агрегата — средняя ошибка за год: отделена чертой и жирнее. */
+#agg-table tbody tr:last-child {
+  font-weight: 600;
+}
+
+#agg-table tbody tr:last-child th, #agg-table tbody tr:last-child td {
+  border-top: 1px solid var(--rule);
+}
+
+#agg-table tbody tr:last-child th {
+  white-space: normal;
 }
 
 .cell-dash {
   color: var(--ink-soft);
 }
 
-/* Заголовок модели в таблице ошибок: короткая роль жирным, полное название модели —
-   строкой ниже, приглушённой (переиспользует .cell-sub) — скрыта на узком экране,
-   там на счету каждый миллиметр строки. */
-.role-primary {
+.cell-sub {
   display: block;
-  font-weight: 600;
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-family: var(--font-text);
+  font-size: 0.75rem;
+  font-weight: 400;
 }
 
-/* Заголовок фолда: месяцы теста и длина обучения — двумя строками, а не одной
-   длинной («апрель–июнь 2024 (обучение 15 мес.)» не помещается ни в одну колонку
-   таблицы на телефоне). */
+/* -- ошибки моделей: строка-карточка на модель ----------------------------------------------
+   Таблица остаётся таблицей (роли строк и ячеек проставлены в demo.js), но рисуется иначе:
+   на широком экране каждая строка — сетка, первая колонка — название модели, остальные — по
+   одной на фолд и среднее. Колонок столько, сколько ячеек в строке (grid-auto-flow: column):
+   число фолдов решает конфиг, а не вёрстка. */
+
+.errors-table {
+  display: block;
+  margin-top: 26px;
+}
+
+.errors-table thead {
+  display: block;
+}
+
+.errors-table tbody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.errors-table tr {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: minmax(0, 1.3fr);
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid transparent;
+}
+
+.errors-table thead tr {
+  padding: 0 22px 10px;
+}
+
+.errors-table thead th {
+  padding: 0 10px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.errors-table thead th:first-child {
+  padding-left: 0;
+}
+
 .fold-head-months {
   display: block;
 }
 
 .fold-head-train {
   display: block;
-  margin-top: 2px;
-  font-size: 0.78em;
-  font-weight: 400;
-  color: var(--ink-soft);
+  text-transform: none;
 }
 
-/* -- таблица ошибок на телефоне: карточка на модель, значения — сеткой 2×2 ---
-   Пять узких колонок (модель + 3 фолда + среднее) не помещаются без прокрутки
-   даже с компактными заголовками — вместо неё каждая строка таблицы становится
-   отдельным блоком, а тело <thead> — подписью каждой ячейки (data-label). */
-@media (max-width: 479px) {
-  /* Тоньше поля у всех таблиц — освобождает пиксели там, где считает каждый:
-     первые четыре колонки агрегата (месяц/факт/прогноз/ошибка %) должны влезать
-     без прокрутки, а с полем 0.7rem с каждой стороны им не хватало ~1-2px. */
-  table.data-table th, table.data-table td {
-    padding-left: 0.4rem;
-    padding-right: 0.4rem;
-  }
+.errors-table tbody tr {
+  padding: 16px 22px;
+  background: var(--surface);
+  border-color: var(--rule);
+  border-radius: 16px;
+}
 
-  .role-desc {
+.errors-table tbody th {
+  padding: 0;
+  text-align: left;
+  font-weight: 400;
+}
+
+.role-primary {
+  display: block;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.role-primary::first-letter {
+  text-transform: uppercase;
+}
+
+.errors-table .role-desc {
+  margin-top: 3px;
+  font-size: 0.8125rem;
+}
+
+.errors-table td {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-family: var(--font-mono);
+  font-size: 1.1875rem;
+  line-height: 1.3;
+  text-align: left;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.errors-table td.cell-best {
+  background: var(--best-bg);
+  color: var(--best-ink);
+  font-weight: 600;
+}
+
+.errors-foot {
+  margin: 14px 0 0;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+}
+
+/* Ниже 900 px пять колонок не помещаются: строка становится карточкой — название модели
+   сверху, под ним значения. Значения идут в одну строку, пока каждому хватает восьми rem,
+   иначе переносятся (на телефоне получается сетка 2×2): сколько их в строке, решает ширина,
+   а не вёрстка. Подпись столбца (месяцы теста и длина обучения) — над каждым числом, потому
+   что шапка таблицы скрыта. */
+@media (max-width: 899px) {
+  .errors-table thead {
     display: none;
   }
 
-  #errors-table {
+  .errors-table tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px 12px;
+    padding: 16px;
+  }
+
+  .errors-table tbody th {
+    flex: 1 0 100%;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  /* Ячейка — колонка: подпись растягивается и прижимает число и «панель …» ко дну, поэтому
+     числа соседних ячеек стоят на одной высоте, даже когда подписи в одну и две строки. */
+  .errors-table td {
+    display: flex;
+    flex: 1 1 8rem;
+    flex-direction: column;
     min-width: 0;
   }
 
-  #errors-table, #errors-table thead, #errors-table tbody,
-  #errors-table tr, #errors-table th, #errors-table td {
-    display: block;
-    width: auto;
+  .errors-table td::before {
+    content: attr(data-label);
+    flex: 1 0 auto;
+    margin-bottom: 2px;
+    color: var(--ink-soft);
+    font-family: var(--font-text);
+    font-size: 0.75rem;
+    font-weight: 400;
+    white-space: normal;
   }
 
-  #errors-table thead {
+  .errors-table td.cell-best::before {
+    color: var(--best-ink);
+  }
+}
+
+/* -- блок федерального агрегата: тёмная панель, как блок «Стенд» на главной ------------------ */
+
+.agg.night {
+  padding: 40px 40px 36px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 28px;
+}
+
+.agg .stand-section-lead {
+  color: var(--night-ink-3);
+}
+
+.agg-chart {
+  margin-top: 28px;
+}
+
+.agg-link {
+  margin-top: 26px;
+}
+
+/* -- телефон ---------------------------------------------------------------------------------- */
+
+@media (max-width: 639px) {
+  .stand-hero {
+    padding: 14px 0 64px;
+  }
+
+  .stand-intro {
+    margin-top: 14px;
+    font-size: 1rem;
+  }
+
+  .stand-search {
+    margin-top: 22px;
+  }
+
+  .mo-card {
+    padding: 22px 18px 18px;
+    border-radius: 20px;
+  }
+
+  /* Регион и код ОКТМО — двумя строками без разделителя: код не рвётся и не оставляет
+     точку в конце первой строки. */
+  .meta-separator {
     display: none;
   }
 
-  #errors-table tbody tr {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0 0.6rem;
-    border: 1px solid var(--rule);
-    border-radius: 4px;
-    padding: 0.6rem 0.7rem;
-    margin: 0.6rem 0;
-  }
-
-  #errors-table tbody tr:first-child {
-    margin-top: 0;
-  }
-
-  #errors-table tbody th[scope="row"] {
-    grid-column: 1 / -1;
-    text-align: left;
-    white-space: normal;
-    border-bottom: 1px solid var(--rule);
-    padding: 0 0 0.5rem;
-    margin-bottom: 0.4rem;
-  }
-
-  #errors-table tbody td {
-    border-bottom: none;
-    padding: 0.3rem 0;
-  }
-
-  #errors-table .cell-best {
-    border-left: none;
-    padding-left: 0;
-  }
-
-  #errors-table tbody td::before {
-    content: attr(data-label);
+  .oktmo {
     display: block;
-    /* table.data-table td задаёт white-space: nowrap для широкого экрана (см. выше) —
-       ::before наследует его от td. Карточка на телефоне узкая, а подпись фолда теперь
-       длиннее («апр–июн 2024 · обучение 15 мес.»): без сброса она вылезала за правый
-       край карточки одной строкой, а не переносилась. */
-    white-space: normal;
-    font-size: 0.72em;
-    color: var(--ink-soft);
-    margin-bottom: 0.1rem;
+  }
+
+  .stand-section {
+    padding-top: 52px;
+  }
+
+  .stand-section + .stand-section {
+    padding-top: 44px;
+  }
+
+  .agg.night {
+    padding: 24px 18px;
+    border-radius: 22px;
+  }
+
+  .agg-link {
+    display: flex;
+  }
+}
+
+@media (max-width: 479px) {
+  /* Первые четыре колонки таблицы агрегата (месяц, факт, прогноз, ошибка) должны влезать
+     без прокрутки в 360 px: поля ячеек уже. */
+  table.data-table th, table.data-table td {
+    padding-left: 8px;
+    padding-right: 8px;
   }
 }

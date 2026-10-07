@@ -39,7 +39,7 @@ const LineChart = (() => {
 
   // Высота фигуры целиком, включая полосу подписей оси X (иначе контейнер с
   // фиксированной высотой обрезает последнюю строку подписей — частая ошибка).
-  const HEIGHT_WIDE = 300;
+  const HEIGHT_WIDE = 340;
   const HEIGHT_NARROW = 240;
   const NARROW_BREAKPOINT = 480;
 
@@ -170,7 +170,9 @@ const LineChart = (() => {
     container.appendChild(svg);
 
     const tooltip = document.createElement("div");
-    tooltip.className = "chart-tooltip";
+    // night — ночные токены site.css: плашка тёмная на любой теме, а ключи рядов в ней
+    // берут цвета, подобранные под тёмный фон.
+    tooltip.className = "chart-tooltip night";
     tooltip.hidden = true;
     container.appendChild(tooltip);
 
@@ -292,8 +294,9 @@ const LineChart = (() => {
       if (width <= 0) return;
       const narrow = width < NARROW_BREAKPOINT;
       height = narrow ? HEIGHT_NARROW : HEIGHT_WIDE;
+      // Подписи оси — моноширинные: «50 000» занимает ширину шести знаков, слева нужен запас.
       margin = narrow
-        ? { top: 24, right: 12, bottom: 30, left: 48 }
+        ? { top: 24, right: 12, bottom: 30, left: 52 }
         : { top: 28, right: 18, bottom: 34, left: 64 };
 
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -383,14 +386,26 @@ const LineChart = (() => {
           class: `chart-marker chart-marker-${marker.kind}`,
         }));
         const anchor = x > margin.left + pw * 0.75 ? "end" : "start";
+        // Вид отметки — в классе подписи: у изломов подпись своего цвета, как и сама линия.
         const labelText = svgEl("text", {
           x: x + (anchor === "end" ? -4 : 4), y: margin.top + 10 + (order % 2) * 12,
-          class: "chart-marker-label", "text-anchor": anchor,
+          class: `chart-marker-label chart-marker-label-${marker.kind}`, "text-anchor": anchor,
         });
         labelText.textContent = marker.label;
         markerGroup.appendChild(labelText);
       });
       svg.appendChild(markerGroup);
+
+      // Подпись, которой не хватает места справа от отметки (моноширинный шрифт шире
+      // обычного, а отметка «конец панели» стоит близко к правому краю), переходит
+      // налево от неё: иначе правый край графика обрезал бы её на середине.
+      markerGroup.querySelectorAll("text").forEach((node) => {
+        const box = node.getBBox();
+        if (node.getAttribute("text-anchor") === "start" && box.x + box.width > width - 4) {
+          node.setAttribute("text-anchor", "end");
+          node.setAttribute("x", Number(node.getAttribute("x")) - 8);
+        }
+      });
 
       // Ряды: путь на каждую непрерывную пробежку точек, чтобы пропуск не рисовал линию.
       const seriesGroup = svgEl("g", { class: "chart-series" });
@@ -410,7 +425,8 @@ const LineChart = (() => {
         }
         runs.forEach((run) => {
           const d = run.map((i, k) => `${k === 0 ? "M" : "L"} ${scaleX(i)} ${scaleY(s.values[i])}`).join(" ");
-          const path = svgEl("path", { d, class: "chart-line", fill: "none" });
+          // id ряда — в классе: толщину линии задаёт стиль страницы, а не сам график.
+          const path = svgEl("path", { d, class: `chart-line chart-line-${s.id}`, fill: "none" });
           path.style.stroke = s.color;
           if (s.dash && DASH[s.dash]) path.style.strokeDasharray = DASH[s.dash];
           seriesGroup.appendChild(path);
@@ -446,6 +462,14 @@ const LineChart = (() => {
     resizeObserver.observe(container);
     draw();
 
+    // Лишние подписи оси снимаются по измеренной ширине (getBBox), а моноширинный шрифт
+    // может догрузиться позже первой отрисовки и стать шире запасного: когда шрифты
+    // загрузились — график перерисовывается с настоящими размерами.
+    let alive = true;
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => { if (alive) draw(); });
+    }
+
     return {
       update(nextSpec) {
         currentSpec = nextSpec;
@@ -453,6 +477,7 @@ const LineChart = (() => {
         draw();
       },
       destroy() {
+        alive = false;
         resizeObserver.disconnect();
         document.removeEventListener("pointerdown", onDocPointerDown);
         container.innerHTML = "";

@@ -5,93 +5,144 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Прогноз расходов по муниципалитету — стенд</title>
 <meta name="description" content="Потребительские расходы муниципального образования из панели СберИндекса по месяцам, их прогноз на год вперёд от конца панели, изломы ряда и ошибки моделей на нём, а также прогноз федерального агрегата, уже сверенный с фактом.">
+<meta name="theme-color" content="#0b1020">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="../site/site.css">
 <link rel="stylesheet" href="demo.css">
 </head>
 <body>
-<main class="page">
+<a class="skip-link" href="#main">К содержанию</a>
 
-<header>
-  <p class="back-link"><a href="../">&larr; обзор работы</a></p>
-  <p class="eyebrow">Демонстрационный стенд</p>
-  <h1>Прогноз расходов по муниципалитету</h1>
-  <p class="lead" id="intro-text">Загрузка данных…</p>
+<header class="site-header night">
+  <div class="wrap site-header-inner">
+    <a class="brand" href="../">
+      <svg class="brand-mark" width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true" focusable="false">
+        <path class="mark-a" d="M2 18 C7 14 10 20 14 13 S21 9 24 5"/>
+        <path class="mark-b" d="M2 22 C8 19 11 23 15 18 S21 15 24 12"/>
+      </svg>
+      <span>Одно число</span>
+    </a>
+    <details class="nav-menu" id="nav-menu" open>
+      <summary class="nav-toggle" aria-label="Меню">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+          <path class="mark-menu" d="M4 7h16M4 12h16M4 17h16"/>
+        </svg>
+      </summary>
+      <nav class="site-nav" aria-label="Разделы сайта">
+        <a class="nav-link" href="../">← Обзор работы</a>
+        <a class="nav-link" href="../report/report.html">Отчёт</a>
+        <a class="nav-link nav-link-solid" href="https://github.com/kr1zal/sberindex_konkurs">Код на GitHub</a>
+      </nav>
+    </details>
+  </div>
 </header>
 
-<section class="search-section" aria-label="Поиск муниципального образования">
-  <label class="search-label" for="mo-search">Найдите муниципальное образование по названию или региону</label>
-  <div class="combobox">
-    <input
-      id="mo-search" type="text" autocomplete="off"
-      role="combobox" aria-expanded="false" aria-controls="mo-listbox" aria-haspopup="listbox"
-      aria-autocomplete="list"
-      placeholder="например: Казань или Томская область">
-    <ul id="mo-listbox" role="listbox" class="listbox" aria-label="Результаты поиска" hidden></ul>
+<main id="main">
+
+<section class="stand-hero night" aria-labelledby="stand-title">
+  <div class="wrap">
+    <p class="eyebrow">Стенд · прогноз по муниципалитету</p>
+    <h1 class="stand-title" id="stand-title">Покажите мой город</h1>
+    <p class="stand-intro" id="intro-text">Загрузка данных…</p>
+
+    <div class="stand-search">
+      <div class="search" role="search">
+        <label class="search-label" for="mo-search">Муниципалитет или регион</label>
+        <div class="field">
+          <input
+            id="mo-search" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
+            role="combobox" aria-expanded="false" aria-controls="mo-listbox" aria-haspopup="listbox"
+            aria-autocomplete="list"
+            placeholder="Например: казань, михайловский">
+        </div>
+        <ul id="mo-listbox" role="listbox" class="suggestions" aria-label="Результаты поиска" hidden></ul>
+        <p id="mo-search-status" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
+      </div>
+
+      <div class="quick" id="quick-chips" role="group" aria-label="Быстрый выбор муниципального образования"></div>
+      <p class="search-hint" id="search-hint"></p>
+      <p class="stand-alert" id="mo-invalid-note" role="alert" hidden></p>
+      <noscript>
+        <p class="stand-alert">Стенд работает с включённым JavaScript: данные и графики строит скрипт страницы.</p>
+      </noscript>
+    </div>
   </div>
-  <p id="mo-search-status" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
-  <p class="section-note" id="search-hint"></p>
-  <p class="mo-note" id="mo-invalid-note" role="alert" hidden></p>
 </section>
 
-<section class="mo-section" aria-labelledby="mo-heading">
-  <h2 id="mo-heading">Выбранный муниципалитет</h2>
-  <p class="mo-name" id="mo-name">—</p>
-  <p class="mo-meta" id="mo-meta"></p>
-  <p class="mo-note" id="mo-no-region-note" hidden></p>
+<div class="wrap mo-wrap">
+  <section class="mo-card" aria-labelledby="mo-name">
+    <div class="mo-title">
+      <p class="mono-label">Выбранный муниципалитет</p>
+      <h2 class="mo-name" id="mo-name">—</h2>
+      <p class="mo-meta" id="mo-meta"></p>
+    </div>
+    <p class="mo-note" id="mo-no-region-note" hidden></p>
 
-  <div class="chart-figure">
     <div class="chart-legend" id="mo-legend"></div>
     <div class="chart-container" id="mo-chart"></div>
-    <p class="chart-caption" id="mo-forecast-caption"></p>
-    <p class="chart-caption" id="mo-breaks-caption"></p>
-  </div>
 
-  <details class="numbers-details">
-    <summary>Числа графика</summary>
-    <div class="table-scroll">
-      <table class="data-table" id="mo-numbers-table"></table>
+    <div class="chart-notes">
+      <p class="chart-caption" id="mo-forecast-caption"></p>
+      <p class="chart-caption" id="mo-breaks-caption"></p>
     </div>
-  </details>
-</section>
 
-<section class="errors-section" aria-labelledby="errors-heading">
-  <h2 id="errors-heading">Как модели ошибались на этом муниципалитете</h2>
-  <p class="section-note" id="errors-caption"></p>
-  <div class="table-scroll">
-    <table class="data-table" id="errors-table" role="table"></table>
+    <details class="numbers-details">
+      <summary>Числа графика</summary>
+      <div class="table-scroll">
+        <table class="data-table" id="mo-numbers-table"></table>
+      </div>
+    </details>
+  </section>
+</div>
+
+<section class="stand-section" aria-labelledby="errors-heading">
+  <div class="wrap">
+    <p class="eyebrow">Проверка на истории</p>
+    <h2 class="section-title" id="errors-heading">Как модели ошибались на этом муниципалитете</h2>
+    <p class="stand-section-lead" id="errors-caption"></p>
+    <table class="errors-table" id="errors-table" role="table" aria-labelledby="errors-heading"></table>
+    <p class="errors-foot">Выделено фоном — лучшая модель в столбце на этом муниципалитете.</p>
   </div>
 </section>
 
-<hr class="rule">
+<section class="stand-section" aria-labelledby="aggregate-heading">
+  <div class="wrap">
+    <div class="agg night">
+      <p class="eyebrow">Проверено фактом</p>
+      <h2 class="section-title" id="aggregate-heading">Федеральный агрегат: прогноз, уже сверенный с фактом</h2>
+      <p class="stand-section-lead" id="agg-lead">Загрузка данных…</p>
 
-<section class="aggregate-section" aria-labelledby="aggregate-heading">
-  <h2 id="aggregate-heading">Федеральный агрегат: прогноз, уже сверенный с фактом</h2>
-  <p class="lead" id="agg-lead">Загрузка данных…</p>
+      <div class="agg-chart">
+        <div class="chart-legend" id="agg-legend"></div>
+        <div class="chart-container" id="agg-chart"></div>
+        <p class="chart-caption" id="agg-chart-caption"></p>
+      </div>
 
-  <div class="chart-figure">
-    <div class="chart-legend" id="agg-legend"></div>
-    <div class="chart-container" id="agg-chart"></div>
-    <p class="chart-caption" id="agg-chart-caption"></p>
-  </div>
+      <div class="table-scroll">
+        <table class="data-table" id="agg-table"></table>
+      </div>
 
-  <div class="table-scroll">
-    <table class="data-table" id="agg-table"></table>
+      <a class="btn btn-primary agg-link" href="../#fact">Интерактивная версия на главной →</a>
+    </div>
   </div>
 </section>
-
-<footer class="footer">
-  <p>
-    Данные — <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>
-    о безналичных потребительских расходах муниципальных образований.
-    Код и тексты — под лицензией MIT; данные — на условиях СберИндекса;
-    справочник муниципальных образований — CC BY-SA 4.0.
-  </p>
-  <p id="footer-built"></p>
-  <p><a href="../">Обзор работы: главные числа, отчёт, слайды и код</a></p>
-</footer>
 
 </main>
+
+<footer class="site-footer night">
+  <div class="wrap site-footer-inner">
+    <p>
+      Данные — <a href="https://sberindex.ru/ru/dashboards/potrebitelskie-beznalicnye-rashody-na-urovne-munizipalnyh-obrazovanij">дашборд СберИндекса</a>
+      о безналичных потребительских расходах муниципальных образований. Числа на странице — из тех же
+      файлов результатов, что и отчёт. Код и тексты — MIT; данные — на условиях СберИндекса;
+      справочник муниципальных образований — CC BY-SA 4.0; шрифты
+      <a href="../site/fonts/unbounded-OFL.txt">Unbounded</a>, <a href="../site/fonts/onest-OFL.txt">Onest</a>
+      и <a href="../site/fonts/jetbrains-mono-OFL.txt">JetBrains Mono</a> — SIL OFL.
+    </p>
+    <p class="built" id="footer-built"></p>
+  </div>
+</footer>
+
 <script src="linechart.js" defer></script>
 <script src="demo.js" defer></script>
 </body>
