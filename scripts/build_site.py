@@ -117,7 +117,8 @@ recommended-модель самого длинного горизонта — tw
               в порядке prophet, naive_last, лучшая основного протокола (summary.csv
               MAE.idxmin()), two_stage — [{id, role, label, note, mae}], mae[i] — MAE
               на горизонте list[i], руб., по horizons_summary.csv (нет — null);
-              notes[i] — пояснение под полосами на горизонте list[i].
+              notes[i] — пояснение под полосами на горизонте list[i], с числом фолдов этого
+              горизонта (`horizon_folds`).
     fact      то же, что demo/data/aggregate.json (одна и та же структура, не пересчёт).
     teaser    {months, items}: три МО из TEASER_MO; items[k] — {id, short, region, fact,
               forecast, known, breaks} теми же значениями, что в demo/data/mo/*.json;
@@ -132,6 +133,7 @@ import argparse
 import datetime as dt
 import importlib.util
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -174,9 +176,14 @@ AGGREGATE_CHART_START = "2022-01"
 LANDING_SAMPLE_SEED = 20261007
 LANDING_SAMPLE_SIZE = 30
 
-# Ряды нормируются к среднему за первый год панели: на обложке и в «Почему это прогноз
-# одного числа» 100% — «расходы такого же, как в среднем за первый год».
+# Ряды нормируются к среднему за первые месяцы панели: на обложке и в «Почему это прогноз
+# одного числа» 100% — «расходы такие же, как в среднем за этот период».
 STORY_BASE_MONTHS = 12
+
+# Подпись третьего шага «Почему это прогноз одного числа»: доля значений панели (в процентах),
+# которые лежат в полосе вокруг общего движения. Ширина полосы — процентиль отклонений этой доли,
+# округлённый вверх до целого процента: полоса не уже, чем нужно, чтобы доля была честной.
+STORY_SPREAD_SHARE = 90
 
 # Муниципалитеты блока «Стенд»: названия — как в series_id панели, короткая подпись — для
 # чипа. Нужен ряд с регионом (Орёл, Казань) и ряд-омоним с номером «#N» (Михайловский
@@ -381,9 +388,14 @@ def compute_placeholders(
     - ``folds_short`` — та же оговорка о фолдах одним оборотом, «на 2 фолдах из 3»: для узких
       экранов, где подпись числа сокращена.
     - ``sample_label`` — «30 случайных муниципалитетов»: выборка обложки с согласованными формами.
-    - ``spread_pct`` — у девяти значений из десяти по всей панели отклонение от общего движения
-      (медианы по рядам) не больше этого числа процентов: подпись третьего шага «Почему это
-      прогноз одного числа». Считается на всей матрице, а не на 30 нарисованных рядах.
+    - ``spread_share`` / ``spread_pct`` — не менее чем у `spread_share`% значений по всей панели
+      отклонение от общего движения (медианы по рядам) не больше `spread_pct`%: подпись третьего
+      шага «Почему это прогноз одного числа». Доля — константа `STORY_SPREAD_SHARE`, ширина полосы —
+      её процентиль отклонений, округлённый вверх. Считается на всей матрице, а не на 30
+      нарисованных рядах.
+    - ``story_base`` — период, к среднему за который нормированы ряды обложки и первого раздела:
+      «2023 год» (первые `STORY_BASE_MONTHS` месяцев панели — календарный год) или
+      «первые 12 месяцев панели».
     - ``landing_json`` — данные главной (формат — докстринг модуля); добавляет `main` после
       сборки, сюда он не входит.
     """
@@ -500,7 +512,12 @@ def compute_placeholders(
     )
     norm, median = _story_matrix(wide)
     deviation = norm.div(median, axis=0).sub(1).abs().to_numpy()
-    placeholders["spread_pct"] = num(float(np.percentile(deviation, 90)) * 100, 0)
+    # Округление вверх: при процентиле 7,03% полоса ±7% вмещала бы чуть меньше заявленной доли.
+    # До ceil — округление до шести знаков, чтобы шум float не добавил лишний процент к целому.
+    spread = float(np.percentile(deviation, STORY_SPREAD_SHARE)) * 100
+    placeholders["spread_share"] = str(STORY_SPREAD_SHARE)
+    placeholders["spread_pct"] = str(math.ceil(round(spread, 6)))
+    placeholders["story_base"] = story_base_label(wide)
     return placeholders
 
 
@@ -856,6 +873,18 @@ def _story_matrix(wide: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     return norm, norm.median(axis=1)
 
 
+def story_base_label(wide: pd.DataFrame) -> str:
+    """Период нормировки словами, после предлога «за»: «2023 год», если первые
+    `STORY_BASE_MONTHS` месяцев панели — целые календарные годы, иначе «первые 12 месяцев
+    панели». Год на странице берётся из данных, а не пишется в шаблоне: панель может начаться
+    не с января, и тогда «год» был бы неправдой."""
+    start = wide.index[0]
+    if start.month == 1 and STORY_BASE_MONTHS % 12 == 0:
+        first, last = start.year, start.year + STORY_BASE_MONTHS // 12 - 1
+        return f"{first} год" if first == last else f"{first}–{last} годы"
+    return f"первые {STORY_BASE_MONTHS} {plural(STORY_BASE_MONTHS, 'месяц', 'месяца', 'месяцев')} панели"
+
+
 def build_story(wide: pd.DataFrame) -> dict:
     """`story` данных главной: 30 рядов выборки и медиана по ВСЕМ рядам матрицы."""
     if wide.shape[1] < LANDING_SAMPLE_SIZE:
@@ -902,6 +931,27 @@ def _label_parts(model_id: str) -> tuple[str, str]:
     return head[:1].upper() + head[1:], tail
 
 
+def horizon_folds(horizons_cfg: dict, horizons_summary: pd.DataFrame) -> dict[int, int]:
+    """Число фолдов протокола на каждом горизонте: колонка «фолдов» `horizons_summary.csv`,
+    сверенная с `n_folds` из `configs/horizons.yaml`.
+
+    Число стоит в пояснении каждого горизонта: средняя по двум фолдам и по девяти — разные
+    по весу утверждения. Файл результатов и конфиг, разошедшиеся в этом числе, — признак
+    прогона не с тем конфигом, и сборка падает, а не выбирает одно из двух."""
+    counts = horizons_summary.groupby("horizon")["фолдов"].agg(["min", "max"])
+    mixed = [int(h) for h, row in counts.iterrows() if row["min"] != row["max"]]
+    if mixed:
+        raise ValueError(f"в results/horizons_summary.csv у горизонтов {mixed} разное число фолдов у моделей")
+    wanted = {int(item["horizon"]): int(item["n_folds"]) for item in horizons_cfg["horizons"]}
+    found = {h: int(counts.loc[h, "max"]) for h in wanted if h in counts.index}
+    if found != wanted:
+        raise ValueError(
+            f"число фолдов по горизонтам в results/horizons_summary.csv ({found}) не совпадает "
+            f"с configs/horizons.yaml ({wanted}) — результаты прогнаны с другим конфигом"
+        )
+    return wanted
+
+
 def build_horizons(
     *, horizons_cfg: dict, horizons_summary: pd.DataFrame, summary: pd.DataFrame,
     full_cfg: dict, placeholders: dict[str, str],
@@ -942,17 +992,21 @@ def build_horizons(
 
     best_label = next(m["label"] for m in models if "best_mean" in m["role"].split("+"))
     horizon_main = int(full_cfg["split"]["horizon"])
+    folds = horizon_folds(horizons_cfg, horizons_summary)
     notes = []
     for i, horizon in enumerate(horizons):
         sentences = []
         if horizon == NOWCAST_HORIZON:
             sentences.append("Наукаст — прогноз текущего месяца, пока его данных ещё нет.")
-            if placeholders["h1_gain"] != "—":
-                sentences.append(f"{best_label} точнее эталона на {placeholders['h1_gain']}%.")
         elif any(m["mae"][i] is None for m in models):
             sentences.append("Где полосы нет, модель не удалось обучить: на этом горизонте истории не хватает.")
         else:
             sentences.append("Средняя абсолютная ошибка по фолдам скользящего origin, ₽ на человека в месяц.")
+        # Число фолдов — сразу за описанием горизонта: полоса «лучшая» по среднему, а на горизонтах
+        # с двумя фолдами и одним порядок моделей по фолдам может быть другим.
+        sentences.append(f"Фолдов: {folds[horizon]}.")
+        if horizon == NOWCAST_HORIZON and placeholders["h1_gain"] != "—":
+            sentences.append(f"{best_label} точнее эталона на {placeholders['h1_gain']}%.")
         if horizon == horizon_main and horizon != NOWCAST_HORIZON:
             sentences.append(f"{best_label} точнее эталона на {placeholders['best_gain']}%.")
             sentences.append(placeholders["folds_caveat"])

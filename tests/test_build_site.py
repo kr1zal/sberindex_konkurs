@@ -15,12 +15,14 @@ import datetime as dt
 import importlib.util
 import io
 import json
+import math
 import re
 import sys
 import tempfile
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import unquote
 
 import numpy as np
 import pandas as pd
@@ -234,6 +236,100 @@ class _IdCollector(HTMLParser):
         values = dict(attrs)
         if values.get("id"):
             self.ids[values["id"]] = {"tag": tag, **values}
+
+
+class _NodeText(HTMLParser):
+    """Видимый текст узлов по их `id` — вместе с вложенными тегами. Подстановки вне пяти карточек
+    (подзаголовок обложки, шаг 01, блок «Стенд», заголовок раздела 03, ползунок) сверяются в
+    границах своего узла: «где-то на странице» этим значениям не подходит — подмена одной
+    подстановки другой (`n_series_rub` на `n_months`) оставалась бы незамеченной."""
+
+    VOID = {"br", "hr", "img", "input", "link", "meta"}
+
+    def __init__(self, ids) -> None:
+        super().__init__()
+        self.wanted = set(ids)
+        self.text = {node_id: "" for node_id in ids}
+        self._stack: list[tuple[str, str | None]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self.VOID:
+            return
+        node_id = dict(attrs).get("id")
+        self._stack.append((tag, node_id if node_id in self.wanted else None))
+
+    def handle_endtag(self, tag: str) -> None:
+        while self._stack:
+            if self._stack.pop()[0] == tag:
+                break
+
+    def handle_data(self, data: str) -> None:
+        for _, node_id in self._stack:
+            if node_id:
+                self.text[node_id] += data
+
+
+class _IdsOf:
+    """Тексты и атрибуты узлов страницы по `id`: `text(id)` — видимый текст с вложенными тегами,
+    `attr(id, имя)` — значение атрибута."""
+
+    def __init__(self, html: str) -> None:
+        ids = _IdCollector()
+        ids.feed(html)
+        self._attrs = ids.ids
+        nodes = _NodeText(ids.ids)
+        nodes.feed(html)
+        self._text = {node_id: _collapse(text) for node_id, text in nodes.text.items()}
+
+    def text(self, node_id: str) -> str:
+        return self._text[node_id]
+
+    def attr(self, node_id: str, name: str) -> str:
+        return self._attrs[node_id][name]
+
+
+def _collapse(text: str) -> str:
+    """Пробелы разметки — в один; неразрывный пробел остаётся (его пишут числа и подписи)."""
+    return re.sub(r"[ \t\n\r\f\v]+", " ", text).strip()
+
+
+# Числа словами в тексте страницы: основы и формы падежей, простым списком. Проверка ищет их
+# в видимом тексте шаблона, где число обязано быть подстановкой генератора. «Обе» и «пол» сюда
+# не входят — это не счёт.
+_NUMBER_WORDS = re.compile(
+    r"(?<!\w)(?:"
+    r"од(?:ин|н\w*)|дв(?:а|е|ое)(?!\w)|дву\w*|двух\w*|двум\w*|двен\w*|двад\w*|двест\w*|"
+    r"тр(?:и|[её]х\w*|ем\w*)(?!\w)|трин\w*|трид\w*|трист\w*|трет\w*|"
+    r"четыр\w*|четвёрт\w*|четверт\w*|"
+    r"пят\w*|шест\w*|сем(?:ь|и|ью|ьсот|ьдесят)(?!\w)|седьм\w*|семнад\w*|"
+    r"восем\w*|восьм\w*|девят\w*|девян\w*|десят\w*|сорок\w*|"
+    r"перв(?:ый|ого|ому|ым|ом|ая|ой|ую|ое|ые|ых|ыми)(?!\w)|"
+    r"втор(?:ой|ого|ому|ым|ом|ая|ую|ое|ые|ых|ыми)(?!\w)|"
+    r"сто(?!\w)|ста(?!\w)|сот(?:ня|ни|ен|ый|ого)\w*|тысяч\w*|миллион\w*|миллиард\w*|"
+    r"нол[ьяюеи](?!\w)|нуль(?!\w)|нулев\w*|дважды|трижды|четырежды"
+    r")\w*",
+    re.IGNORECASE,
+)
+
+# То, что числом не является: имя сайта, фигура речи про сам вывод работы, один муниципалитет на
+# линию графика, название этапа модели, прилагательное «двухэтапная» и отрицание «ни одной из
+# моделей». Исключения — целыми оборотами, а не основами: «первый год» или «двух месяцев» они
+# не скрывают.
+_NOT_NUMBERS = (
+    "Одно число",
+    "одного числа",
+    "один муниципалитет",
+    r"перв\w+ этап\w*",
+    r"двухэтапн\w*",
+    r"ни одн\w+",
+)
+
+
+def _number_words_in(text: str) -> list[str]:
+    """Числа словами в тексте, кроме оборотов из `_NOT_NUMBERS`."""
+    for phrase in _NOT_NUMBERS:
+        text = re.sub(phrase, " ", text)
+    return [match.group(0) for match in _NUMBER_WORDS.finditer(text)]
 
 
 class BuildSiteTest(unittest.TestCase):
@@ -732,11 +828,17 @@ class BuildSiteTest(unittest.TestCase):
                     # Якорь внутри страницы — это не файл: ищем элемент с таким id.
                     self.assertIn(link[1:], ids.ids, f"{link}: на странице нет такого id")
                     continue
-                target = (ROOT / link).resolve()
+                path_part, _, fragment = link.partition("#")
+                target = (ROOT / unquote(path_part)).resolve()
                 if target.is_dir():
                     self.assertTrue((target / "index.html").exists(), f"{link}: нет index.html внутри")
                 else:
                     self.assertTrue(target.exists(), f"{link}: файла {target} нет")
+                if fragment:
+                    # Ссылка на раздел другой страницы («report/report.html#…»): такой id там должен быть.
+                    page_ids = _IdCollector()
+                    page_ids.feed(target.read_text(encoding="utf-8"))
+                    self.assertIn(unquote(fragment), page_ids.ids, f"{link}: в {target.name} нет такого id")
 
     # -- ссылки и ресурсы стенда (demo/index.html) ----------------------------
 
@@ -955,11 +1057,19 @@ class BuildSiteTest(unittest.TestCase):
         self.assertNotEqual([str(self.wide.columns[i]) for i in other], self.landing["story"]["ids"])
 
     def test_story_spread_in_template_is_recomputed_from_all_series(self) -> None:
-        # Третий шаг: «у девяти значений из десяти … не больше ±N%» — N по всей панели.
+        # Третий шаг: «не менее чем у N% значений … не больше ±M%» — по всей панели. M — процентиль
+        # отклонений, округлённый вверх: при 7,03% полоса ±7% вмещала бы меньше заявленной доли.
         norm = self._story_norm()
         deviation = norm.div(norm.median(axis=1), axis=0).sub(1).abs().to_numpy()
-        expected = _fmt(float(np.percentile(deviation, 90)) * 100, 0)
-        self.assertIn(f"не больше ±{expected}%", self.html)
+        share = build_site.STORY_SPREAD_SHARE
+        self.assertTrue(50 < share < 100)
+        band = math.ceil(round(float(np.percentile(deviation, share)) * 100, 6))
+        caption = _IdsOf(self.html).attr("step-3", "data-caption")
+        self.assertIn(f"не менее чем у {share}% значений", caption)
+        self.assertIn(f"не больше ±{band}%", caption)
+        # Утверждение верно, и полоса не шире нужного: на один процент уже она бы доли не вмещала.
+        self.assertGreaterEqual(float((deviation <= band / 100).mean()), share / 100)
+        self.assertLess(float((deviation <= (band - 1) / 100).mean()), share / 100)
 
     # -- horizons: MAE четырёх моделей на горизонтах конфига --------------------------------
 
@@ -1016,6 +1126,16 @@ class BuildSiteTest(unittest.TestCase):
         if 0 < n_folds < 3:
             words = {1: "один", 2: "два"}[n_folds]
             self.assertIn(f"но это {words} {_plural(n_folds, 'фолд', 'фолда', 'фолдов')}", notes[12])
+        # Число фолдов каждого горизонта — в его пояснении, из двух независимых источников: конфига
+        # и результатов. Среднее по двум фолдам и по девяти — разные по весу утверждения.
+        config_folds = {int(item["horizon"]): int(item["n_folds"]) for item in self.horizons_cfg["horizons"]}
+        result_folds = self.horizons_folds.groupby("horizon")["fold"].nunique()
+        self.assertEqual(sorted(config_folds), horizons["list"])
+        for horizon, note in notes.items():
+            with self.subTest(horizon=horizon):
+                self.assertEqual(int(result_folds[horizon]), config_folds[horizon])
+                self.assertEqual(note.count("Фолдов:"), 1)
+                self.assertIn(f"Фолдов: {config_folds[horizon]}.", note)
         # Пояснение «модель не удалось обучить» — только если на этом горизонте у какой-то из
         # четырёх моделей MAE нет: полосы нет, и читатель должен знать почему.
         year = self.horizons_summary[self.horizons_summary["horizon"] == 12].set_index("model")["MAE"]
@@ -1038,7 +1158,7 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual(
             teaser["months"], self.index_json["panel_months"] + self.index_json["forecast_months"]
         )
-        # Три МО из задания: МО стенда по умолчанию, Казань и ряд-омоним с номером «#2».
+        # Три МО блока «Стенд» (TEASER_MO): МО стенда по умолчанию, Казань и ряд-омоним с номером «#2».
         self.assertEqual(
             [item["id"] for item in teaser["items"]],
             [self.index_json["default_mo"], "городской округ город Казань", "Михайловский муниципальный район #2"],
@@ -1091,13 +1211,21 @@ class BuildSiteTest(unittest.TestCase):
                 text = (ROOT / "site" / "fonts" / licence).read_text(encoding="utf-8")
                 self.assertIn("SIL OPEN FONT LICENSE Version 1.1", text)
 
+    @staticmethod
+    def _page_scripts() -> list[str]:
+        """Все скрипты страниц: файлы `site/*.js` и `demo/*.js` (список не пишется руками — новый
+        файл попадает под проверки сам)."""
+        names = sorted(str(path.relative_to(ROOT)) for folder in ("site", "demo") for path in (ROOT / folder).glob("*.js"))
+        assert "site/landing-lib.js" in names and "demo/linechart.js" in names, names
+        return names
+
     def test_stylesheets_and_script_load_nothing_external(self) -> None:
         for name in ("site/site.css", "site/landing.css", "demo/demo.css"):
             css = (ROOT / name).read_text(encoding="utf-8")
             with self.subTest(file=name):
                 self.assertNotRegex(css, r"url\(\s*['\"]?(?:https?:)?//", "внешний url() в стилях")
                 self.assertNotIn("@import", css)
-        for name in ("site/landing.js", "demo/demo.js", "demo/linechart.js"):
+        for name in self._page_scripts():
             js = (ROOT / name).read_text(encoding="utf-8")
             with self.subTest(file=name):
                 # Единственный «http» в скрипте — пространство имён SVG, это не ресурс.
@@ -1120,9 +1248,33 @@ class BuildSiteTest(unittest.TestCase):
                 with self.subTest(file=name, url=url):
                     self.assertTrue((css_path.parent / url).resolve().exists(), f"{url}: файла нет")
 
-    def test_landing_script_has_no_hand_typed_data_numbers(self) -> None:
-        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+    def test_landing_scripts_have_no_hand_typed_data_numbers(self) -> None:
+        for name in ("site/landing.js", "site/landing-lib.js"):
+            with self.subTest(file=name):
+                self._check_no_data_numbers_in((ROOT / name).read_text(encoding="utf-8"), name)
 
+    def test_landing_script_binds_each_year_error_row_to_its_own_method(self) -> None:
+        # Три строки «Средняя ошибка за год» — свои методы: перепутанные `mean-r1` и `mean-r2` проходили
+        # все тесты, а читатель увидел бы чужое число у правила. Порядок строк в разметке — как здесь.
+        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        ids = _IdsOf(self.html)
+        rows = {"mean-own": "two_stage", "mean-r1": "naive", "mean-r2": "seasonal_naive"}
+        for node_id, method in rows.items():
+            with self.subTest(row=node_id):
+                self.assertIn(f'byId("{node_id}").textContent = `${{fact.mape.{method}}}%`;', js)
+                self.assertEqual(ids.attr(node_id, "class"), node_id)
+        for node_id, method in {"mean-r1-name": "naive", "mean-r2-name": "seasonal_naive"}.items():
+            with self.subTest(row=node_id):
+                self.assertIn(f'byId("{node_id}").textContent = `«${{fact.rule_names.{method}}}»`;', js)
+        # Само число и подпись правила в данных — одного метода: названия правил из того же файла проверки.
+        names = self.aggregate_json["rule_names"]
+        self.assertEqual(names["naive"], self.agg_check.loc[self.agg_check["method"] == "naive", "aggregate_model"].iloc[0])
+        self.assertEqual(
+            names["seasonal_naive"],
+            self.agg_check.loc[self.agg_check["method"] == "seasonal_naive", "aggregate_model"].iloc[0],
+        )
+
+    def _check_no_data_numbers_in(self, js: str, name: str) -> None:
         # Числа страницы: всё, что стоит в пунктах «пяти чисел», средние ошибки года и MAE
         # горизонтов. Нужны «данные-подобные» значения: с десятичной запятой, с неразрывным
         # пробелом разрядов или из четырёх и более цифр — короткие целые («24», «3») совпали бы
@@ -1148,13 +1300,13 @@ class BuildSiteTest(unittest.TestCase):
                 with self.subTest(number=variant):
                     self.assertIsNone(
                         re.search(r"(?<![\w.,])" + re.escape(variant) + r"(?![\w.,])", js),
-                        f"в landing.js вписано число данных {variant!r}",
+                        f"в {name} вписано число данных {variant!r}",
                     )
 
         # И сами ряды: массив из шести и более чисел подряд — вписанные данные.
         self.assertIsNone(
             re.search(r"\[\s*-?\d+(?:\.\d+)?\s*(?:,\s*-?\d+(?:\.\d+)?\s*){5,}\]", js),
-            "в landing.js есть числовой массив — данные должны приходить из landing-data",
+            f"в {name} есть числовой массив — данные должны приходить из landing-data",
         )
 
     def test_template_has_no_hand_typed_numbers(self) -> None:
@@ -1170,6 +1322,111 @@ class BuildSiteTest(unittest.TestCase):
         text = text.replace("CC BY-SA 4.0", " ")
         leftovers = re.findall(r".{0,20}\d.{0,20}", text)
         self.assertEqual(leftovers, [], "в шаблоне вписаны числа; вынесите их в подстановки генератора")
+
+    def test_template_has_no_hand_typed_number_words(self) -> None:
+        # Правило «ни одного числа руками» — и словами тоже: «Пять горизонтов» над четырьмя кнопками
+        # читалось как ошибка, «девять из десяти» повторяло константу генератора, «первый год панели»
+        # — константу STORY_BASE_MONTHS. Исключения — обороты, где слово числом не является.
+        for name, path in (("шаблон главной", ROOT / "site" / "index.template.html"),
+                           ("стенд", ROOT / "demo" / "index.html")):
+            collector = _TextCollector()
+            collector.feed(path.read_text(encoding="utf-8"))
+            text = re.sub(r"\$\{[a-z_0-9]+\}", " ", " ".join(collector.chunks))
+            with self.subTest(page=name):
+                self.assertEqual(_number_words_in(text), [], f"{name}: число вписано словами; вынесите его в подстановку")
+
+    def test_number_word_check_sees_what_it_should_and_spares_what_it_should(self) -> None:
+        # Сама проверка не должна ослепнуть: формы и падежи ловятся, исключения скрывают только свои обороты.
+        caught = ["Пять горизонтов", "у девяти значений из десяти", "двух тысяч рядов", "за первый год панели",
+                  "двенадцатый месяц", "три месяца", "шести моделей", "один фолд", "десять", "в три раза",
+                  "ни одной из шести", "одной из шести", "сорок восемь гипотез", "четвёртое число", "ровно ноль"]
+        for text in caught:
+            with self.subTest(text=text):
+                self.assertTrue(_number_words_in(text), f"проверка пропустила: {text}")
+        spared = ["Одно число", "прогноз одного числа", "каждая линия — один муниципалитет", "первый этап модели",
+                  "не двигается ни одной из моделей",
+                  "прогноз первого этапа", "двухэтапная модель", "двухэтапной модели", "движение", "стоимость",
+                  "стенд", "второстепенный", "расходы"]
+        for text in spared:
+            with self.subTest(text=text):
+                self.assertEqual(_number_words_in(text), [])
+        # Оборот-исключение не прячет число рядом с собой.
+        self.assertTrue(_number_words_in("первый этап и первый год"))
+        self.assertTrue(_number_words_in("двухэтапная модель на двух горизонтах"))
+
+    def test_substitutions_outside_the_stat_cards_sit_in_their_own_nodes(self) -> None:
+        # Подстановки вне пяти карточек привязаны к узлам по id: подмена `n_series_rub` на `n_months`
+        # в подзаголовке обложки, в шаге 01 или в блоке «Стенд», `forecast_year` на другое число в
+        # заголовке раздела 03 или в подписи ползунка тест видит, а не «число нашлось где-то на странице».
+        nodes = _IdsOf(self.html)
+        n_series = _fmt(self.wide.shape[1], 0)
+        origin = pd.Period(self.forward_cfg["origin"], "M")
+        year = origin.year + 1
+        origin_label = f"{_MONTH_OF[origin.month - 1]} {origin.year}"
+        sample = self.landing["story"]["n_sample"]
+        sample_label = f"{sample} " + _plural(sample, "случайный муниципалитет", "случайных муниципалитета",
+                                              "случайных муниципалитетов")
+        start = self.wide.index[0]
+        base = f"{start.year} год" if start.month == 1 else None
+        self.assertIsNotNone(base, "панель начинается не с января: проверке нужна своя подпись периода")
+
+        self.assertEqual(nodes.text("hero-sub"), f"и его разнос по {n_series} муниципалитетам")
+        self.assertIn(f"ещё и на факте {year} года", nodes.text("hero-lead"))
+        self.assertIn("прогноз федерального ряда", nodes.text("hero-lead"))
+        self.assertEqual(
+            nodes.text("hero-caption"),
+            f"{sample_label}\u00a0· расходы к среднему за {base}\u00a0· жёлтая — общее движение",
+        )
+        # Шаг 01: число рядов и период — и в тексте шага, и в подписи под графиком.
+        self.assertIn(f"{sample_label} из {n_series}: расходы к среднему за {base}.", nodes.text("step-1"))
+        self.assertIn(f"от его среднего за {base}.", nodes.attr("step-1", "data-caption"))
+        self.assertIn("Общее движение прогнозирует первый этап", nodes.text("step-2"))
+        self.assertIn(f"Любой из {n_series} муниципалитетов", nodes.text("stand-lead"))
+        self.assertIn(f"прогноз на {year} год", nodes.text("stand-lead"))
+        self.assertEqual(nodes.text("fact-title"), f"Прогноз от {origin_label} против факта {year} года")
+        self.assertIn(f"за весь {year} год", nodes.text("fact-lead"))
+        self.assertEqual(nodes.text("fact-k-label"), f"Месяц {year}")
+        self.assertEqual(nodes.text("material-forecast"), f"Прогноз на {year} год")
+        meta = re.search(r'<meta name="description" content="([^"]*)"', self.html).group(1)
+        self.assertIn(f"Прогноз потребительских расходов {n_series} муниципальных образований", meta)
+        self.assertIn(f"прогноз на {year} год", meta)
+
+    def test_story_base_label_names_a_year_only_when_it_is_one(self) -> None:
+        january = pd.DataFrame(index=pd.date_range("2023-01-01", periods=24, freq="MS"))
+        self.assertEqual(build_site.story_base_label(january), "2023 год")
+        # Панель с другого месяца: «год» был бы неправдой, и подпись называет месяцы.
+        march = pd.DataFrame(index=pd.date_range("2023-03-01", periods=24, freq="MS"))
+        self.assertEqual(build_site.story_base_label(march), "первые 12 месяцев панели")
+
+    def test_horizon_folds_follow_the_config_and_reject_results_of_another_one(self) -> None:
+        config = {int(item["horizon"]): int(item["n_folds"]) for item in self.horizons_cfg["horizons"]}
+        self.assertEqual(build_site.horizon_folds(self.horizons_cfg, self.horizons_summary), config)
+        other_config = self.horizons_summary.copy()
+        other_config.loc[other_config["horizon"] == 6, "фолдов"] += 1
+        with self.assertRaises(ValueError):
+            build_site.horizon_folds(self.horizons_cfg, other_config)
+        mixed = self.horizons_summary.copy()
+        mixed.loc[(mixed["horizon"] == 3) & (mixed["model"] == "prophet"), "фолдов"] = 1
+        with self.assertRaises(ValueError):
+            build_site.horizon_folds(self.horizons_cfg, mixed)
+
+    def test_story_proof_links_to_the_error_decomposition_section_of_the_report(self) -> None:
+        nodes = _IdsOf(self.html)
+        text = nodes.text("story-proof")
+        self.assertIn("межрядовая составляющая ошибки не двигается ни одной из моделей", text)
+        self.assertIn("для которых посчитано разложение", text)
+        # В строке нет числа ни цифрой, ни словом: «ни одной из шести моделей» пишет отчёт, страница — без числа.
+        self.assertEqual(re.findall(r"\d", text), [])
+        self.assertEqual(_number_words_in(text), [])
+        link = re.search(r'<a href="(report/report\.html#[^"]+)">', self.html[self.html.index('id="story-proof"'):])
+        self.assertIsNotNone(link)
+        # Якорь — раздел отчёта о механизме: в отрендеренном отчёте такой id есть.
+        anchor = unquote(link.group(1).split("#", 1)[1])
+        report_html = (ROOT / "report" / "report.html").read_text(encoding="utf-8")
+        report = _IdCollector()
+        report.feed(report_html)
+        self.assertIn(anchor, report.ids)
+        self.assertIn(f'<h3 class="anchored" data-anchor-id="{anchor}">Механизм: ошибка состоит из двух частей', report_html)
 
     # -- разметка главной ---------------------------------------------------------------------------
 
@@ -1196,11 +1453,20 @@ class BuildSiteTest(unittest.TestCase):
                 self.assertTrue(ids.ids[chart]["aria-label"])
         self.assertIn('class="hero-plot" aria-hidden="true"', self.html)
         # Шаги и переключатели — кнопки с состоянием.
-        self.assertEqual(self.html.count('class="step" type="button" aria-pressed='), 3)
+        self.assertEqual(len(re.findall(r'<button class="step" id="step-\d" type="button" aria-pressed=', self.html)), 3)
         self.assertIn('lang="ru"', self.html)
         self.assertIn('<link rel="icon" href="data:,">', self.html)
         self.assertIn('name="viewport"', self.html)
         self.assertIn('name="description"', self.html)
+
+    def test_page_loads_the_helpers_before_the_page_script(self) -> None:
+        # landing.js берёт помощники из LandingLib при запуске: без файла перед ним страница не оживёт.
+        template = (ROOT / "site" / "index.template.html").read_text(encoding="utf-8")
+        for name, page in (("index.html", self.html), ("шаблон", template)):
+            with self.subTest(page=name):
+                lib = page.index('<script src="site/landing-lib.js" defer></script>')
+                script = page.index('<script src="site/landing.js" defer></script>')
+                self.assertLess(lib, script)
 
     def test_page_links_to_the_expected_materials(self) -> None:
         collector = _LinkCollector()

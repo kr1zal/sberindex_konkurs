@@ -46,10 +46,11 @@
       <div class="hero-text">
         <p class="eyebrow hero-eyebrow rise d1">Конкурс СберИндекса · Прогнозирование</p>
         <h1 class="hero-title rise d2" id="hero-title">Прогноз <span class="amber">одного числа</span></h1>
-        <p class="hero-sub rise d3">и его разнос по ${n_series_rub} муниципалитетам</p>
-        <p class="hero-lead rise d4">
+        <p class="hero-sub rise d3" id="hero-sub">и его разнос по ${n_series_rub} муниципалитетам</p>
+        <p class="hero-lead rise d4" id="hero-lead">
           Потребительские расходы муниципальных образований по данным СберИндекса:
-          от наукаста до года вперёд, с проверкой на истории и на факте ${forecast_year} года.
+          от наукаста до года вперёд. Проверено на истории, а прогноз федерального ряда —
+          ещё и на факте ${forecast_year} года.
         </p>
       </div>
 
@@ -77,8 +78,8 @@
         </svg>
       </div>
       <div class="hero-axis" id="hero-axis" aria-hidden="true"></div>
-      <figcaption class="hero-caption">
-        ${sample_label} · расходы к среднему за первый год панели ·
+      <figcaption class="hero-caption" id="hero-caption">
+        ${sample_label}&nbsp;· расходы к среднему за ${story_base}&nbsp;·
         <span class="amber">жёлтая — общее движение</span>
       </figcaption>
       <noscript>
@@ -152,28 +153,28 @@
 
     <div class="story">
       <div class="steps" role="group" aria-label="Шаги рассуждения">
-        <button class="step" type="button" aria-pressed="true"
-                data-caption="Каждая линия — один муниципалитет; расходы показаны в процентах от его среднего за первый год панели.">
+        <button class="step" id="step-1" type="button" aria-pressed="true"
+                data-caption="Каждая линия — один муниципалитет; расходы показаны в процентах от его среднего за ${story_base}.">
           <span class="step-num">Шаг 01</span>
           <span class="step-title">Ряды идут вместе</span>
           <span class="step-text">
-            ${sample_label} из ${n_series_rub}: расходы к среднему за первый год панели.
+            ${sample_label} из ${n_series_rub}: расходы к среднему за ${story_base}.
             Сезон, декабрьский скачок и рост — общие.
           </span>
           <span class="step-short">ряды</span>
         </button>
-        <button class="step" type="button" aria-pressed="false"
+        <button class="step" id="step-2" type="button" aria-pressed="false"
                 data-caption="Жёлтая линия — медиана по всем рядам панели, общее движение страны.">
           <span class="step-num">Шаг 02</span>
           <span class="step-title">Общее движение</span>
           <span class="step-text">
             Медиана по рядам повторяет почти всю динамику.
-            Её прогнозируют по длинному федеральному ряду СберИндекса.
+            Общее движение прогнозирует первый этап — по длинному федеральному ряду СберИндекса.
           </span>
           <span class="step-short">общее движение</span>
         </button>
-        <button class="step" type="button" aria-pressed="false"
-                data-caption="Те же ряды, делённые на общее движение: у девяти значений из десяти по всей панели отклонение от него не больше ±${spread_pct}%.">
+        <button class="step" id="step-3" type="button" aria-pressed="false"
+                data-caption="Те же ряды, делённые на общее движение: не менее чем у ${spread_share}% значений по всей панели отклонение от него не больше ±${spread_pct}%.">
           <span class="step-num">Шаг 03</span>
           <span class="step-title">Что остаётся</span>
           <span class="step-text">
@@ -197,6 +198,12 @@
         <p class="story-text" id="story-text"></p>
       </div>
     </div>
+
+    <p class="story-proof" id="story-proof">
+      Не только на картинке: межрядовая составляющая ошибки не двигается ни одной из моделей,
+      для которых посчитано разложение.
+      <a href="report/report.html#механизм-ошибка-состоит-из-двух-частей-и-двигается-только-одна">Разложение ошибки — в отчёте</a>
+    </p>
   </div>
 </section>
 
@@ -204,7 +211,7 @@
   <div class="wrap">
     <div class="section-bar">
       <div>
-        <p class="eyebrow">02 · Пять горизонтов</p>
+        <p class="eyebrow">02 · Горизонты</p>
         <h2 class="section-title" id="horizons-title">Какая модель точнее — зависит от горизонта</h2>
       </div>
       <div class="segmented" id="h-seg" role="group" aria-label="Горизонт прогноза"></div>
@@ -221,7 +228,7 @@
   <div class="wrap">
     <p class="eyebrow">03 · Проверка фактом</p>
     <h2 class="section-title" id="fact-title">Прогноз от ${agg_origin_label} против факта ${forecast_year} года</h2>
-    <p class="section-lead">
+    <p class="section-lead" id="fact-lead">
       Федеральный ряд СберИндекс уже опубликовал за весь ${forecast_year} год, а муниципальный разрез — ещё нет.
       Поэтому первый этап двухэтапной модели — единственный прогноз работы, который можно сверить с фактом.
     </p>
@@ -248,7 +255,7 @@
         <div class="plot-axis plot-axis-years" id="fact-years" aria-hidden="true"></div>
 
         <div class="slider-row">
-          <label class="mono-label" for="fact-k">Месяц ${forecast_year}</label>
+          <label class="mono-label" for="fact-k" id="fact-k-label">Месяц ${forecast_year}</label>
           <input id="fact-k" type="range">
         </div>
         <div class="toggles">
@@ -289,7 +296,7 @@
       <div class="stand-copy">
         <p class="eyebrow">04 · Стенд</p>
         <h2 class="section-title" id="city-title">Покажите мой город</h2>
-        <p class="stand-lead">
+        <p class="stand-lead" id="stand-lead">
           Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год,
           изломы ряда и то, как ошибались модели.
         </p>
@@ -333,7 +340,7 @@
       </li>
       <li class="card">
         <p class="mono-label">Проверка</p>
-        <p>Скользящий origin, пять горизонтов, MAE и R² по пулу; эталон — Prophet с настройками по умолчанию.</p>
+        <p>Скользящий origin на горизонтах от наукаста до года, MAE и R² по пулу; эталон — Prophet с настройками по умолчанию.</p>
       </li>
     </ul>
 
@@ -385,7 +392,7 @@
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M4 4h16v16H4z M4 9h16 M9 9v11 M12 13l2 2 3-4"/>
         </svg>
-        <h3 class="material-title"><a class="material-link" href="results/forecast_2025.csv.gz">Прогноз на ${forecast_year} год</a></h3>
+        <h3 class="material-title"><a class="material-link" id="material-forecast" href="results/forecast_2025.csv.gz">Прогноз на ${forecast_year} год</a></h3>
         <p class="material-note">все ряды панели · csv.gz</p>
       </li>
     </ul>
@@ -409,6 +416,7 @@
 </footer>
 
 <script type="application/json" id="landing-data">${landing_json}</script>
+<script src="site/landing-lib.js" defer></script>
 <script src="site/landing.js" defer></script>
 </body>
 </html>
