@@ -1380,7 +1380,8 @@ class BuildSiteTest(unittest.TestCase):
         # Шаг 01: число рядов и период — и в тексте шага, и в подписи под графиком.
         self.assertIn(f"{sample_label} из {n_series}: расходы к среднему за {base}.", nodes.text("step-1"))
         self.assertIn(f"от его среднего за {base}.", nodes.attr("step-1", "data-caption"))
-        self.assertIn("Общее движение прогнозирует первый этап", nodes.text("step-2"))
+        # Прогнозирует первый этап — по федеральному ряду; медиана рядов только показывает общее движение.
+        self.assertIn("Его прогнозирует первый этап модели", nodes.text("step-2"))
         self.assertIn(f"Любой из {n_series} муниципалитетов", nodes.text("stand-lead"))
         self.assertIn(f"прогноз на {year} год", nodes.text("stand-lead"))
         self.assertEqual(nodes.text("fact-title"), f"Прогноз от {origin_label} против факта {year} года")

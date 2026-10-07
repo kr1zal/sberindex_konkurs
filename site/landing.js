@@ -862,6 +862,9 @@
 
     // mousedown до click: иначе фокус успевает уйти с поля раньше, чем сработает выбор.
     list.addEventListener("mousedown", (event) => event.preventDefault());
+    // То же у кнопки: уход с поля закрывает список и сбрасывает подсвеченную подсказку раньше,
+    // чем кнопка получит щелчок, — и она открыла бы первое совпадение вместо выбранного.
+    go.addEventListener("mousedown", (event) => event.preventDefault());
 
     input.addEventListener("focus", () => {
       // Первый фокус загружает список; после отказа каждый следующий пробует снова.

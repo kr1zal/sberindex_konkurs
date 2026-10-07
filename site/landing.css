@@ -976,6 +976,17 @@
   white-space: nowrap;
 }
 
+/* На узком экране истории меньше, линия конца панели ближе к оси, и подпись слева от неё
+   налезала на подписи шкалы — внизу справа от линии графика нет. */
+@media (max-width: 639px) {
+  .vline-end > span {
+    top: auto;
+    bottom: 4px;
+    right: auto;
+    left: 6px;
+  }
+}
+
 .vline-cursor {
   border-left: 1.5px solid var(--ink);
   opacity: 0.18;
