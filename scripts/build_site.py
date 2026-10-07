@@ -56,7 +56,9 @@
     breaks               {protocol, penalty, detector, mode} — источник изломов ниже
     folds                [{fold, train_months, test_from, test_to}, …] — фолды
                          основного протокола (configs/full.yaml, src.split.rolling_origin)
-    models               [{id, role, label}, …] — модели таблицы ошибок, см. ниже
+    models               [{id, role, label, name, note}, …] — модели таблицы ошибок, см. ниже;
+                         label — полное название модели (как в `forecast_rule`), name и note —
+                         название по роли и пояснение под ним, те же, что на главной (`model_names`)
     panel_mae            {model_id: [fold0, fold1, fold2, среднее]}, руб.
     series               [[series_id, регион|null, ОКТМО|null, номер файла mo/], …]; у рядов без региона
                          пятым элементом — средние расходы за последние MEAN_MONTHS месяцев панели,
@@ -251,6 +253,19 @@ MODEL_LABELS = {
     "chronos_ft": "Chronos-Bolt, дообученный",
 }
 
+# Названия моделей в сравнениях — ОДИН словарь для главной (полосы горизонтов) и страницы прогноза по
+# муниципалитету (таблица ошибок): название задаёт роль модели в сравнении (`_build_model_roles`), а не
+# идентификатор, и на обеих страницах она называется одинаково. Пояснение под названием — что за моделью
+# стоит (`model_names`). «Эталон конкурса» и «Лучшая в среднем по панели» — не «Эталон (Prophet)» на одной
+# странице и «Лучшая панельная» на другой: читатель сверяет страницы друг с другом.
+ROLE_NAMES = {
+    "reference": "Эталон конкурса",
+    "naive": "Наивная",
+    "recommended": "Рекомендуемая панельная",
+    "best_mean": "Лучшая в среднем по панели",
+    "two_stage": "Двухэтапная",
+}
+
 # Кандидаты первого этапа двухэтапной модели (`src/external.py::CANDIDATES`) —
 # копия `_fc_agg_ru` отчёта (report/report.qmd, ~строка 2081): та же модель,
 # то же название на странице и в отчёте.
@@ -438,6 +453,8 @@ def compute_placeholders(
       сборки, сюда он не входит. Так же `main` добавляет ``cp_claim`` (HTML фразы об изломах,
       `changepoint_claim`), ``cp_method`` («PELT на темпах роста») и ``cp_penalty`` (штраф
       офлайновой картины): они считаются не здесь, а `build_breaks` из файлов стенда разладок.
+      Так же — ``recommended_note``: какая модель строит прогноз на год вперёд и почему она не
+      «лучшая в среднем» (`recommended_note`, по `forecast_rule` данных стенда).
     """
     top = summary["MAE"].idxmin()
     horizon_main = int(full_cfg["split"]["horizon"])
@@ -836,7 +853,8 @@ def _build_model_roles(summary: pd.DataFrame, forward_cfg: dict) -> list[dict]:
     for model_id, role in roles_in_order:
         by_model.setdefault(model_id, []).append(role)
     return [
-        {"id": model_id, "role": "+".join(roles), "label": MODEL_LABELS.get(model_id, model_id)}
+        {"id": model_id, "role": "+".join(roles), "label": MODEL_LABELS.get(model_id, model_id),
+         **dict(zip(("name", "note"), model_names(model_id, roles)))}
         for model_id, roles in by_model.items()
     ]
 
@@ -870,6 +888,7 @@ class DemoBuild(NamedTuple):
     total_bytes: int
     entries: dict[str, dict]  # series_id → запись demo/data/mo/<номер>.json
     regions: dict[str, str | None]  # series_id → регион (None — не определён)
+    forecast_rule: tuple = ()  # index.json::forecast_rule — какая модель строит прогноз на какие месяцы
 
 
 def build_demo_data(
@@ -1020,7 +1039,8 @@ def build_demo_data(
         )
 
     entries = {series_id: entry for payload in mo_payload.values() for series_id, entry in payload.items()}
-    return DemoBuild(files=files, total_bytes=total, entries=entries, regions=region_of)
+    return DemoBuild(files=files, total_bytes=total, entries=entries, regions=region_of,
+                     forecast_rule=tuple(forecast_rule))
 
 
 def write_demo_data(demo: DemoBuild, data_dir: Path) -> None:
@@ -1164,6 +1184,45 @@ def _label_parts(model_id: str) -> tuple[str, str]:
     return head[:1].upper() + head[1:], tail
 
 
+def model_names(model_id: str, roles: list[str]) -> tuple[str, str]:
+    """Название и пояснение модели на странице — одно на главную и на страницу прогноза по муниципалитету.
+
+    Название — по роли (`ROLE_NAMES`); у модели в нескольких ролях сразу — через « + », последующие со
+    строчной. Пояснение — то, что стоит за моделью: у эталона, наивной и двухэтапной — хвост её названия
+    в `MODEL_LABELS` («Prophet по умолчанию», «оставить как в прошлом месяце», «одно число и разнос
+    долями»), у панельных моделей название по роли о составе ничего не говорит, и пояснение — полное название."""
+    unknown = [role for role in roles if role not in ROLE_NAMES]
+    if unknown:
+        raise ValueError(f"у роли модели {model_id} нет названия в ROLE_NAMES: {', '.join(unknown)}")
+    names = [ROLE_NAMES[role] for role in roles]
+    name = names[0] + "".join(f" + {text[:1].lower() + text[1:]}" for text in names[1:])
+    _, tail = _label_parts(model_id)
+    return name, tail or MODEL_LABELS.get(model_id, model_id)
+
+
+def recommended_note(forecast_rule) -> str:
+    """Фраза о том, какая модель строит прогноз на год вперёд и почему не «лучшая в среднем»: прогноз
+    по муниципалитету идёт от рекомендуемой модели, а выбирается она по длине истории, а не по верхней
+    строке таблицы (`report/report.qmd`, раздел о сравнении с эталоном: «рекомендуемая модель выбирается
+    по длине истории, а не по верхней строке таблицы»). Месяцы и названия — из `forecast_rule`
+    (`index.json`), подряд идущие отрезки одной модели сведены в один."""
+    groups: list[list[str]] = []  # [название, первый месяц, последний месяц]
+    for run in forecast_rule:
+        if groups and groups[-1][0] == run["label"]:
+            groups[-1][2] = run["to"]
+        else:
+            groups.append([run["label"], run["from"], run["to"]])
+
+    def span(first: str, last: str) -> str:
+        if first == last:
+            return MONTH_NOM[int(first[5:]) - 1]
+        return f"с {MONTH_OF[int(first[5:]) - 1]} по {MONTH_NOM[int(last[5:]) - 1]}"
+
+    parts = ", ".join(f"{span(first, last)} — «{label}»" for label, first, last in groups)
+    return (f"Прогноз на {forecast_rule[0]['from'][:4]} год строит рекомендуемая модель: {parts}. "
+            "Рекомендуемая модель выбирается по длине истории, а не по верхней строке таблицы.")
+
+
 def horizon_folds(horizons_cfg: dict, horizons_summary: pd.DataFrame) -> dict[int, int]:
     """Число фолдов протокола на каждом горизонте: колонка «фолдов» `horizons_summary.csv`,
     сверенная с `n_folds` из `configs/horizons.yaml`.
@@ -1192,10 +1251,9 @@ def build_horizons(
     """`horizons` данных главной: MAE четырёх моделей на горизонтах `configs/horizons.yaml`.
 
     Порядок — как в докстринге модуля; модель в двух ролях сразу входит одной строкой
-    (роли через «+»), как в `_build_model_roles`. Название и пояснение берутся из
-    `MODEL_LABELS`; у лучшей модели основного протокола название — «Лучшая панельная»:
-    на годовом горизонте её MAE нет, и слово «панельная» объясняет почему — панельным
-    моделям на год вперёд не хватает истории."""
+    (роли через «+»), как в `_build_model_roles`. Название и пояснение — из `model_names`, тех же,
+    что у таблицы ошибок страницы прогноза по муниципалитету. На годовом горизонте у лучшей по
+    среднему панельной модели MAE нет — ей не хватает истории; об этом говорит подпись горизонта."""
     horizons = sorted({int(item["horizon"]) for item in horizons_cfg["horizons"]})
     best = summary["MAE"].idxmin()
     roles_by_model: dict[str, list[str]] = {}
@@ -1213,11 +1271,7 @@ def build_horizons(
 
     models = []
     for model_id, roles in roles_by_model.items():
-        if roles == ["best_mean"]:
-            label = "Лучшая панельная" if model_id.startswith("global_") else "Лучшая по MAE"
-            note = MODEL_LABELS.get(model_id, model_id)
-        else:
-            label, note = _label_parts(model_id)
+        label, note = model_names(model_id, roles)
         models.append({
             "id": model_id, "role": "+".join(roles), "label": label, "note": note,
             "mae": [mae_at(h, model_id) for h in horizons],
@@ -1396,6 +1450,7 @@ def main(argv: list[str] | None = None) -> int:
     breaks = build_breaks(load_cp_tables(cp_cfg), cp_cfg, penalty)
     placeholders.update({
         "cp_claim": breaks.claim_html, "cp_method": breaks.method, "cp_penalty": breaks.penalty,
+        "recommended_note": recommended_note(demo.forecast_rule),
     })
 
     landing = build_landing_data(

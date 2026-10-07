@@ -571,10 +571,6 @@ table.data-table tbody tr:last-child th, table.data-table tbody tr:last-child td
   line-height: 1.35;
 }
 
-.role-primary::first-letter {
-  text-transform: uppercase;
-}
-
 .errors-table .role-desc {
   margin-top: 3px;
   font-size: 0.8125rem;

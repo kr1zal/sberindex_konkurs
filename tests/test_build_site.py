@@ -576,6 +576,80 @@ class BuildSiteTest(unittest.TestCase):
                 expected = models_by_id.get(segment["model"], segment["model"])
                 self.assertEqual(segment["label"], expected)
 
+    def test_model_names_are_one_dictionary_for_both_pages(self) -> None:
+        # «Лучшая панельная» на главной и «Лучшая в среднем по панели» на странице прогноза, «Эталон конкурса»
+        # и «Эталон (Prophet)» — одни и те же модели под разными названиями. Теперь название задаёт роль, и словарь
+        # один: у моделей, которые есть на обеих страницах, название и пояснение совпадают дословно.
+        landing = {m["id"]: m for m in self.landing["horizons"]["models"]}
+        stand = {m["id"]: m for m in self.index_json["models"]}
+        shared = sorted(set(landing) & set(stand))
+        self.assertGreaterEqual(len(shared), 3)
+        for model_id in shared:
+            with self.subTest(model=model_id):
+                self.assertEqual(landing[model_id]["role"], stand[model_id]["role"])
+                self.assertEqual(landing[model_id]["label"], stand[model_id]["name"])
+                self.assertEqual(landing[model_id]["note"], stand[model_id]["note"])
+        # Сами названия — написаны здесь заново, а не взяты из словаря генератора.
+        best = self.summary["MAE"].idxmin()
+        expected = {
+            "prophet": ("Эталон конкурса", "Prophet по умолчанию"),
+            "naive_last": ("Наивная", "оставить как в прошлом месяце"),
+            "two_stage": ("Двухэтапная", "одно число и разнос долями"),
+            best: ("Лучшая в среднем по панели", build_site.MODEL_LABELS[best]),
+        }
+        recommended = self.forward_cfg["recommended"][min(self.forward_cfg["recommended"])]
+        if recommended not in expected:
+            expected[recommended] = ("Рекомендуемая панельная", build_site.MODEL_LABELS[recommended])
+        for model_id, (name, note) in expected.items():
+            with self.subTest(expected=model_id):
+                where = stand if model_id in stand else landing
+                self.assertEqual(where[model_id]["name" if where is stand else "label"], name)
+                self.assertEqual(where[model_id]["note"], note)
+        # Страница прогноза не держит своего словаря: названия приходят из данных.
+        demo_js = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
+        self.assertNotIn("ROLE_SHORT_LABELS", demo_js)
+        self.assertIn("primary.textContent = model.name;", demo_js)
+        self.assertIn("secondary.textContent = model.note;", demo_js)
+        # Старых названий на главной нет, подпись горизонта называет лучшую так же, как полоса.
+        self.assertNotIn("Лучшая панельная", self.html)
+        notes = dict(zip(self.landing["horizons"]["list"], self.landing["horizons"]["notes"]))
+        self.assertIn("Лучшая в среднем по панели точнее эталона на", notes[1])
+
+    def test_model_names_take_the_role_not_the_identifier(self) -> None:
+        self.assertEqual(build_site.model_names("two_stage", ["two_stage"]),
+                         ("Двухэтапная", "одно число и разнос долями"))
+        # Две роли сразу — одна строка, вторая роль со строчной; пояснение то же.
+        self.assertEqual(build_site.model_names("two_stage", ["recommended", "two_stage"]),
+                         ("Рекомендуемая панельная + двухэтапная", "одно число и разнос долями"))
+        # У модели без записи в словаре названий — её идентификатор, но не падение.
+        self.assertEqual(build_site.model_names("new_model", ["best_mean"]),
+                         ("Лучшая в среднем по панели", "new_model"))
+        with self.assertRaises(ValueError):
+            build_site.model_names("prophet", ["champion"])
+
+    def test_recommended_model_phrase_matches_the_forecast_rule_of_the_config(self) -> None:
+        # Прогноз на год вперёд строит рекомендуемая модель, а не «лучшая в среднем»: фраза на главной называет,
+        # какая именно и на какие месяцы, и повторяет формулировку отчёта. Месяцы и модели пересчитаны здесь по
+        # configs/forecast_forward.yaml: шаг s берёт наименьший горизонт, который его покрывает.
+        recommended = self.forward_cfg["recommended"]
+        horizons = sorted(recommended)
+        origin = pd.Period(self.forward_cfg["origin"], "M")
+        by_month = [(origin + step, recommended[min(h for h in horizons if h >= step)])
+                    for step in range(1, horizons[-1] + 1)]
+        groups: list[list] = []
+        for month, model in by_month:
+            if groups and groups[-1][0] == model:
+                groups[-1][2] = month
+            else:
+                groups.append([model, month, month])
+        parts = [f"с {_MONTH_OF[a.month - 1]} по {_MONTH_NOM[b.month - 1]} — «{build_site.MODEL_LABELS[m]}»"
+                 for m, a, b in groups]
+        text = _IdsOf(self.html).text("stand-recommended")
+        self.assertEqual(text, (
+            f"Прогноз на {origin.year + 1} год строит рекомендуемая модель: {', '.join(parts)}. "
+            "Рекомендуемая модель выбирается по длине истории, а не по верхней строке таблицы."))
+        self.assertGreaterEqual(len(groups), 2)
+
     def test_model_roles_match_docstring_rule(self) -> None:
         """`models` — пять ролей по правилу докстринга модуля (его начало): prophet —
         reference, naive_last — naive, recommended самого короткого горизонта —

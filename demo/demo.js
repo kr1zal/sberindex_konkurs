@@ -127,28 +127,12 @@ function dateWordsFromISO(iso) {
 }
 
 // ---------------------------------------------------------------------------
-// Роли моделей, детектор изломов — короткие словари для текста. Названия самих
-// моделей (полные, для второй, приглушённой строки) генератор кладёт прямо
-// в данные — models[].label и forecast_rule[].label (scripts/build_site.py,
-// словарь MODEL_LABELS) — второго, JS-словаря с тем же текстом не держим.
+// Детектор изломов — короткие словари для текста. Названия моделей (по роли и
+// пояснение под ним) генератор кладёт прямо в данные — models[].name и models[].note,
+// полное название — models[].label и forecast_rule[].label (scripts/build_site.py,
+// словари ROLE_NAMES и MODEL_LABELS): те же названия на главной и здесь, и второго,
+// JS-словаря с тем же текстом не держим.
 // ---------------------------------------------------------------------------
-
-// Короткая, первая строка ячейки таблицы ошибок — по роли, не по полному названию
-// модели (то — второй, приглушённой строкой, model.label). Roles.reference — всегда
-// prophet (см. build_site.py::_build_model_roles), поэтому «(Prophet)» — не догадка.
-const ROLE_SHORT_LABELS = {
-  reference: "эталон (Prophet)",
-  naive: "наивная",
-  recommended: "рекомендуемая панельная",
-  best_mean: "лучшая в среднем по панели",
-  two_stage: "двухэтапная",
-};
-
-// role — строка через «+» (see: models[].role в докстринге build_site.py), а не
-// список: одна модель может занимать несколько ролей сразу.
-function roleShortLabel(roleStr) {
-  return roleStr.split("+").map((r) => ROLE_SHORT_LABELS[r] || r).join(" + ");
-}
 
 // Как в отчёте (report/report.qmd :: _CP_DET / _CP_ON) — те же подписи для тех же
 // понятий и там, и здесь.
@@ -590,15 +574,14 @@ function renderErrorsTable(index, mo) {
     const rowTh = document.createElement("th");
     rowTh.setAttribute("scope", "row");
     rowTh.setAttribute("role", "rowheader");
-    // Короткая роль — первой, крупной строкой; полное название модели — второй,
-    // приглушённой — без прежнего дублирования, когда роль повторялась и в названии
-    // модели, и в скобках.
+    // Название по роли — первой, крупной строкой; пояснение — второй, приглушённой: то же название
+    // и то же пояснение, что у полос горизонтов на главной (генератор: model_names).
     const primary = document.createElement("span");
     primary.className = "role-primary";
-    primary.textContent = roleShortLabel(model.role);
+    primary.textContent = model.name;
     const secondary = document.createElement("span");
     secondary.className = "cell-sub role-desc";
-    secondary.textContent = model.label;
+    secondary.textContent = model.note;
     rowTh.append(primary, secondary);
     tr.appendChild(rowTh);
 

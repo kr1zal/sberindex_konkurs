@@ -1397,6 +1397,14 @@
   line-height: 1.6;
 }
 
+/* Какая модель строит прогноз и по какому правилу выбрана: мельче лида, он читается после него. */
+.stand-fineprint {
+  margin: 12px 0 0;
+  color: var(--night-soft);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
