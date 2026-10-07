@@ -1077,7 +1077,9 @@ class BuildSiteTest(unittest.TestCase):
         ids.feed(self.demo_html)
         links = _LinkCollector()
         links.feed(self.demo_html)
-        for fragment in ('lang="ru"', 'name="viewport"', 'name="description"', '<link rel="icon" href="data:,">'):
+        for fragment in ('lang="ru"', 'name="viewport"', 'name="description"',
+                         '<link rel="icon" href="../favicon.ico" sizes="32x32">',
+                         '<link rel="icon" href="../favicon.svg" type="image/svg+xml">'):
             self.assertIn(fragment, self.demo_html)
         self.assertEqual(ids.ids["main"]["tag"], "main")
         self.assertIn("#main", links.links, "нет ссылки «К содержанию»")
@@ -1838,7 +1840,8 @@ class BuildSiteTest(unittest.TestCase):
         # Шаги и переключатели — кнопки с состоянием.
         self.assertEqual(len(re.findall(r'<button class="step" id="step-\d" type="button" aria-pressed=', self.html)), 3)
         self.assertIn('lang="ru"', self.html)
-        self.assertIn('<link rel="icon" href="data:,">', self.html)
+        self.assertIn('<link rel="icon" href="favicon.ico" sizes="32x32">', self.html)
+        self.assertIn('<link rel="icon" href="favicon.svg" type="image/svg+xml">', self.html)
         self.assertIn('name="viewport"', self.html)
         self.assertIn('name="description"', self.html)
 
