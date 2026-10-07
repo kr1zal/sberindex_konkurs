@@ -1939,6 +1939,17 @@ class ChangepointClaimTest(unittest.TestCase):
         part = self.claim(crossed={"2023-10": "2023-11", "2024-01": "2024-02"}, delay=1.0)
         self.assertIn("а в реальном времени видно 2 из 3 событий", part)
 
+    def test_claim_refuses_a_panel_of_another_length_instead_of_repeating_the_old_words(self) -> None:
+        # «На двух годах данных» — слова отчёта, написанные руками: панель другой длины сделала бы их неверными.
+        # Сборка обязана остановиться, а не напечатать прежнюю фразу.
+        tables = {"cp_summary": self.frames()[0], "cp_realtime_events": self.frames()[1]}
+        months = [f"2023-{m:02d}" for m in range(1, 13)]
+        tables["cp_realtime"] = pd.DataFrame({"protocol": "v2", "penalty": 5.0, "month": months, "share": 0.0})
+        tables["cp_offline"] = pd.DataFrame({"protocol": "v2", "penalty": 1.0, "month": months, "share": 0.0})
+        with self.assertRaises(ValueError) as caught:
+            build_site.build_breaks(tables, self.CFG, 1.0)
+        self.assertIn("двух годах данных", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

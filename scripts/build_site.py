@@ -596,6 +596,11 @@ CP_DETECTOR = {"pelt": "PELT", "binseg": "BinSeg", "window": "Window", "bottomup
 CP_DETECTOR_GEN = {**CP_DETECTOR, "kernel_rbf": "ядрового (RBF)"}
 CP_MODE_ON = {"ratio": "на темпах роста", "raw": "на сырых значениях", "deseason": "без профиля месяца"}
 
+# В фразе резюме отчёта сказано «раннего предупреждения на двух годах данных не показано» — слова написаны в отчёте
+# руками, потому что панель — два года. Если панель другой длины, те же слова стали бы неверными: `build_breaks`
+# останавливает сборку, а не печатает их молча.
+CP_CLAIM_PANEL_MONTHS = 24
+
 # Таблицы стенда разладок, которые читает раздел: сводка по детекторам, потоковая доля по месяцам, события
 # потокового сигнала и изломы по полному ряду. Остальные файлы стенда нужны отчёту, а не странице.
 CP_TABLES = ("cp_summary", "cp_realtime", "cp_realtime_events", "cp_offline")
@@ -745,6 +750,10 @@ def build_breaks(tables: dict[str, pd.DataFrame], cp_cfg: dict, penalty: float) 
     cpe, cpr, cpo = tables["cp_realtime_events"], tables["cp_realtime"], tables["cp_offline"]
     p_sel = float(cpe.loc[_cp_true(cpe["selected"]), "penalty"].iloc[0])
     months = list(cpr.loc[cpr["penalty"] == p_sel, "month"])
+    if len(months) != CP_CLAIM_PANEL_MONTHS:
+        raise ValueError(
+            f"в панели стенда разладок {len(months)} месяцев, а фраза об изломах, перенесённая из резюме отчёта, "
+            f"говорит о {CP_CLAIM_PANEL_MONTHS} (двух годах данных): поправьте её в `changepoint_claim` и в отчёте")
     offline = cpo.pivot(index="month", columns="penalty", values="share").reindex(months)
     if float(penalty) not in offline.columns or offline[float(penalty)].isna().any():
         raise ValueError(
