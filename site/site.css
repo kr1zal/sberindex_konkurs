@@ -109,7 +109,9 @@
   --btn-ink: #ffffff;
   /* Граница полей ввода — около 3,6:1 к белому: без неё поле на светлом фоне не видно. */
   --field-line: #7c8799;
-  --step-line: #dce1e8;
+  /* Рамка невыбранного шага «Почему это прогноз одного числа»: кнопка среди соседнего текста — граница
+     элемента управления, не меньше 3:1 к фону (светлее рамка делала шаги похожими на статичные карточки). */
+  --step-line: #7c8799;
 
   /* Данные: цвета линий — как на рисунках отчёта (src/charts.py), у каждой не ниже 3:1 к карточке. */
   --chart-fact: #52514e;
@@ -124,7 +126,7 @@
   --chart-break: #bf8217;
   --chart-break-ink: #9a6a12;
   --chart-grid: #eef0f4;
-  --chart-mark: #b9c0cc; /* вспомогательные вертикали: «конец панели» */
+  --chart-mark: #8a95a8; /* вспомогательные вертикали: «конец панели» — 3:1 к белому */
   --bar-best: #2a78d6;
   --bar-rest: #7c8799;
   --bar-track: #f0f2f5;
@@ -134,7 +136,7 @@
   :root {
     --bg: var(--night);
     --surface: var(--night-surface);
-    --surface-card: #f5f6f8; /* схема метода остаётся на светлой подложке и в тёмной теме */
+    --surface-card: #e3e6ec; /* схема метода остаётся на светлой подложке и в тёмной теме, но смягчённой: белое пятно на тёмной странице бьёт по глазам */
     --ink: var(--night-ink);
     --ink-soft: var(--night-soft);
     --rule: var(--night-rule);
@@ -147,7 +149,7 @@
     --btn-bg-hover: var(--amber-hover);
     --btn-ink: var(--night);
     --field-line: var(--night-line);
-    --step-line: #2f3c61;
+    --step-line: #5a6a96;
 
     --chart-fact: #c9d2e6;
     --chart-forecast: #5b9bf0;
@@ -158,7 +160,7 @@
     --chart-break: var(--amber);
     --chart-break-ink: var(--amber);
     --chart-grid: #1b2540;
-    --chart-mark: #3a4566;
+    --chart-mark: #5a6a96;
     --bar-best: #5b9bf0;
     --bar-rest: #7a88a6;
     --bar-track: #1b2540;
@@ -181,7 +183,7 @@
   --btn-bg-hover: var(--amber-hover);
   --btn-ink: var(--night);
   --field-line: var(--night-line);
-  --step-line: #2f3c61;
+  --step-line: #5a6a96;
 
   --chart-fact: #c9d2e6;
   --chart-forecast: #5b9bf0;
@@ -192,7 +194,7 @@
   --chart-break: var(--amber);
   --chart-break-ink: var(--amber);
   --chart-grid: #1b2540;
-  --chart-mark: #3a4566;
+  --chart-mark: #5a6a96;
   --bar-best: #5b9bf0;
   --bar-rest: #7a88a6;
   --bar-track: #1b2540;
@@ -252,6 +254,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible,
 input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+/* Ссылка «К содержанию» переносит фокус на main (у него tabindex="-1"): в Safari без явного фокуса следующий Tab
+   шёл бы от начала страницы. Кольцо вокруг всей страницы не нужно — читатель видит, куда попал, по тексту. */
+main:focus {
+  outline: none;
 }
 
 /* Знак «откроется в новой вкладке» после подписи ссылки. Его нет в имени ссылки для программ чтения с экрана:

@@ -754,6 +754,7 @@
 }
 
 .step:hover {
+  border-color: var(--ink);
   transform: translateY(-1px);
 }
 
@@ -774,6 +775,24 @@
   text-transform: uppercase;
 }
 
+.step > .step-num {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Что кнопка делает: у невыбранного шага справа в строке «Шаг 02» — «показать →». У выбранного подсказки нет. */
+.step-hint {
+  color: var(--accent);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.step[aria-pressed="true"] .step-hint {
+  display: none;
+}
+
 .step-title {
   margin-top: 6px;
   color: var(--ink);
@@ -792,8 +811,9 @@
   display: none;
 }
 
+/* Линии рядов несут смысл (узкий разброс в шаге «что остаётся»): при такой прозрачности они не меньше 3:1 к фону. */
 .story-lines {
-  stroke-opacity: 0.55;
+  stroke-opacity: 0.75;
   transition: stroke-opacity 0.6s ease;
 }
 
@@ -1452,7 +1472,7 @@
 }
 
 .vline-panel {
-  border-left: 1px dashed #3a4566;
+  border-left: 1px dashed var(--chart-mark);
 }
 
 .vline-break {
@@ -1571,8 +1591,9 @@
   text-align: right;
 }
 
+/* Ссылка подписи читается и на светлой подложке, и на смягчённой тёмной темы (#e3e6ec): 4,5:1 и выше. */
 .method-figure figcaption a {
-  color: #1f6bc4;
+  color: #174f93;
 }
 
 @media (max-width: 639px) {

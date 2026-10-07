@@ -172,6 +172,115 @@ class HeroMotionTest(unittest.TestCase):
         self.assertRegex(block, r"\.hero-median\s*\{\s*animation:\s*none")
 
 
+def _rgb(color: str) -> tuple[float, float, float]:
+    """#rrggbb → компоненты 0…255."""
+    value = color.strip().lstrip("#")
+    return tuple(float(int(value[i:i + 2], 16)) for i in (0, 2, 4))
+
+
+def _luminance(rgb: tuple[float, float, float]) -> float:
+    """Относительная яркость по WCAG 2.1."""
+    def channel(c: float) -> float:
+        c /= 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (channel(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(foreground: str | tuple, background: str | tuple, alpha: float = 1.0) -> float:
+    """Контраст цвета линии (с прозрачностью alpha) к фону, формула WCAG 2.1."""
+    fg = _rgb(foreground) if isinstance(foreground, str) else foreground
+    bg = _rgb(background) if isinstance(background, str) else background
+    mixed = tuple(alpha * f + (1 - alpha) * b for f, b in zip(fg, bg))
+    lighter, darker = sorted((_luminance(mixed), _luminance(bg)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _theme_tokens(css: str) -> dict[str, dict[str, str]]:
+    """Токены трёх областей site.css: светлая тема (:root), тёмная (в prefers-color-scheme) и ночной блок (.night).
+    Значения, ссылающиеся на другие токены через var(), раскрываются по :root."""
+    blocks = {
+        "light": re.search(r"\n:root \{(.*?)\n\}", css, re.S).group(1),
+        "dark": re.search(r"@media \(prefers-color-scheme: dark\) \{\s*:root \{(.*?)\n  \}", css, re.S).group(1),
+        "night": re.search(r"\n\.night \{(.*?)\n\}", css, re.S).group(1),
+    }
+    raw = {name: dict(re.findall(r"(--[\w-]+):\s*([^;]+?);", text)) for name, text in blocks.items()}
+
+    def resolve(value: str, scope: str) -> str:
+        found = re.match(r"var\((--[\w-]+)\)", value)
+        if not found:
+            return value.split("/*")[0].strip()
+        name = found.group(1)
+        return resolve(raw[scope].get(name) or raw["light"][name], scope)
+
+    return {scope: {name: resolve(value, scope) for name, value in tokens.items()} for scope, tokens in raw.items()}
+
+
+class ContrastTest(unittest.TestCase):
+    """Цвета, которые несут смысл: рамка кнопки и линии графиков — не меньше 3:1 к фону (WCAG 1.4.11)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.site = _read("site/site.css")
+        cls.landing = _read("site/landing.css")
+        cls.tokens = _theme_tokens(cls.site)
+
+    def surface(self, scope: str) -> dict[str, str]:
+        t = self.tokens[scope]
+        return {"page": t.get("--bg") or self.tokens["light"]["--bg"], "card": t["--surface"]}
+
+    def test_step_buttons_are_visible_among_the_neighbouring_text(self) -> None:
+        # Невыбранные шаги с рамкой 1,2:1 выглядели статичными карточками — читатель мог не узнать, что медиана и
+        # остаток за кликом. Рамка — как у поля поиска: 3:1 к фону страницы в обеих темах.
+        for scope in ("light", "dark"):
+            with self.subTest(scope=scope):
+                background = self.surface(scope)["page"]
+                self.assertGreaterEqual(_contrast(self.tokens[scope]["--step-line"], background), 3.0)
+        rule = re.search(r"\.step:hover \{([^}]*)\}", self.landing).group(1)
+        self.assertIn("border-color: var(--ink)", rule)
+
+    def test_step_buttons_say_what_they_do(self) -> None:
+        template = _read("site/index.template.html")
+        hints = re.findall(r'<span class="step-hint" aria-hidden="true">показать →</span>', template)
+        self.assertEqual(len(hints), 3, "подсказка есть у каждого шага: выбранным может быть любой")
+        self.assertRegex(self.landing, r'\.step\[aria-pressed="true"\] \.step-hint \{\s*display: none;')
+
+    def test_series_lines_reach_three_to_one_at_their_opacity(self) -> None:
+        opacity = float(re.search(r"\.story-lines \{\s*stroke-opacity: ([\d.]+);", self.landing).group(1))
+        for scope in ("light", "dark"):
+            with self.subTest(scope=scope):
+                line = self.tokens[scope]["--chart-line"]
+                self.assertGreaterEqual(_contrast(line, self.surface(scope)["card"], opacity), 3.0)
+
+    def test_marks_of_the_panel_end_reach_three_to_one(self) -> None:
+        # «Конец панели» на светлой и тёмной карточке и вертикаль блока на ночной подложке.
+        for scope in ("light", "dark", "night"):
+            with self.subTest(scope=scope):
+                self.assertGreaterEqual(_contrast(self.tokens[scope]["--chart-mark"], self.surface(scope)["card"]), 3.0)
+        self.assertRegex(self.landing, r"\.vline-panel \{\s*border-left: 1px dashed var\(--chart-mark\);")
+
+    def test_method_figure_is_softened_in_the_dark_theme_and_its_caption_stays_readable(self) -> None:
+        # Белая подложка схемы была самым ярким пятном тёмной страницы; смягчённая — и подпись с ссылкой на ней
+        # читаются (4,5:1 и выше), на светлой теме — тоже.
+        self.assertEqual(self.tokens["dark"]["--surface-card"].lower(), "#e3e6ec")
+        text = re.search(r"\.method-figure figcaption \{[^}]*color:\s*(#[0-9a-fA-F]{6})", self.landing).group(1)
+        link = re.search(r"\.method-figure figcaption a \{[^}]*color:\s*(#[0-9a-fA-F]{6})", self.landing).group(1)
+        for scope in ("light", "dark"):
+            for name, color in (("подпись", text), ("ссылка", link)):
+                with self.subTest(scope=scope, part=name):
+                    self.assertGreaterEqual(_contrast(color, self.tokens[scope]["--surface-card"]), 4.5)
+
+
+class SkipLinkTargetTest(unittest.TestCase):
+    def test_main_takes_focus_from_the_skip_link_on_both_pages(self) -> None:
+        # Без tabindex="-1" фокус после «К содержанию» оставался на body: в Safari следующий Tab шёл от начала.
+        for page in ("site/index.template.html", "demo/index.html"):
+            with self.subTest(page=page):
+                self.assertIn('<main id="main" tabindex="-1">', _read(page))
+        self.assertRegex(_read("site/site.css"), r"\nmain:focus \{\s*outline: none;")
+
+
 class StylesheetCommentsTest(unittest.TestCase):
     def test_no_page_numbers_in_stylesheet_comments(self) -> None:
         # В комментарии к стилю не пишется число данных: оно устаревает вместе с данными, а размер,
