@@ -1,11 +1,12 @@
-"""Генератор страницы входа и данных стенда: `scripts/build_site.py`.
+"""Генератор главной страницы и данных стенда: `scripts/build_site.py`.
 
 Сборка (единственная дорогая часть — чтение `per_series.csv` и матрицы панели, доли
 секунды) идёт один раз в `setUpClass`, во временный каталог (`--out`), чтобы не трогать
-закоммиченные `index.html`/`demo/data/`. Числа страницы входа этот файл считает заново,
+закоммиченные `index.html`/`demo/data/`. Числа главной этот файл считает заново,
 короткими выражениями pandas по тем же `results/*.csv` — независимо от генератора: тест,
 вызывающий функции самого генератора, проверял бы только то, что код совпадает сам
-с собой, а не то, что число на странице верное.
+с собой, а не то, что число на странице верное. То же — для данных `landing-data`
+(медиана, ряды выборки, MAE горизонтов): сверка с матрицей и CSV, а не с самим собой.
 """
 from __future__ import annotations
 
@@ -46,6 +47,10 @@ AGGREGATE_JSON_KEYS = {
     "unit", "origin", "horizon", "model", "model_label",
     "history", "check", "rule_names", "mape",
 }
+LANDING_JSON_KEYS = {"story", "horizons", "fact", "teaser"}
+STORY_KEYS = {"months", "base_months", "ids", "series", "median", "n_total", "n_sample"}
+HORIZONS_KEYS = {"list", "main", "labels", "unit", "models", "notes"}
+TEASER_ITEM_KEYS = {"id", "short", "region", "fact", "forecast", "known", "breaks"}
 
 _MONTH_OF = ["января", "февраля", "марта", "апреля", "мая", "июня",
              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
@@ -185,6 +190,14 @@ class BuildSiteTest(unittest.TestCase):
         cls.index_json = json.loads((cls.data_dir / "index.json").read_text(encoding="utf-8"))
         cls.aggregate_json = json.loads((cls.data_dir / "aggregate.json").read_text(encoding="utf-8"))
 
+        # Данные главной — JSON внутри <script id="landing-data">: берём ровно то, что получит
+        # браузер, из готового index.html, а не из функций генератора.
+        landing_scripts = re.findall(
+            r'<script type="application/json" id="landing-data">(.*?)</script>', cls.html, re.S
+        )
+        cls.landing_raw = landing_scripts[0] if len(landing_scripts) == 1 else None
+        cls.landing = json.loads(cls.landing_raw) if cls.landing_raw is not None else None
+
         # Пять пунктов <li class="stat"> по порядку — число и подпись каждого отдельно,
         # без схлопывания разметки, но с нормализацией пробелов (отступы и переносы строк
         # шаблона иначе попали бы прямо в текст подписи).
@@ -212,6 +225,7 @@ class BuildSiteTest(unittest.TestCase):
         cls.forward_cfg = yaml.safe_load(
             (ROOT / "configs" / "forecast_forward.yaml").read_text(encoding="utf-8")
         )
+        cls.horizons_cfg = yaml.safe_load((ROOT / "configs" / "horizons.yaml").read_text(encoding="utf-8"))
         cls.summary = read_results(ROOT / "results" / "summary.csv", index_col=0)
         per_series = read_results(ROOT / "results" / "per_series.csv", dtype={"error": object})
         cls.ok = per_series[~refused(per_series)]
@@ -647,6 +661,202 @@ class BuildSiteTest(unittest.TestCase):
                         value.startswith(("http://", "https://", "//")),
                         f"{page}: внешний ресурс <{tag}> -> {value}",
                     )
+
+
+    def test_landing_data_is_one_parsable_json_script(self) -> None:
+        self.assertIsNotNone(self.landing_raw, "в index.html нет ровно одного <script id=landing-data>")
+        # «<» экранирован: иначе «</script» внутри строки данных закрыл бы тег.
+        self.assertNotIn("<", self.landing_raw)
+        self.assertEqual(set(self.landing), LANDING_JSON_KEYS)
+        self.assertEqual(set(self.landing["story"]), STORY_KEYS)
+        self.assertEqual(set(self.landing["horizons"]), HORIZONS_KEYS)
+        self.assertEqual(set(self.landing["teaser"]), {"months", "items"})
+
+    def test_landing_json_size_is_under_the_module_threshold(self) -> None:
+        size = len(self.landing_raw.encode("utf-8"))
+        self.assertLessEqual(size, build_site.MAX_LANDING_BYTES)
+
+    def test_landing_json_escapes_angle_brackets_and_round_trips(self) -> None:
+        payload = {"name": "</script><!-- x -->", "n": [1.5, None]}
+        text = build_site.landing_json(payload)
+        self.assertNotIn("<", text)
+        self.assertEqual(json.loads(text), payload)
+
+    def test_landing_json_over_threshold_raises(self) -> None:
+        too_big = {"x": "я" * build_site.MAX_LANDING_BYTES}
+        with self.assertRaises(ValueError):
+            build_site.landing_json(too_big)
+
+    def _story_norm(self) -> pd.DataFrame:
+        """Ряды матрицы, делённые на среднее своих первых 12 месяцев — написано здесь заново."""
+        return self.wide / self.wide.iloc[:12].mean()
+
+    def test_story_median_is_recomputed_over_all_matrix_series(self) -> None:
+        story = self.landing["story"]
+        median = self._story_norm().median(axis=1)
+        self.assertEqual(len(story["median"]), len(self.wide))
+        for month, got, expected in zip(story["months"], story["median"], median):
+            with self.subTest(month=month):
+                # Три знака после запятой — округление генератора: расхождение не больше полу-единицы
+                # последнего знака (плюс запас на двоичное представление).
+                self.assertAlmostEqual(got, float(expected), delta=0.0005 + 1e-9)
+        # Тест чувствителен к ошибке «медиана только по выборке»: медиана 30 рядов расходится
+        # с медианой по всей панели больше, чем округление.
+        sample_median = self._story_norm()[story["ids"]].median(axis=1)
+        self.assertGreater(float((sample_median - median).abs().max()), 0.0005)
+
+    def test_story_counts_and_months_match_the_matrix(self) -> None:
+        story = self.landing["story"]
+        self.assertEqual(story["n_total"], self.wide.shape[1])
+        self.assertEqual(story["n_sample"], len(story["ids"]))
+        self.assertEqual(story["n_sample"], build_site.LANDING_SAMPLE_SIZE)
+        self.assertEqual(story["months"], [m.strftime("%Y-%m") for m in self.wide.index])
+        self.assertEqual(story["base_months"], 12)
+
+    def test_story_sample_series_are_matrix_columns_with_normalised_values(self) -> None:
+        story = self.landing["story"]
+        self.assertEqual(len(set(story["ids"])), len(story["ids"]), "в выборке повторяются ряды")
+        self.assertEqual(len(story["series"]), len(story["ids"]))
+        norm = self._story_norm()
+        for series_id, row in zip(story["ids"], story["series"]):
+            with self.subTest(series=series_id):
+                self.assertIn(series_id, norm.columns)
+                self.assertEqual(len(row), len(self.wide))
+                for got, expected in zip(row, norm[series_id]):
+                    self.assertAlmostEqual(got, float(expected), delta=0.0005 + 1e-9)
+
+    def test_story_sample_is_fixed_by_the_module_seed(self) -> None:
+        # Сид — константа модуля: та же выборка при повторной сборке, другой сид — другая.
+        again = build_site.build_story(self.wide)
+        self.assertEqual(again["ids"], self.landing["story"]["ids"])
+        other = np.random.default_rng(build_site.LANDING_SAMPLE_SEED + 1).choice(
+            self.wide.shape[1], size=build_site.LANDING_SAMPLE_SIZE, replace=False
+        )
+        self.assertNotEqual([str(self.wide.columns[i]) for i in other], self.landing["story"]["ids"])
+
+    def test_horizons_match_horizons_summary_csv(self) -> None:
+        horizons = self.landing["horizons"]
+        expected_list = sorted(int(item["horizon"]) for item in self.horizons_cfg["horizons"])
+        self.assertEqual(horizons["list"], expected_list)
+        self.assertEqual(horizons["main"], int(self.full_cfg["split"]["horizon"]))
+        self.assertEqual(len(horizons["labels"]), len(expected_list))
+        self.assertEqual(len(horizons["notes"]), len(expected_list))
+
+        best = self.summary["MAE"].idxmin()
+        self.assertEqual([m["id"] for m in horizons["models"]], ["prophet", "naive_last", best, "two_stage"])
+        table = self.horizons_summary.set_index(["horizon", "model"])["MAE"]
+        for model in horizons["models"]:
+            expected = []
+            for horizon in expected_list:
+                value = table.get((horizon, model["id"]), np.nan)
+                expected.append(int(round(float(value))) if pd.notna(value) else None)
+            with self.subTest(model=model["id"]):
+                self.assertEqual(model["mae"], expected)
+                self.assertTrue(model["label"] and model["note"], "у модели нет подписи или пояснения")
+
+    def test_horizons_missing_value_is_null_not_zero(self) -> None:
+        # Лучшая модель основного протокола на годовом горизонте не обучается (MAE пуст в CSV):
+        # в данных — null, а не 0, иначе полоса вышла бы «лучшей».
+        year = self.horizons_summary[self.horizons_summary["horizon"] == 12].set_index("model")["MAE"]
+        best = self.summary["MAE"].idxmin()
+        index = self.landing["horizons"]["list"].index(12)
+        model = next(m for m in self.landing["horizons"]["models"] if m["id"] == best)
+        if pd.isna(year.get(best, np.nan)):
+            self.assertIsNone(model["mae"][index])
+        else:
+            self.assertEqual(model["mae"][index], int(round(float(year[best]))))
+
+    def test_horizons_notes_carry_the_generators_numbers_and_caveats(self) -> None:
+        horizons = self.landing["horizons"]
+        notes = dict(zip(horizons["list"], horizons["notes"]))
+        top = self.summary["MAE"].idxmin()
+        by_horizon_model = self.horizons_summary.set_index(["horizon", "model"])
+        # Наукаст: выигрыш лучшей модели к эталону — число из CSV.
+        h1_gain = by_horizon_model.loc[(1, top), "к Prophet, %"]
+        self.assertIn(f"{_fmt(h1_gain, 1)}%", notes[1])
+        # Основной горизонт: тот же выигрыш и та же оговорка о фолдах, что в первой карточке.
+        main = horizons["main"]
+        self.assertIn(f"{_fmt(self.summary.loc[top, 'к Prophet, %'], 1)}%", notes[main])
+        sentence = re.search(r"(?:Но выигрыш|Выигрыш) держится [^.]*\.", self.stats[0]["caption"])
+        self.assertIsNotNone(sentence, "в первой карточке нет оговорки о фолдах")
+        self.assertIn(sentence.group(0), notes[main])
+        # Год: оговорка про фолд — число из horizons_folds.csv, как у третьей карточки.
+        n_folds = int(self.horizons_folds.loc[
+            (self.horizons_folds["horizon"] == 12) & (self.horizons_folds["model"] == "two_stage"), "MAE"
+        ].notna().sum())
+        if 0 < n_folds < 3:
+            words = {1: "один", 2: "два"}[n_folds]
+            self.assertIn(f"но это {words} {_plural(n_folds, 'фолд', 'фолда', 'фолдов')}", notes[12])
+        # Пояснение «модель не удалось обучить» — только если на этом горизонте у какой-то из
+        # четырёх моделей MAE нет: полосы нет, и читатель должен знать почему.
+        year = self.horizons_summary[self.horizons_summary["horizon"] == 12].set_index("model")["MAE"]
+        shown = [m["id"] for m in horizons["models"]]
+        has_gap = any(pd.isna(year.get(model_id, np.nan)) for model_id in shown)
+        self.assertEqual("не удалось обучить" in notes[12], has_gap)
+
+    def test_fact_equals_demo_aggregate_json(self) -> None:
+        self.assertEqual(self.landing["fact"], self.aggregate_json)
+
+    def test_teaser_equals_demo_mo_files(self) -> None:
+        mo_files: dict[str, dict] = {}
+        for path in (self.data_dir / "mo").glob("*.json"):
+            mo_files.update(json.loads(path.read_text(encoding="utf-8")))
+        regions = {row[0]: row[1] for row in self.index_json["series"]}
+
+        teaser = self.landing["teaser"]
+        self.assertEqual(
+            teaser["months"], self.index_json["panel_months"] + self.index_json["forecast_months"]
+        )
+        # Три МО из задания: МО стенда по умолчанию, Казань и ряд-омоним с номером «#2».
+        self.assertEqual(
+            [item["id"] for item in teaser["items"]],
+            [self.index_json["default_mo"], "городской округ город Казань", "Михайловский муниципальный район #2"],
+        )
+        for item in teaser["items"]:
+            with self.subTest(series=item["id"]):
+                self.assertEqual(set(item), TEASER_ITEM_KEYS)
+                entry = mo_files[item["id"]]
+                for key in ("fact", "forecast", "known", "breaks"):
+                    self.assertEqual(item[key], entry[key])
+                self.assertEqual(item["region"], regions[item["id"]])
+                self.assertTrue(item["short"])
+                self.assertNotIn(None, item["fact"] + item["forecast"] + item["known"])
+
+    def test_teaser_rejects_missing_series_and_gaps(self) -> None:
+        empty = build_site.DemoBuild(files={}, total_bytes=0, entries={}, regions={})
+        with self.assertRaises(ValueError):
+            build_site.build_teaser(empty, self.wide, self.forward_cfg)
+
+        entries = {sid: {"fact": [1], "forecast": [1], "known": [1], "breaks": []}
+                   for sid, _ in build_site.TEASER_MO}
+        entries[build_site.TEASER_MO[0][0]]["known"] = [None]
+        gappy = build_site.DemoBuild(
+            files={}, total_bytes=0, entries=entries, regions={sid: None for sid in entries}
+        )
+        with self.assertRaises(ValueError):
+            build_site.build_teaser(gappy, self.wide, self.forward_cfg)
+
+    def test_fonts_are_self_hosted_with_licences(self) -> None:
+        css = (ROOT / "site" / "site.css").read_text(encoding="utf-8")
+        faces = re.findall(r"@font-face\s*\{(.*?)\}", css, re.S)
+        self.assertEqual(len(faces), 6, "ожидаются кириллица и латиница трёх семейств")
+        families = set()
+        for face in faces:
+            family = re.search(r'font-family:\s*"([^"]+)"', face).group(1)
+            families.add(family)
+            with self.subTest(family=family):
+                self.assertIn("font-display: swap", face)
+                self.assertIn("unicode-range:", face)
+                src = re.search(r'url\("(fonts/[^"]+\.woff2)"\)', face)
+                self.assertIsNotNone(src, "шрифт должен лежать в site/fonts/")
+                font_file = ROOT / "site" / src.group(1)
+                self.assertTrue(font_file.exists(), f"{font_file} нет")
+                self.assertEqual(font_file.read_bytes()[:4], b"wOF2", f"{font_file.name}: не woff2")
+        self.assertEqual(families, {"Unbounded", "Onest", "JetBrains Mono"})
+        for licence in ("unbounded-OFL.txt", "onest-OFL.txt", "jetbrains-mono-OFL.txt"):
+            with self.subTest(licence=licence):
+                text = (ROOT / "site" / "fonts" / licence).read_text(encoding="utf-8")
+                self.assertIn("SIL OPEN FONT LICENSE Version 1.1", text)
 
 
 if __name__ == "__main__":

@@ -1,13 +1,14 @@
-"""Единственный источник страницы входа (`index.html`) и данных демонстрационного
+"""Единственный источник главной страницы (`index.html`) и данных демонстрационного
 стенда (`demo/data/*.json`) для GitHub Pages.
 
     .venv/bin/python scripts/build_site.py [--out DIR]
 
 Пишет `<DIR>/index.html` из `site/index.template.html` (`--out` по умолчанию — корень
 репозитория; тесты собирают во временный каталог) и `<DIR>/demo/data/**`. Сам стенд
-(`demo/index.html`, `demo/demo.js`, графики) — рукописный и читает только эти данные.
+(`demo/index.html`, `demo/demo.js`, графики) и скрипт главной (`site/landing.js`) —
+рукописные и читают только эти данные.
 
-## Пять чисел страницы входа
+## Пять чисел главной
 
 Резюме отчёта (`report/report.qmd`) объясняет тот же прогон теми же файлами. Отсюда
 перенесена ЛОГИКА, а не результат: `compute_placeholders` пересчитывает её на текущих
@@ -95,6 +96,33 @@ recommended-модель самого длинного горизонта — tw
 `scripts/news_event_study.py::PENALTY` (модуль грузится по пути, как в отчёте) — так
 отчёт выбирает офлайновую картину; фолды — `src.split.rolling_origin` на
 `configs/full.yaml`; MAE — `per_series.csv` без отказов (`src.results_guard.refused`).
+
+## Данные главной — контракт с `site/landing.js`
+
+Лежат в `index.html` прямо в странице, `<script type="application/json" id="landing-data">`
+(подстановка `${landing_json}`; `<` экранирован как `\\u003c`, чтобы данные не закрыли
+тег): страница работает без сети и без лишнего запроса. Формат, как у данных стенда:
+пропуск — ``null``, месяцы — ``"YYYY-MM"``, значения рядов — до трёх знаков.
+
+    story     месяцы панели, 30 рядов для обложки и раздела «Почему это прогноз одного числа»
+              и медиана по всем рядам матрицы:
+              {months, base_months, ids, series, median, n_total, n_sample}.
+              series[j] — ряд ids[j], делённый на среднее его первых base_months месяцев;
+              median[t] — медиана таких значений по ВСЕМ n_total рядам матрицы в месяце t.
+              Ряды выбраны сидом LANDING_SAMPLE_SEED.
+    horizons  {list, main, labels, unit, models, notes}: горизонты из configs/horizons.yaml,
+              main — горизонт основного протокола (его показывают первым), четыре модели
+              в порядке prophet, naive_last, лучшая основного протокола (summary.csv
+              MAE.idxmin()), two_stage — [{id, role, label, note, mae}], mae[i] — MAE
+              на горизонте list[i], руб., по horizons_summary.csv (нет — null);
+              notes[i] — пояснение под полосами на горизонте list[i].
+    fact      то же, что demo/data/aggregate.json (одна и та же структура, не пересчёт).
+    teaser    {months, items}: три МО из TEASER_MO; items[k] — {id, short, region, fact,
+              forecast, known, breaks} теми же значениями, что в demo/data/mo/*.json;
+              months — 24 месяца панели и 12 месяцев прогноза подряд.
+
+Размер данных главной ограничен `MAX_LANDING_BYTES` — как и размер данных стенда, он проверяется
+до записи.
 """
 from __future__ import annotations
 
@@ -107,6 +135,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 from string import Template
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -123,6 +152,10 @@ from src.split import rolling_origin  # noqa: E402
 # Порог размера стенда: суммарный размер demo/data/ не должен превышать это число байт.
 MAX_DEMO_BYTES = 2_000_000
 
+# Порог размера данных главной: JSON внутри index.html грузится вместе со страницей, а не
+# по требованию, как данные стенда, поэтому лимит на порядок жёстче.
+MAX_LANDING_BYTES = 40_000
+
 # МО стенда по умолчанию — то же, чем отчёт иллюстрирует изломы одного ряда
 # (report/report.qmd, ~строка 5008): готовая, проверенная на реальных данных иллюстрация.
 DEFAULT_MO = "городской округ город Орёл"
@@ -132,6 +165,32 @@ DEFAULT_MO = "городской округ город Орёл"
 # `start="2022-01"`), чтобы год проверки (2025) не оказался прижат к правому
 # краю: без обрезки график начинался бы в 2018 году.
 AGGREGATE_CHART_START = "2022-01"
+
+# Обложка и раздел «Почему это прогноз одного числа» рисуют ряды одной и той же выборки:
+# сид фиксирован, чтобы страница не менялась от сборки к сборке. Размер выборки — число
+# линий на графике; больше — и линии сливаются в пятно.
+LANDING_SAMPLE_SEED = 20261007
+LANDING_SAMPLE_SIZE = 30
+
+# Ряды нормируются к среднему за первый год панели: на обложке и в «Почему это прогноз
+# одного числа» 100% — «расходы такого же, как в среднем за первый год».
+STORY_BASE_MONTHS = 12
+
+# Муниципалитеты блока «Стенд»: названия — как в series_id панели, короткая подпись — для
+# чипа. Нужен ряд с регионом (Орёл, Казань) и ряд-омоним с номером «#N» (Михайловский
+# район): на нём видно, что в адрес стенда номер идёт закодированным. Ряд, которого нет
+# в панели, роняет сборку (`build_teaser`).
+TEASER_MO = [
+    (DEFAULT_MO, "Орёл"),
+    ("городской округ город Казань", "Казань"),
+    ("Михайловский муниципальный район #2", "Михайловский р-н #2"),
+]
+
+# Наукаст на месячных данных — это горизонт 1 (README, отчёт, configs/horizons.yaml): внутри
+# месяца данных нет, поэтому месяц t прогнозируется по данным до t−1. Год вперёд — горизонт 12,
+# как в `compute_placeholders` (`h12_*`): подпись «Год» на переключателе и оговорка об одном фолде.
+NOWCAST_HORIZON = 1
+YEAR_HORIZON = 12
 
 # Названия моделей — копия `_ru` отчёта (report/report.qmd, ~строка 1682): тот же
 # читателю текст в обоих местах. Модель без записи здесь получает на странице
@@ -260,7 +319,7 @@ def _load_penalty() -> float:
 
 
 # ---------------------------------------------------------------------------
-# Пять чисел страницы входа
+# Пять чисел главной
 # ---------------------------------------------------------------------------
 
 
@@ -271,7 +330,7 @@ def compute_placeholders(
 ) -> dict[str, str]:
     """Считает все подстановки `${имя}` шаблона `site/index.template.html`.
 
-    Текст страницы входа живёт в шаблоне, а каждое число в нём — одна из этих
+    Текст главной живёт в шаблоне, а каждое число в нём — одна из этих
     подстановок; вписанных руками чисел в шаблоне нет. Пять чисел — те же, что
     в резюме отчёта: главное число, наукаст, год вперёд, проверка агрегата, панель.
 
@@ -303,6 +362,14 @@ def compute_placeholders(
       `build_matrix` (`configs/forecast_forward.yaml::data`).
     - ``panel_shape`` — «N рядов × M месяцев» целиком, слова — через `plural`.
     - ``panel_span`` — первый и последний месяц панели словами, «январь 2023 — декабрь 2024».
+    - ``folds_short`` — та же оговорка о фолдах одним оборотом, «на 2 фолдах из 3»: для узких
+      экранов, где подпись числа сокращена.
+    - ``sample_label`` — «30 случайных муниципалитетов»: выборка обложки с согласованными формами.
+    - ``spread_pct`` — у девяти значений из десяти по всей панели отклонение от общего движения
+      (медианы по рядам) не больше этого числа процентов: подпись третьего шага «Почему это
+      прогноз одного числа». Считается на всей матрице, а не на 30 нарисованных рядах.
+    - ``landing_json`` — данные главной (формат — докстринг модуля); добавляет `main` после
+      сборки, сюда он не входит.
     """
     top = summary["MAE"].idxmin()
     horizon_main = int(full_cfg["split"]["horizon"])
@@ -335,6 +402,7 @@ def compute_placeholders(
     vs_lost = [f for f in r2_folds if fold_mae.loc[f, top] > fold_mae.loc[f, "prophet"]]
     vs_first = len(vs_lost) == 1 and vs_lost[0] == min(r2_folds)
     lead = "Но выигрыш держится " if vs_lost else "Выигрыш держится "
+    placeholders["folds_short"] = on_folds(len(won_mae), len(r2_folds))
     placeholders["folds_caveat"] = (
         lead + on_folds(len(won_mae), len(r2_folds))
         + (f": на {and_join(_ORDINAL.get(f, str(f)) for f in vs_lost)}"
@@ -408,6 +476,15 @@ def compute_placeholders(
     placeholders["panel_span"] = (
         f"{MONTH_NOM[start.month - 1]} {start.year} — {MONTH_NOM[end.month - 1]} {end.year}"
     )
+
+    placeholders["sample_label"] = (
+        f"{LANDING_SAMPLE_SIZE} "
+        + plural(LANDING_SAMPLE_SIZE, "случайный муниципалитет", "случайных муниципалитета",
+                 "случайных муниципалитетов")
+    )
+    norm, median = _story_matrix(wide)
+    deviation = norm.div(median, axis=0).sub(1).abs().to_numpy()
+    placeholders["spread_pct"] = num(float(np.percentile(deviation, 90)) * 100, 0)
     return placeholders
 
 
@@ -513,13 +590,25 @@ def _load_breaks(cp_cfg: dict, penalty: float) -> dict[str, list[str]]:
     return {series: sorted(months) for series, months in subset.groupby("series_id")["month"]}
 
 
+class DemoBuild(NamedTuple):
+    """Данные стенда, собранные в памяти: что писать, сколько это весит и то, что нужно главной."""
+
+    files: dict[Path, str]  # путь → текст; на диск ещё ничего не записано
+    total_bytes: int
+    entries: dict[str, dict]  # series_id → запись demo/data/mo/<номер>.json
+    regions: dict[str, str | None]  # series_id → регион (None — не определён)
+
+
 def build_demo_data(
     data_dir: Path, *, wide: pd.DataFrame, forecast: pd.DataFrame, ok: pd.DataFrame,
     summary: pd.DataFrame, full_cfg: dict, forward_cfg: dict, cp_cfg: dict,
-    penalty: float, agg_check: pd.DataFrame, built: str,
-) -> int:
-    """Пишет `demo/data/index.json`, `demo/data/mo/<номер>.json` и `demo/data/aggregate.json`
-    (формат — докстринг модуля). Возвращает суммарный размер записанного, в байтах."""
+    penalty: float, aggregate: dict, built: str,
+) -> DemoBuild:
+    """Собирает `demo/data/index.json`, `demo/data/mo/<номер>.json` и `demo/data/aggregate.json`
+    (формат — докстринг модуля) и проверяет размер; на диск не пишет — это `write_demo_data`.
+
+    `aggregate` приходит готовым (`build_aggregate_json`): ту же структуру главная кладёт
+    в свои данные, и считать её дважды значило бы рисковать расхождением."""
     # Горизонты — по ключам recommended, как _fc_steps отчёта (report/report.qmd), а не
     # forward_cfg["horizons"]: тот список и recommended сейчас совпадают, но recommended —
     # источник истины (это она отвечает и за прогноз, и за пунктир), а horizons здесь был
@@ -583,6 +672,7 @@ def build_demo_data(
         raise ValueError(f"МО стенда по умолчанию {DEFAULT_MO!r} не найдено среди рядов панели")
 
     series_entries = []
+    region_of: dict[str, str | None] = {}
     mo_payload: dict[int, dict] = defaultdict(dict)
     for series_id in wide.columns:
         region = regions.at[series_id, "region"]
@@ -591,6 +681,7 @@ def build_demo_data(
         oktmo = None if pd.isna(oktmo) else oktmo
         number = region_number.get(region, no_region_number)
         series_entries.append([series_id, region, oktmo, number])
+        region_of[series_id] = region
 
         mae = {}
         for model_id in model_ids:
@@ -640,7 +731,7 @@ def build_demo_data(
     files: dict[Path, str] = {data_dir / "index.json": _serialize_json(index_payload)}
     for number, payload in mo_payload.items():
         files[data_dir / "mo" / f"{number}.json"] = _serialize_json(payload)
-    files[data_dir / "aggregate.json"] = _serialize_json(build_aggregate_json(agg_check, forward_cfg))
+    files[data_dir / "aggregate.json"] = _serialize_json(aggregate)
 
     total = sum(len(text.encode("utf-8")) for text in files.values())
     if total > MAX_DEMO_BYTES:
@@ -649,6 +740,12 @@ def build_demo_data(
             "сократите состав или точность полей demo/data/, не поднимайте порог не глядя"
         )
 
+    entries = {series_id: entry for payload in mo_payload.values() for series_id, entry in payload.items()}
+    return DemoBuild(files=files, total_bytes=total, entries=entries, regions=region_of)
+
+
+def write_demo_data(demo: DemoBuild, data_dir: Path) -> None:
+    """Пишет собранные данные стенда в `data_dir`."""
     # Старые demo/data/mo/*.json чистятся перед записью новых: без этого при уменьшении
     # числа регионов лишние файлы прежних прогонов оставались бы в рабочем каталоге
     # (а при коммите — и в репозитории) неограниченно долго.
@@ -656,9 +753,8 @@ def build_demo_data(
     if mo_dir.exists():
         for old in mo_dir.glob("*.json"):
             old.unlink()
-    for path, text in files.items():
+    for path, text in demo.files.items():
         _write_text(path, text)
-    return total
 
 
 def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path = ROOT) -> dict:
@@ -719,6 +815,190 @@ def build_aggregate_json(agg_check: pd.DataFrame, forward_cfg: dict, root: Path 
     }
 
 
+# ---------------------------------------------------------------------------
+# Данные главной (формат — докстринг модуля, раздел «Данные главной»)
+# ---------------------------------------------------------------------------
+
+
+def _story_matrix(wide: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """Ряды матрицы, делённые на среднее своих первых `STORY_BASE_MONTHS` месяцев, и их
+    медиана по рядам в каждом месяце — «общее движение»."""
+    norm = wide / wide.iloc[:STORY_BASE_MONTHS].mean()
+    return norm, norm.median(axis=1)
+
+
+def build_story(wide: pd.DataFrame) -> dict:
+    """`story` данных главной: 30 рядов выборки и медиана по ВСЕМ рядам матрицы."""
+    if wide.shape[1] < LANDING_SAMPLE_SIZE:
+        raise ValueError(
+            f"в матрице {wide.shape[1]} рядов — меньше выборки обложки ({LANDING_SAMPLE_SIZE})"
+        )
+    norm, median = _story_matrix(wide)
+    picked = np.random.default_rng(LANDING_SAMPLE_SEED).choice(
+        wide.shape[1], size=LANDING_SAMPLE_SIZE, replace=False
+    )
+    ids = [str(wide.columns[i]) for i in picked]
+    return {
+        "months": [pd.Timestamp(m).strftime("%Y-%m") for m in wide.index],
+        "base_months": STORY_BASE_MONTHS,
+        "ids": ids,
+        "series": [[round(float(v), 3) for v in norm[series_id].to_numpy()] for series_id in ids],
+        "median": [round(float(v), 3) for v in median.to_numpy()],
+        "n_total": int(wide.shape[1]),
+        "n_sample": LANDING_SAMPLE_SIZE,
+    }
+
+
+def horizon_label(horizon: int) -> str:
+    """Подпись горизонта на переключателе главной: «Наукаст», «3 мес.», «Год»."""
+    if horizon == NOWCAST_HORIZON:
+        return "Наукаст"
+    if horizon == YEAR_HORIZON:
+        return "Год"
+    return f"{horizon}\u00a0мес."
+
+
+def _label_parts(model_id: str) -> tuple[str, str]:
+    """Название и пояснение модели из `MODEL_LABELS`: «наивная: оставить как в прошлом
+    месяце» → («Наивная», «оставить как в прошлом месяце»); «эталон конкурса (Prophet по
+    умолчанию)» → («Эталон конкурса», «Prophet по умолчанию»). Без «:» и скобок — всё название,
+    пояснение пусто."""
+    text = MODEL_LABELS.get(model_id, model_id)
+    if ": " in text:
+        head, tail = text.split(": ", 1)
+    elif text.endswith(")") and " (" in text:
+        head, tail = text[:-1].split(" (", 1)
+    else:
+        head, tail = text, ""
+    return head[:1].upper() + head[1:], tail
+
+
+def build_horizons(
+    *, horizons_cfg: dict, horizons_summary: pd.DataFrame, summary: pd.DataFrame,
+    full_cfg: dict, placeholders: dict[str, str],
+) -> dict:
+    """`horizons` данных главной: MAE четырёх моделей на горизонтах `configs/horizons.yaml`.
+
+    Порядок — как в докстринге модуля; модель в двух ролях сразу входит одной строкой
+    (роли через «+»), как в `_build_model_roles`. Название и пояснение берутся из
+    `MODEL_LABELS`; у лучшей модели основного протокола название — «Лучшая панельная»:
+    на годовом горизонте её MAE нет, и слово «панельная» объясняет почему — панельным
+    моделям на год вперёд не хватает истории."""
+    horizons = sorted({int(item["horizon"]) for item in horizons_cfg["horizons"]})
+    best = summary["MAE"].idxmin()
+    roles_by_model: dict[str, list[str]] = {}
+    for model_id, role in [("prophet", "reference"), ("naive_last", "naive"),
+                           (best, "best_mean"), ("two_stage", "two_stage")]:
+        roles_by_model.setdefault(model_id, []).append(role)
+
+    mae_table = horizons_summary.set_index(["horizon", "model"])["MAE"]
+
+    def mae_at(horizon: int, model_id: str) -> int | None:
+        try:
+            return _ruble(float(mae_table.loc[(horizon, model_id)]))
+        except KeyError:
+            return None
+
+    models = []
+    for model_id, roles in roles_by_model.items():
+        if roles == ["best_mean"]:
+            label = "Лучшая панельная" if model_id.startswith("global_") else "Лучшая по MAE"
+            note = MODEL_LABELS.get(model_id, model_id)
+        else:
+            label, note = _label_parts(model_id)
+        models.append({
+            "id": model_id, "role": "+".join(roles), "label": label, "note": note,
+            "mae": [mae_at(h, model_id) for h in horizons],
+        })
+
+    best_label = next(m["label"] for m in models if "best_mean" in m["role"].split("+"))
+    horizon_main = int(full_cfg["split"]["horizon"])
+    notes = []
+    for i, horizon in enumerate(horizons):
+        sentences = []
+        if horizon == NOWCAST_HORIZON:
+            sentences.append("Наукаст — прогноз текущего месяца, пока его данных ещё нет.")
+            if placeholders["h1_gain"] != "—":
+                sentences.append(f"{best_label} точнее эталона на {placeholders['h1_gain']}%.")
+        elif any(m["mae"][i] is None for m in models):
+            sentences.append("Где полосы нет, модель не удалось обучить: на этом горизонте истории не хватает.")
+        else:
+            sentences.append("Средняя абсолютная ошибка по фолдам скользящего origin, ₽ на человека в месяц.")
+        if horizon == horizon_main and horizon != NOWCAST_HORIZON:
+            sentences.append(f"{best_label} точнее эталона на {placeholders['best_gain']}%.")
+            sentences.append(placeholders["folds_caveat"])
+        if horizon == YEAR_HORIZON and placeholders["h12_model"] != "—":
+            sentences.append(f"Лучшая — {placeholders['h12_model']}{placeholders['h12_folds_caveat']}.")
+        notes.append(" ".join(sentences))
+
+    return {
+        "list": horizons,
+        "main": horizon_main,
+        "labels": [horizon_label(h) for h in horizons],
+        "unit": "руб. на человека в месяц",
+        "models": models,
+        "notes": notes,
+    }
+
+
+def build_teaser(demo: DemoBuild, wide: pd.DataFrame, forward_cfg: dict) -> dict:
+    """`teaser` данных главной: три МО из `TEASER_MO` теми же значениями, что в
+    `demo/data/mo/*.json` (берутся из собранных данных стенда, а не считаются заново)."""
+    missing = [series_id for series_id, _ in TEASER_MO if series_id not in demo.entries]
+    if missing:
+        raise ValueError(f"МО блока «Стенд» нет среди рядов панели: {', '.join(missing)}")
+    # Мини-график блока не умеет рисовать дыры: линия факта, прогноза и пунктира целиком.
+    gaps = [series_id for series_id, _ in TEASER_MO
+            if any(value is None for key in ("fact", "forecast", "known") for value in demo.entries[series_id][key])]
+    if gaps:
+        raise ValueError(f"в данных МО блока «Стенд» есть пропуски: {', '.join(gaps)}")
+    origin = pd.Period(forward_cfg["origin"], "M")
+    forecast_months = [str(origin + step) for step in range(1, max(forward_cfg["recommended"]) + 1)]
+    return {
+        "months": [pd.Timestamp(m).strftime("%Y-%m") for m in wide.index] + forecast_months,
+        "items": [
+            {
+                "id": series_id, "short": short, "region": demo.regions[series_id],
+                **{key: demo.entries[series_id][key] for key in ("fact", "forecast", "known", "breaks")},
+            }
+            for series_id, short in TEASER_MO
+        ],
+    }
+
+
+def build_landing_data(
+    *, wide: pd.DataFrame, summary: pd.DataFrame, full_cfg: dict, forward_cfg: dict,
+    horizons_cfg: dict, horizons_summary: pd.DataFrame, aggregate: dict, demo: DemoBuild,
+    placeholders: dict[str, str],
+) -> dict:
+    """Все данные главной одним словарём: `story`, `horizons`, `fact`, `teaser`."""
+    return {
+        "story": build_story(wide),
+        "horizons": build_horizons(
+            horizons_cfg=horizons_cfg, horizons_summary=horizons_summary, summary=summary,
+            full_cfg=full_cfg, placeholders=placeholders,
+        ),
+        "fact": aggregate,
+        "teaser": build_teaser(demo, wide, forward_cfg),
+    }
+
+
+def landing_json(payload: dict) -> str:
+    """Данные главной текстом для `<script type="application/json">`.
+
+    `<` пишется как `\\u003c`: иначе «</script» в любой строке данных закрыл бы тег и сломал
+    страницу. JSON.parse в браузере разбирает такую запись в обычный «<». Размер
+    проверяется здесь же — до записи страницы."""
+    text = _serialize_json(payload).replace("<", "\\u003c")
+    size = len(text.encode("utf-8"))
+    if size > MAX_LANDING_BYTES:
+        raise ValueError(
+            f"данные главной {size} байт больше порога {MAX_LANDING_BYTES} — "
+            "сократите состав или точность полей, не поднимайте порог не глядя"
+        )
+    return text
+
+
 def _serialize_json(payload) -> str:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
 
@@ -735,7 +1015,7 @@ def _write_text(path: Path, text: str) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Сборка страницы входа (index.html) и данных демонстрационного стенда"
+        description="Сборка главной страницы (index.html) и данных демонстрационного стенда"
     )
     parser.add_argument(
         "--out", type=Path, default=ROOT,
@@ -751,6 +1031,7 @@ def main(argv: list[str] | None = None) -> int:
 
     full_cfg = _load_yaml(ROOT / "configs" / "full.yaml")
     forward_cfg = _load_yaml(ROOT / "configs" / "forecast_forward.yaml")
+    horizons_cfg = _load_yaml(ROOT / "configs" / "horizons.yaml")
     cp_cfg = _load_yaml(ROOT / "configs" / "changepoints.yaml")
     penalty = _load_penalty()
 
@@ -773,23 +1054,36 @@ def main(argv: list[str] | None = None) -> int:
         full_cfg=full_cfg, forward_cfg=forward_cfg, today=today,
     )
 
+    # Структура агрегата одна на стенд и на главную: стенд пишет её в aggregate.json,
+    # главная кладёт в свои данные как есть.
+    aggregate = build_aggregate_json(agg_check, forward_cfg)
+
     data_dir = out / "demo" / "data"
-    demo_bytes = build_demo_data(
+    demo = build_demo_data(
         data_dir, wide=wide, forecast=forecast, ok=ok, summary=summary,
         full_cfg=full_cfg, forward_cfg=forward_cfg, cp_cfg=cp_cfg, penalty=penalty,
-        agg_check=agg_check, built=today.isoformat(),
+        aggregate=aggregate, built=today.isoformat(),
     )
+
+    landing = build_landing_data(
+        wide=wide, summary=summary, full_cfg=full_cfg, forward_cfg=forward_cfg,
+        horizons_cfg=horizons_cfg, horizons_summary=horizons_summary, aggregate=aggregate,
+        demo=demo, placeholders=placeholders,
+    )
+    placeholders["landing_json"] = landing_json(landing)
 
     template_path = ROOT / "site" / "index.template.html"
     html = Template(template_path.read_text(encoding="utf-8")).substitute(placeholders)
+
+    # Пороги и подстановки проверены выше, в памяти: на диск идёт только собранное целиком.
+    write_demo_data(demo, data_dir)
     out.mkdir(parents=True, exist_ok=True)
     index_path = out / "index.html"
     index_path.write_text(html, encoding="utf-8")
 
     print(f"написано: {index_path}")
-    print(f"данные стенда: {data_dir} — {demo_bytes} байт (порог {MAX_DEMO_BYTES})")
-    # Порог проверен внутри build_demo_data, до записи файлов — сюда код доходит уже
-    # только с прошедшей проверкой.
+    print(f"данные стенда: {data_dir} — {demo.total_bytes} байт (порог {MAX_DEMO_BYTES})")
+    print(f"данные главной: {len(placeholders['landing_json'].encode('utf-8'))} байт (порог {MAX_LANDING_BYTES})")
     return 0
 
 
