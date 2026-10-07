@@ -786,7 +786,11 @@ class BuildSiteTest(unittest.TestCase):
         first, last = pd.Period(fold["test_from"], "M"), pd.Period(fold["test_to"], "M")
         window = int((last - first).n) + 1
         glossary = _IdsOf(self.html).text("glossary")
-        self.assertIn(f"фолд — проверочное окно в {window} мес.: модель учится на месяцах до него и прогнозирует его", glossary)
+        # Окно фолда равно горизонту прогноза: на основном горизонте — столько, сколько месяцев в окне первого фолда;
+        # у года вперёд и у наукаста окна другой длины, и «фолд — окно в три месяца» им не подходит.
+        self.assertIn(
+            f"фолд — проверочное окно длиной в горизонт прогноза (на основном горизонте — {window} мес.): "
+            "модель учится на месяцах до него и прогнозирует его", glossary)
         self.assertIn("наукаст — прогноз текущего месяца до выхода его данных", glossary)
         self.assertIn("origin — месяц, от которого строится прогноз", glossary)
         # Словарь стоит сразу под строкой панели, до первого раздела.
@@ -1878,9 +1882,11 @@ class BuildSiteTest(unittest.TestCase):
                         documents += 1
                         self.assertEqual(anchor["target"], "_blank", href)
                         self.assertEqual(anchor["rel"], "noopener", href)
-                        if anchor["text"].strip():  # у ссылки-картинки текста нет
+                        # У каждой такой ссылки программа чтения с экрана слышит, что она откроется в новой вкладке;
+                        # у ссылки-картинки схемы метода имя — длинный alt, и скрытая подпись стоит рядом с ним.
+                        self.assertIn("(откроется в новой вкладке)", anchor["text"], href)
+                        if anchor["text"].strip() != "(откроется в новой вкладке)":  # знак «↗» — у текстовых ссылок
                             self.assertIn("↗", anchor["text"], href)
-                            self.assertIn("(откроется в новой вкладке)", anchor["text"], href)
                     elif not href.startswith(("http://", "https://")):
                         self.assertIsNone(anchor["target"], f"переход внутри сайта в новой вкладке: {href}")
                 self.assertGreaterEqual(documents, 3)
@@ -1888,6 +1894,17 @@ class BuildSiteTest(unittest.TestCase):
         landing_nav = {a["href"]: a for a in _anchors(self.html)}
         self.assertIsNone(landing_nav["demo/"]["target"])
         self.assertEqual(landing_nav["report/slides.html"]["target"], "_blank")
+
+    def test_the_method_diagram_link_says_it_opens_in_a_new_tab_to_screen_readers_too(self) -> None:
+        # Картинка-ссылка на схему метода открывается в новой вкладке, как остальные ссылки на документы: у неё нет
+        # видимого текста, а имя — длинный alt, поэтому скрытая подпись стоит прямо в ссылке, после картинки.
+        link = re.search(r'<a href="report/method\.svg" target="_blank" rel="noopener">\s*<img .*?>\s*(.*?)\s*</a>',
+                         self.html, re.S)
+        self.assertIsNotNone(link, "не нашлась ссылка-картинка схемы метода")
+        self.assertEqual(link.group(1), '<span class="visually-hidden"> (откроется в новой вкладке)</span>')
+        # И подпись под картинкой — со знаком и скрытым текстом, как у остальных ссылок.
+        caption = re.search(r"<figcaption>(.*?)</figcaption>", self.html, re.S).group(1)
+        self.assertIn("(откроется в новой вкладке)", caption)
 
     def test_the_word_stand_names_only_the_protocol_with_injections(self) -> None:
         # Страница прогноза по муниципалитету на сайте нигде не «стенд»: слово зарезервировано за стендом с

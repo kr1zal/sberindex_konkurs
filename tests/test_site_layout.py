@@ -172,6 +172,24 @@ class HeroMotionTest(unittest.TestCase):
         self.assertRegex(block, r"\.hero-median\s*\{\s*animation:\s*none")
 
 
+class PhoneCoverTest(unittest.TestCase):
+    """Обложка на телефоне: поле «Покажите мой город» — на первом экране вместе со строкой главного числа."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        css = _read("site/landing.css")
+        cls.block = re.search(r"@media \(max-width: 639px\) \{(.*?)\n\}", css, re.S).group(1)
+
+    def test_cover_chart_is_short_so_that_the_search_field_is_not_pushed_below_the_first_screen(self) -> None:
+        # Поле стоит после графика, и на 390×844 при графике в двести пикселей оно уходило за нижний край экрана:
+        # видна была одна подпись. График остаётся, но не выше ста шестидесяти пикселей и не ниже, чем он читается.
+        height = re.search(r"\.hero-plot \{\s*height:\s*(\d+)px;", self.block)
+        self.assertIsNotNone(height, "у обложки на телефоне нет своей высоты графика")
+        self.assertLessEqual(int(height.group(1)), 160)
+        self.assertGreaterEqual(int(height.group(1)), 120, "график остаётся читаемым")
+        self.assertNotRegex(self.block, r"\.hero-(?:figure|plot)\s*\{[^}]*display:\s*none")
+
+
 def _rgb(color: str) -> tuple[float, float, float]:
     """#rrggbb → компоненты 0…255."""
     value = color.strip().lstrip("#")

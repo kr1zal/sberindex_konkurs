@@ -298,23 +298,58 @@
   }
 }
 
+/* На телефоне поле поиска — на первом экране, вместе со строкой главного числа: график обложки ниже, отступы между
+   блоками теснее. Поле стоит после графика (порядок блоков выше), и каждые лишние десятки пикселей над ним уводят
+   его за нижний край экрана. */
 @media (max-width: 639px) {
   .hero {
     padding-bottom: 72px;
   }
 
+  .hero-grid {
+    padding-top: 4px;
+  }
+
   .hero-eyebrow {
-    margin-bottom: 14px;
+    margin-bottom: 10px;
     font-size: 0.72rem;
   }
 
+  .hero-sub {
+    margin-top: 6px;
+  }
+
   .hero-lead {
-    margin-top: 16px;
+    margin-top: 12px;
     font-size: 1rem;
   }
 
+  .hero-proof {
+    margin-top: 10px;
+  }
+
+  .hero-figure {
+    margin-top: 16px;
+  }
+
   .hero-plot {
-    height: 200px;
+    height: 160px;
+  }
+
+  .hero-axis {
+    margin-top: 6px;
+  }
+
+  .hero-caption {
+    margin-top: 6px;
+  }
+
+  .hero-search {
+    margin-top: 16px;
+  }
+
+  .hero-search .search-label {
+    margin-bottom: 8px;
   }
 
   .hero-line {
@@ -328,7 +363,7 @@
   /* На телефоне поле и кнопка — два блока друг под другом, поле — отдельной плашкой. */
   .hero-search .field {
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     padding: 0;
     background: transparent;
     border: 0;
