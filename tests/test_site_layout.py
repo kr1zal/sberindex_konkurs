@@ -147,9 +147,10 @@ class HeroMotionTest(unittest.TestCase):
 
 
 class StylesheetCommentsTest(unittest.TestCase):
-    def test_no_page_numbers_in_stylesheets(self) -> None:
-        # Число данных не пишется ни в стиле, ни в комментарии к нему: размер, подогнанный под
-        # «3,8–4,5%», ломается на другом диапазоне, а комментарий с числом устаревает вместе с данными.
+    def test_no_page_numbers_in_stylesheet_comments(self) -> None:
+        # В комментарии к стилю не пишется число данных: оно устаревает вместе с данными, а размер,
+        # подогнанный под конкретное значение, ломается на другом. Ищутся только комментарии: значения
+        # свойств («0.42», «2.2») с числами страницы случайно совпадать вправе.
         page = _read("index.html")
         number = r"\d+(?:\u00a0\d{3})*(?:,\d+)?"
         shown = re.findall(r'<p class="stat-number">(.*?)</p>', page) + re.findall(
@@ -158,13 +159,16 @@ class StylesheetCommentsTest(unittest.TestCase):
                   if "," in t or "\u00a0" in t or len(re.sub(r"\D", "", t)) >= 4}
         self.assertGreater(len(tokens), 5, "проверка потеряла числа страницы")
         for name in ("site/site.css", "site/landing.css", "demo/demo.css"):
-            css = _read(name)
+            comments = " ".join(re.findall(r"/\*.*?\*/", _read(name), re.S))
+            self.assertTrue(comments, f"в {name} нет комментариев — проверка ничего не читает")
             for token in sorted(tokens):
                 for variant in {token, token.replace(",", "."), token.replace("\u00a0", " ")}:
                     with self.subTest(file=name, number=variant):
                         # «4,5:1» — отношение контраста из требований доступности, а не число страницы.
-                        self.assertIsNone(re.search(r"(?<![\w.,-])" + re.escape(variant) + r"(?![\w.,]|:\d)", css),
-                                          f"в {name} встречается число данных {variant!r}")
+                        self.assertIsNone(
+                            re.search(r"(?<![\w.,-])" + re.escape(variant) + r"(?![\w.,]|:\d)", comments),
+                            f"в комментарии {name} встречается число данных {variant!r}",
+                        )
 
     def test_card_numbers_are_sized_by_the_card_width(self) -> None:
         # Правило размера описано словами: число занимает долю ширины карточки (cqw) в пределах
