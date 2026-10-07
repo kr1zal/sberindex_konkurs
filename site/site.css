@@ -259,7 +259,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-/* Крупное число: широкие цифры Unbounded держат «23,0%» как знак. Размер задаёт страница,
+/* Крупное число: широкие цифры Unbounded держат число с процентом как знак. Размер задаёт страница,
    а цифры одной ширины нужны ещё и счёту: пока число растёт от нуля, строка не дёргается. */
 .stat-number {
   margin: 0;

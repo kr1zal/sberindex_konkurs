@@ -116,6 +116,66 @@ class HeroTitleTest(unittest.TestCase):
         self.assertRegex(grid_rule, r"align-items:\s*stretch")
 
 
+class HeroMotionTest(unittest.TestCase):
+    """Движение обложки: «дыхание» медианы со свечением не бесконечное."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.css = _read("site/landing.css")
+
+    def test_median_breathing_repeats_a_few_times_and_stops(self) -> None:
+        # Анимация прозрачности дочернего элемента SVG под фильтром (свечение) не композитится:
+        # бесконечная заставляла браузер перерисовывать график каждый кадр, пока открыта страница.
+        rule = re.search(r"\.hero-median \{([^}]*)\}", self.css).group(1)
+        animation = re.search(r"animation:([^;]+);", rule).group(1)
+        breathe = [part for part in animation.split(",") if "breathe" in part]
+        self.assertEqual(len(breathe), 1, "у медианы пропало «дыхание»")
+        self.assertNotIn("infinite", animation)
+        self.assertRegex(breathe[0].strip(), r"\s\d+$", "число повторов должно стоять последним словом правила")
+        self.assertNotIn("infinite", self.css)
+
+    def test_breathing_starts_and_ends_at_full_opacity(self) -> None:
+        # Конечная анимация возвращает элемент к обычному состоянию: кадры 0% и 100% — полная
+        # непрозрачность, иначе после последнего повтора медиана «подпрыгнула» бы.
+        frames = re.search(r"@keyframes breathe \{(.*?)\n\}", self.css, re.S).group(1)
+        edge = re.search(r"0%, 100% \{\s*opacity:\s*([\d.]+);", frames).group(1)
+        self.assertEqual(float(edge), 1.0)
+
+    def test_reduced_motion_still_switches_the_animation_off(self) -> None:
+        block = re.search(r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}\n", self.css, re.S).group(1)
+        self.assertRegex(block, r"\.hero-median\s*\{\s*animation:\s*none")
+
+
+class StylesheetCommentsTest(unittest.TestCase):
+    def test_no_page_numbers_in_stylesheets(self) -> None:
+        # Число данных не пишется ни в стиле, ни в комментарии к нему: размер, подогнанный под
+        # «3,8–4,5%», ломается на другом диапазоне, а комментарий с числом устаревает вместе с данными.
+        page = _read("index.html")
+        number = r"\d+(?:\u00a0\d{3})*(?:,\d+)?"
+        shown = re.findall(r'<p class="stat-number">(.*?)</p>', page) + re.findall(
+            r'<span class="stat-note stat-note-full">(.*?)</span>', page, re.S)
+        tokens = {t for text in shown for t in re.findall(number, text)
+                  if "," in t or "\u00a0" in t or len(re.sub(r"\D", "", t)) >= 4}
+        self.assertGreater(len(tokens), 5, "проверка потеряла числа страницы")
+        for name in ("site/site.css", "site/landing.css", "demo/demo.css"):
+            css = _read(name)
+            for token in sorted(tokens):
+                for variant in {token, token.replace(",", "."), token.replace("\u00a0", " ")}:
+                    with self.subTest(file=name, number=variant):
+                        # «4,5:1» — отношение контраста из требований доступности, а не число страницы.
+                        self.assertIsNone(re.search(r"(?<![\w.,-])" + re.escape(variant) + r"(?![\w.,]|:\d)", css),
+                                          f"в {name} встречается число данных {variant!r}")
+
+    def test_card_numbers_are_sized_by_the_card_width(self) -> None:
+        # Правило размера описано словами: число занимает долю ширины карточки (cqw) в пределах
+        # от читаемого минимума до размера на широкой карточке.
+        css = _read("site/landing.css")
+        block = re.search(r"@supports \(width: 1cqw\) \{(.*?)\n\}", css, re.S).group(1)
+        self.assertRegex(block, r"font-size:\s*clamp\([^)]*\d+cqw[^)]*\)")
+        comment = css[: css.index("@supports (width: 1cqw)")].rsplit("/*", 1)[1]
+        self.assertIn("доля ширины карточки", comment)
+
+
 class MaterialsTemplateTest(unittest.TestCase):
     def test_pdf_link_does_not_wrap_away_from_its_conjunction(self) -> None:
         # «HTML и» на конце строки и одинокий «PDF» на следующей. Неразрывный пробел не
