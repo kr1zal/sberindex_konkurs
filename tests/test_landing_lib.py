@@ -212,6 +212,53 @@ class SearchRankingTest(unittest.TestCase):
         self.assertEqual(self.ranked("   "), [])
         self.assertEqual(self.ranked("ъъъъ"), [])
 
+    def test_fewer_extra_letters_go_first_inside_a_tier(self) -> None:
+        # «бе»: оба названия начинаются с запроса; по алфавиту Белозерский раньше Бердска, а по числу
+        # букв сверх набранного — Бердск (шесть букв) раньше Белозерского (одиннадцать).
+        rows = [["Белозерский муниципальный район", "Вологодская область", None, 0],
+                ["Бердск городской округ", "Новосибирская область", None, 1]]
+        got = run_lib(
+            "const rows = lib.rowsFromIndex(input); return lib.searchRows(rows, 'бе', 5).matches.map((r) => r.id);",
+            rows,
+        )
+        self.assertEqual(got, ["Бердск городской округ", "Белозерский муниципальный район"])
+
+    def test_quick_rows_go_before_every_tier(self) -> None:
+        # Город быстрого выбора — выше названия, начинающегося с запроса, хотя сам он во втором ярусе:
+        # «казан» с Enter открывал «Казанский муниципальный район» Тюменской области, а не Казань.
+        rows = [["Казанский муниципальный район", "Тюменская область", None, 0],
+                ["городской округ город Казань", "Республика Татарстан", None, 1],
+                ["Казачинский муниципальный район", "Красноярский край", None, 2]]
+        script = ("const rows = lib.rowsFromIndex(input.rows, input.quick);"
+                  "return lib.searchRows(rows, input.query, 5).matches.map((r) => r.id);")
+        quick = [{"id": "городской округ город Казань", "short": "Казань"}]
+        self.assertEqual(
+            run_lib(script, {"rows": rows, "quick": quick, "query": "каз"}),
+            ["городской округ город Казань", "Казанский муниципальный район", "Казачинский муниципальный район"],
+        )
+        # Без быстрого выбора порядок прежний по ярусам: названия, начинающиеся с запроса, раньше Казани.
+        self.assertEqual(
+            run_lib(script, {"rows": rows, "quick": None, "query": "каз"}),
+            ["Казанский муниципальный район", "Казачинский муниципальный район", "городской округ город Казань"],
+        )
+        # Быстрый выбор не вытаскивает ряд, который под запрос не подходит.
+        self.assertEqual(run_lib(script, {"rows": rows, "quick": quick, "query": "казачин"}),
+                         ["Казачинский муниципальный район"])
+
+    def test_region_label_distinguishes_rows_without_a_region_by_the_year_mean(self) -> None:
+        got = run_lib(
+            "const rows = lib.rowsFromIndex(input);"
+            "return rows.map((row) => lib.regionLabel(row));",
+            [["городской округ город Орёл", "Орловская область", None, 1],
+             ["Михайловский муниципальный район #1", None, None, 3, "23,7"],
+             ["Ардатовский муниципальный район", None, None, 3]],
+        )
+        self.assertEqual(got, [
+            "Орловская область",
+            f"регион не определён · 23,7{NBSP}тыс.{NBSP}₽ в{NBSP}мес.",
+            "регион не определён",
+        ])
+
     def test_ranking_on_the_real_series_list(self) -> None:
         got = run_lib(
             "const index = JSON.parse(require('fs').readFileSync(input.path, 'utf8'));"

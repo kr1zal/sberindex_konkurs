@@ -170,40 +170,66 @@ const LandingLib = (() => {
 
   const normalize = (s) => s.toLowerCase().replace(/ё/g, "е");
 
-  // index.json::series — [[series_id, регион|null, ОКТМО|null, файл], …]. Запрос ищется и в
-  // названии, и в регионе.
-  function rowsFromIndex(series) {
+  // index.json::series — [[series_id, регион|null, ОКТМО|null, файл, средние расходы], …]; пятый
+  // элемент есть только у рядов без региона: он отличает одноимённые ряды друг от друга. quick —
+  // index.json::quick, [{id, short}, …]: города быстрого выбора, их обычно и ищут. Запрос ищется
+  // и в названии, и в регионе.
+  function rowsFromIndex(series, quick) {
+    const featured = new Set((quick || []).map((item) => item.id));
     return series.map((entry) => ({
       id: entry[0],
       region: entry[1],
+      mean: entry[4] === undefined ? null : entry[4],
+      featured: featured.has(entry[0]),
       name: normalize(entry[0]),
       haystack: normalize(entry[1] ? `${entry[0]} ${entry[1]}` : entry[0]),
     }));
   }
 
+  const NO_REGION = "регион не определён";
+
+  // Подпись региона в подсказке и в строке выбора. У ряда без региона рядом — различитель из
+  // генератора: средние расходы на человека в месяц за последний год панели, тыс. ₽. Тот же текст
+  // собирает стенд (demo/demo.js::regionLabel).
+  function regionLabel(row) {
+    return row.region || (row.mean ? `${NO_REGION} · ${row.mean}${NBSP}тыс.${NBSP}₽ в${NBSP}мес.` : NO_REGION);
+  }
+
+  // Букв сверх набранного в словах названия, которым отвечают слова запроса: для каждого слова —
+  // кратчайшее слово названия, которое с него начинается, а при его отсутствии — содержащее его.
+  // Слово, найденное только в регионе, ничего не добавляет. Казань (шесть букв) ближе к запросу
+  // «казан», чем Казанский (девять) и Казачинский (одиннадцать).
+  function extraLetters(nameWords, words) {
+    return words.reduce((sum, word) => {
+      const starting = nameWords.filter((nameWord) => nameWord.indexOf(word) === 0);
+      const pool = starting.length ? starting : nameWords.filter((nameWord) => nameWord.indexOf(word) >= 0);
+      if (!pool.length) return sum;
+      return sum + Math.min.apply(null, pool.map((nameWord) => nameWord.length)) - word.length;
+    }, 0);
+  }
+
   // Ранжирование, то же, что на стенде (demo/demo.js::searchMunicipalities): подходят строки,
-  // где есть все слова запроса. Выше — название, которое начинается с запроса; затем название,
-  // в котором каждое слово запроса — начало какого-то слова («город орёл» → «городской округ
-  // город Орёл», а не «…округ Горелово», где «орел» стоит внутри слова); затем любое вхождение.
-  // Внутри яруса — по алфавиту.
+  // где есть все слова запроса. Порядок: сначала города быстрого выбора, затем ярусы — название,
+  // которое начинается с запроса; название, в котором каждое слово запроса — начало какого-то слова
+  // («город орёл» → «городской округ город Орёл», а не «…округ Горелово», где «орел» стоит внутри
+  // слова); любое вхождение. Внутри яруса — по числу букв сверх набранного, затем по алфавиту.
   function searchRows(rows, query, limit) {
     const words = normalize(query.trim()).split(/\s+/).filter(Boolean);
     if (!words.length) return { matches: [], total: 0 };
     const phrase = words.join(" ");
-    const first = [];
-    const second = [];
-    const third = [];
+    const found = [];
     rows.forEach((row) => {
       if (!words.every((word) => row.haystack.indexOf(word) >= 0)) return;
       const nameWords = row.name.split(/\s+/);
-      if (row.name.indexOf(phrase) === 0) first.push(row);
-      else if (words.every((word) => nameWords.some((nameWord) => nameWord.indexOf(word) === 0))) second.push(row);
-      else third.push(row);
+      let tier = 2;
+      if (row.name.indexOf(phrase) === 0) tier = 0;
+      else if (words.every((word) => nameWords.some((nameWord) => nameWord.indexOf(word) === 0))) tier = 1;
+      found.push({ row, tier, extra: extraLetters(nameWords, words) });
     });
     const collator = new Intl.Collator("ru");
-    const byName = (a, b) => collator.compare(a.id, b.id);
-    const all = first.sort(byName).concat(second.sort(byName), third.sort(byName));
-    return { matches: all.slice(0, limit), total: all.length };
+    found.sort((a, b) => (Number(b.row.featured) - Number(a.row.featured))
+      || (a.tier - b.tier) || (a.extra - b.extra) || collator.compare(a.row.id, b.row.id));
+    return { matches: found.slice(0, limit).map((item) => item.row), total: found.length };
   }
 
   // Куда ведёт кнопка «Открыть прогноз»: подсвеченная подсказка, иначе первое совпадение набранного
@@ -219,6 +245,6 @@ const LandingLib = (() => {
     groupDigits, formatInt, pluralRu,
     niceScale, stepDecimals, formatTick, percentTick, createTickSets, historyKeep,
     numberTokens, countedText,
-    normalize, rowsFromIndex, searchRows, pickTarget,
+    NO_REGION, normalize, rowsFromIndex, regionLabel, searchRows, pickTarget,
   };
 })();

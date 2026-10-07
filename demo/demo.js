@@ -173,47 +173,70 @@ function breaksMethodologyText(breaksInfo) {
 
 // ---------------------------------------------------------------------------
 // Поиск МО: без учёта регистра, «ё» = «е», по всем словам запроса в строке
-// «название + регион»; три яруса — название начинается с запроса; каждое слово запроса
-// начинает какое-то слово названия; любое вхождение — и по алфавиту внутри яруса.
-// Тот же порядок на главной (site/landing-lib.js::searchRows): подсказки там и здесь
-// совпадают.
+// «название + регион». Порядок: сначала города быстрого выбора (их обычно и ищут), затем три
+// яруса — название начинается с запроса; каждое слово запроса начинает какое-то слово названия;
+// любое вхождение. Внутри яруса — по числу букв сверх набранного в совпавших словах (Казань
+// раньше Казанского и Казачинского), затем по алфавиту. Тот же порядок на главной
+// (site/landing-lib.js::searchRows): подсказки там и здесь совпадают.
 // ---------------------------------------------------------------------------
 
 function normalizeSearchText(s) {
   return s.toLowerCase().replace(/ё/g, "е");
 }
 
-function buildSearchIndex(seriesRows) {
-  // seriesRows — index.json.series: [[series_id, регион|null, ОКТМО|null, файл], ...]
-  return seriesRows.map(([seriesId, region, oktmo, fileNumber]) => ({
+function buildSearchIndex(seriesRows, quick) {
+  // seriesRows — index.json.series: [[series_id, регион|null, ОКТМО|null, файл, средние расходы], ...];
+  // пятый элемент есть только у рядов без региона. quick — index.json.quick: [{id, short}, ...].
+  const featured = new Set((quick || []).map((item) => item.id));
+  return seriesRows.map(([seriesId, region, oktmo, fileNumber, mean]) => ({
     seriesId, region, oktmo, fileNumber,
+    mean: mean === undefined ? null : mean,
+    featured: featured.has(seriesId),
     nameNorm: normalizeSearchText(seriesId),
     haystack: normalizeSearchText(region ? `${seriesId} ${region}` : seriesId),
   }));
+}
+
+const NO_REGION_TEXT = "регион не определён";
+const MEAN_HINT = "Средние расходы на человека в месяц за последний год панели, тыс. ₽";
+
+/** Подпись региона в подсказке. У ряда без региона рядом — различитель из генератора: средние
+ * расходы на человека в месяц за последний год панели, тыс. ₽. Тот же текст собирает главная
+ * (site/landing-lib.js::regionLabel). */
+function regionLabel(row) {
+  return row.region || (row.mean ? `${NO_REGION_TEXT} · ${row.mean} тыс. ₽ в мес.` : NO_REGION_TEXT);
+}
+
+/** Букв сверх набранного в словах названия, которым отвечают слова запроса: для каждого слова —
+ * кратчайшее слово названия, которое с него начинается, а при его отсутствии — содержащее его.
+ * Слово, найденное только в регионе, ничего не добавляет. */
+function extraLetters(nameWords, words) {
+  return words.reduce((sum, word) => {
+    const starting = nameWords.filter((nameWord) => nameWord.startsWith(word));
+    const pool = starting.length ? starting : nameWords.filter((nameWord) => nameWord.includes(word));
+    if (!pool.length) return sum;
+    return sum + Math.min(...pool.map((nameWord) => nameWord.length)) - word.length;
+  }, 0);
 }
 
 function searchMunicipalities(query, rows, limit) {
   const words = normalizeSearchText(query.trim()).split(/\s+/).filter(Boolean);
   if (!words.length) return { matches: [], total: 0 };
   const phrase = words.join(" ");
-  const tierA = [];
-  const tierB = [];
-  const tierC = [];
+  const found = [];
   for (const row of rows) {
     if (!words.every((w) => row.haystack.includes(w))) continue;
     // «город орёл»: слово «орел» внутри «Горелово» — не начало слова, и Орёл идёт выше него.
     const nameWords = row.nameNorm.split(/\s+/);
-    if (row.nameNorm.startsWith(phrase)) tierA.push(row);
-    else if (words.every((w) => nameWords.some((nameWord) => nameWord.startsWith(w)))) tierB.push(row);
-    else tierC.push(row);
+    let tier = 2;
+    if (row.nameNorm.startsWith(phrase)) tier = 0;
+    else if (words.every((w) => nameWords.some((nameWord) => nameWord.startsWith(w)))) tier = 1;
+    found.push({ row, tier, extra: extraLetters(nameWords, words) });
   }
   const collator = new Intl.Collator("ru");
-  const byName = (a, b) => collator.compare(a.seriesId, b.seriesId);
-  tierA.sort(byName);
-  tierB.sort(byName);
-  tierC.sort(byName);
-  const all = tierA.concat(tierB, tierC);
-  return { matches: all.slice(0, limit), total: all.length };
+  found.sort((a, b) => (Number(b.row.featured) - Number(a.row.featured))
+    || (a.tier - b.tier) || (a.extra - b.extra) || collator.compare(a.row.seriesId, b.row.seriesId));
+  return { matches: found.slice(0, limit).map((item) => item.row), total: found.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +311,8 @@ function searchHintText(index) {
     `${pluralRu(total, "муниципального образования", "муниципальных образований", "муниципальных образований")} ` +
     `регион не определён, в том числе у ${rubFmt(series)} ` +
     `${pluralRu(series, "одноимённого ряда", "одноимённых рядов", "одноимённых рядов")} ` +
-    `(${rubFmt(names)} ${pluralRu(names, "название", "названия", "названий")}) — их различает номер после «#».`;
+    `(${rubFmt(names)} ${pluralRu(names, "название", "названия", "названий")}) — их различает номер после «#», ` +
+    "а в подсказках рядом — средние расходы на человека в месяц за последний год панели, тыс. ₽.";
 }
 
 function invalidMoMessage(seriesId) {
@@ -902,6 +926,9 @@ function setupCombobox(index) {
   function openListbox() {
     listbox.hidden = false;
     input.setAttribute("aria-expanded", "true");
+    // На телефоне список уходит за нижний край окна: докручиваем ровно настолько, чтобы он влез
+    // (так же, как на главной).
+    listbox.scrollIntoView({ block: "nearest" });
   }
 
   function closeListbox() {
@@ -981,7 +1008,9 @@ function setupCombobox(index) {
       name.textContent = row.seriesId;
       const region = document.createElement("span");
       region.className = "suggestion-region";
-      region.textContent = row.region || "регион не определён";
+      region.textContent = regionLabel(row);
+      // Различитель у рядов без региона объясняется подсказкой при наведении: в строке на него места мало.
+      if (!row.region && row.mean) li.title = MEAN_HINT;
       li.append(name, region);
       li.addEventListener("click", () => commitSelection(row.seriesId));
       listbox.appendChild(li);
@@ -1037,7 +1066,7 @@ function setupCombobox(index) {
 
 async function init() {
   const index = await fetchJson("data/index.json");
-  index.searchRows = buildSearchIndex(index.series);
+  index.searchRows = buildSearchIndex(index.series, index.quick);
   index.seriesById = new Map(index.searchRows.map((row) => [row.seriesId, row]));
 
   document.getElementById("intro-text").textContent = introText(index);

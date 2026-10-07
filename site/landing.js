@@ -15,7 +15,7 @@
 
   const {
     formatInt, pluralRu, niceScale, formatTick, percentTick, createTickSets, historyKeep,
-    numberTokens, countedText, rowsFromIndex, searchRows, pickTarget,
+    numberTokens, countedText, NO_REGION, rowsFromIndex, regionLabel, searchRows, pickTarget,
   } = LandingLib;
 
   let data;
@@ -541,7 +541,6 @@
   // 04 · Стенд: три муниципалитета, мини-график, ссылка на стенд с выбранным
   // ---------------------------------------------------------------------------
 
-  const NO_REGION = "регион не определён";
   const KNOWN_LABEL = "если федеральный индекс за месяц уже опубликован";
 
   function standUrl(seriesId) {
@@ -681,6 +680,7 @@
 
     const LIMIT = 6;
     const STAND = "demo/";
+    const MEAN_HINT = "Средние расходы на человека в месяц за последний год панели, тыс. ₽";
     const defaultNote = note.textContent;
     let rows = null;
     let loading = null;
@@ -699,7 +699,7 @@
             return response.json();
           })
           .then((index) => {
-            rows = rowsFromIndex(index.series);
+            rows = rowsFromIndex(index.series, index.quick);
             failed = false;
             // Подсказка о сбое устарела: список загрузился при повторной попытке.
             if (failureShown) resetNote();
@@ -719,14 +719,29 @@
     // Куда ведёт кнопка «Открыть прогноз»: выбранный в списке ряд, иначе подсвеченная подсказка,
     // иначе первое совпадение набранного запроса; пустой запрос и запрос без совпадений — стенд
     // без выбора, поиск там покажет сам стенд.
+    function currentTarget() {
+      return selected || pickTarget(rows, input.value, active >= 0 ? options[active] : null);
+    }
+
     function targetUrl() {
-      const row = selected || pickTarget(rows, input.value, active >= 0 ? options[active] : null);
+      const row = currentTarget();
       return row ? standUrl(row.id) : STAND;
+    }
+
+    // Строка под полем говорит, что откроет кнопка, пока ряд не выбран из списка: набранный запрос
+    // без выбора ведёт на первое совпадение, и узнавать об этом уже на стенде поздно. У выбранного
+    // ряда (choose) и при сбое загрузки (showFailure) у строки свой текст.
+    function showTarget(row) {
+      if (selected || failureShown) return;
+      const text = row && input.value.trim() ? `Откроется: ${row.id} · ${regionLabel(row)}` : defaultNote;
+      if (note.textContent !== text) note.textContent = text;
     }
 
     // Адрес кнопки держится в ссылке заранее: так он верен и при открытии в новой вкладке.
     function syncGo() {
-      go.href = targetUrl();
+      const row = currentTarget();
+      go.href = row ? standUrl(row.id) : STAND;
+      showTarget(row);
     }
 
     // Переход по кнопке или клавише Enter. Запрос уже набран, а список ещё грузится (быстрый
@@ -799,7 +814,7 @@
       note.textContent = "";
       note.appendChild(document.createTextNode("Выбран: "));
       node("span", "picked", row.id, note);
-      note.appendChild(document.createTextNode(` · ${row.region || NO_REGION} · `));
+      note.appendChild(document.createTextNode(` · ${regionLabel(row)} · `));
       const link = node("a", null, "открыть на стенде →", note);
       link.href = standUrl(row.id);
     }
@@ -833,7 +848,9 @@
         item.setAttribute("role", "option");
         item.setAttribute("aria-selected", "false");
         node("span", "suggestion-name", row.id, item);
-        node("span", "suggestion-region", row.region || NO_REGION, item);
+        node("span", "suggestion-region", regionLabel(row), item);
+        // Различитель у ряда без региона объясняется подсказкой при наведении: в строке на него места мало.
+        if (!row.region && row.mean) item.title = MEAN_HINT;
         item.addEventListener("click", () => choose(row));
       });
       if (total > matches.length) {

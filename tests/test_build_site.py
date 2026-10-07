@@ -423,6 +423,28 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual(self.index_json["n_hash_series"], len(suffixed))
         self.assertEqual(self.index_json["n_hash_names"], len(names))
 
+    def test_series_without_region_carry_the_last_year_mean_as_a_distinguisher(self) -> None:
+        # Одноимённые ряды без региона («Михайловский … #1 … #4») подсказка поиска иначе отличить не может:
+        # пятый элемент записи — средние расходы за последний год панели, тыс. ₽ на человека в месяц,
+        # готовой строкой формата отчёта (пересчитано здесь по матрице панели); у рядов с регионом
+        # записи остаются из четырёх элементов.
+        last_year = self.wide.iloc[-12:].mean()
+        without_region = 0
+        for row in self.index_json["series"]:
+            series_id, region = row[0], row[1]
+            if region:
+                self.assertEqual(len(row), 4, series_id)
+                continue
+            without_region += 1
+            self.assertEqual(len(row), 5, series_id)
+            self.assertEqual(row[4], _fmt(float(last_year[series_id]) / 1000, 1), series_id)
+        self.assertEqual(without_region, self.index_json["n_no_region"])
+        # Различитель различает: у одноимённых Михайловских районов значения разные.
+        homonyms = [row[4] for row in self.index_json["series"]
+                    if row[0].startswith("Михайловский муниципальный район #")]
+        self.assertGreaterEqual(len(homonyms), 2)
+        self.assertEqual(len(set(homonyms)), len(homonyms))
+
     def test_quick_buttons_point_at_panel_series_with_short_labels(self) -> None:
         # Быстрые кнопки стенда: каждая — ряд панели (иначе кнопка открыла бы МО по умолчанию
         # с сообщением «в данных стенда нет»), подписи короткие и не повторяются.
@@ -1371,6 +1393,8 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIsNotNone(base, "панель начинается не с января: проверке нужна своя подпись периода")
 
         self.assertEqual(nodes.text("hero-sub"), f"и его разнос по {n_series} муниципалитетам")
+        # Пустое поле ведёт на пример: его имя называет подпись под полем, а не догадка пользователя.
+        self.assertIn(f"Пустой запрос откроет пример — {self.index_json['default_mo']}.", nodes.text("mo-note"))
         self.assertIn(f"ещё и на факте {year} года", nodes.text("hero-lead"))
         self.assertIn("прогноз федерального ряда", nodes.text("hero-lead"))
         self.assertEqual(

@@ -53,7 +53,11 @@
                          основного протокола (configs/full.yaml, src.split.rolling_origin)
     models               [{id, role, label}, …] — модели таблицы ошибок, см. ниже
     panel_mae            {model_id: [fold0, fold1, fold2, среднее]}, руб.
-    series               [[series_id, регион|null, ОКТМО|null, номер файла mo/], …]
+    series               [[series_id, регион|null, ОКТМО|null, номер файла mo/], …]; у рядов без региона
+                         пятым элементом — средние расходы за последние MEAN_MONTHS месяцев панели,
+                         тыс. руб. на человека в месяц, готовой строкой ``num(v, 1)``: одноимённые
+                         ряды («Михайловский муниципальный район #1 … #4») подсказка поиска иначе
+                         отличить не может, а «#N» — лишь порядок в выгрузке
 
 ``demo/data/mo/<номер>.json`` — ряды одного региона (номер — позиция региона
 в отсортированном списке уникальных регионов; ряды без региона — под отдельным,
@@ -209,6 +213,10 @@ STAND_QUICK_MO = [
     ("Ардатовский муниципальный район", "Ардатовский р-н"),
 ]
 
+# Различитель рядов без региона в подсказках поиска: средние расходы за столько последних месяцев
+# панели (год), тыс. руб. на человека в месяц. Входит в `index.json::series` пятым элементом.
+MEAN_MONTHS = 12
+
 # Наукаст на месячных данных — это горизонт 1 (README, отчёт, configs/horizons.yaml): внутри
 # месяца данных нет, поэтому месяц t прогнозируется по данным до t−1. Год вперёд — горизонт 12,
 # как в `compute_placeholders` (`h12_*`): подпись «Год» на переключателе и оговорка об одном фолде.
@@ -358,6 +366,8 @@ def compute_placeholders(
     в резюме отчёта: главное число, наукаст, год вперёд, проверка агрегата, панель.
 
     - ``built`` — дата сборки словами, «29 сентября 2026».
+    - ``default_mo`` — МО, на котором открывается страница прогноза по муниципалитету без выбора:
+      пустой запрос в поле обложки ведёт именно на него (`DEFAULT_MO`).
     - ``horizon_main`` — горизонт основного протокола, мес. (`configs/full.yaml::split.horizon`).
     - ``forecast_year`` — год прогноза вперёд, `origin.year + 1` (`configs/forecast_forward.yaml::origin`).
     - ``prophet_mae`` / ``best_mae`` — MAE эталона (Prophet) и лучшей модели на этом горизонте, ₽.
@@ -409,6 +419,7 @@ def compute_placeholders(
 
     placeholders: dict[str, str] = {
         "built": _date_words(today),
+        "default_mo": DEFAULT_MO,
         "horizon_main": str(horizon_main),
         "forecast_year": str(forecast_year),
         "prophet_mae": rub(summary.loc["prophet", "MAE"]),
@@ -725,7 +736,12 @@ def build_demo_data(
         region = None if pd.isna(region) else region
         oktmo = None if pd.isna(oktmo) else oktmo
         number = region_number.get(region, no_region_number)
-        series_entries.append([series_id, region, oktmo, number])
+        entry = [series_id, region, oktmo, number]
+        if region is None:
+            mean = float(wide[series_id].iloc[-MEAN_MONTHS:].mean())
+            if np.isfinite(mean):
+                entry.append(num(mean / 1000, 1))
+        series_entries.append(entry)
         region_of[series_id] = region
 
         mae = {}
