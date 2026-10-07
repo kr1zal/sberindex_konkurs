@@ -382,11 +382,12 @@
   padding-top: 110px;
 }
 
+/* Одна строка под заголовком раздела: на широком окне — в одну строку, на узком переносится. */
 .section-lead {
-  max-width: 760px;
+  max-width: 1100px;
   margin: 16px 0 0;
   color: var(--ink-soft);
-  font-size: 1.0625rem;
+  font-size: 1rem;
   line-height: 1.6;
 }
 
@@ -492,14 +493,6 @@
   white-space: nowrap;
 }
 
-.plot-caption {
-  margin: 16px 0 0;
-  min-height: 3em;
-  color: var(--ink-soft);
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
 .vline {
   position: absolute;
   top: 0;
@@ -572,10 +565,6 @@
     left: -44px;
     width: 36px;
     font-size: 0.6875rem;
-  }
-
-  .plot-caption {
-    min-height: 0;
   }
 }
 
@@ -700,15 +689,6 @@
   margin: 10px 0 0;
   font-size: 0.875rem;
   line-height: 1.55;
-}
-
-/* Опора вывода под разделом: разложение ошибки из отчёта, а не только картинка. */
-.story-proof {
-  max-width: 760px;
-  margin: 28px 0 0;
-  color: var(--ink-soft);
-  font-size: 0.9375rem;
-  line-height: 1.6;
 }
 
 @media (max-width: 959px) {
@@ -1225,10 +1205,9 @@
   white-space: nowrap;
 }
 
-/* Оговорки к столбикам — как читать картину: темнее подписи графика, которая говорит, что нарисовано. Пустой блок
-   (оговорок нет) места не занимает: отступ у абзацев, а не у самого блока. */
-.breaks-caveats p {
-  margin: 10px 0 0;
+/* Одна строка под столбиками — как читать картину: найдено задним числом и обе оговорки отчёта одной фразой. */
+.breaks-note {
+  margin: 16px 0 0;
   color: var(--ink);
   font-size: 0.875rem;
   line-height: 1.5;
@@ -1278,14 +1257,6 @@
   color: var(--night-ink-3);
   font-size: 1.0625rem;
   line-height: 1.6;
-}
-
-/* Какая модель строит прогноз и по какому правилу выбрана: мельче лида, он читается после него. */
-.stand-fineprint {
-  margin: 12px 0 0;
-  color: var(--night-soft);
-  font-size: 0.875rem;
-  line-height: 1.55;
 }
 
 .chips {
@@ -1410,31 +1381,8 @@
 
 /* -- 06 · метод -------------------------------------------------------------------- */
 
-.method-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 14px;
-  margin: 30px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.method-cards .card {
-  padding: 22px 24px;
-}
-
-.method-cards .mono-label {
-  color: var(--accent);
-}
-
-.method-cards p:last-child {
-  margin: 10px 0 0;
-  font-size: 0.9375rem;
-  line-height: 1.6;
-}
-
 .method-figure {
-  margin: 14px 0 0;
+  margin: 30px 0 0;
   padding: 28px;
   background: var(--surface-card);
   border: 1px solid var(--rule);

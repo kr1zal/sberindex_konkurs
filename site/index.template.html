@@ -110,34 +110,22 @@
 
     <div class="story">
       <div class="steps" role="group" aria-label="Шаги рассуждения">
-        <button class="step" id="step-1" type="button" aria-pressed="true"
-                data-caption="Каждая линия — один муниципалитет; расходы показаны в процентах от его среднего за ${story_base}.">
+        <button class="step" id="step-1" type="button" aria-pressed="true">
           <span class="step-num">Шаг 01<span class="step-hint" aria-hidden="true">показать →</span></span>
           <span class="step-title">Ряды идут вместе</span>
-          <span class="step-text">
-            ${sample_label} из ${n_series_rub}: расходы к среднему за ${story_base}.
-            Сезон, декабрьский скачок и рост — общие.
-          </span>
+          <span class="step-text">${sample_label} из ${n_series_rub}, расходы к среднему за ${story_base}.</span>
           <span class="step-short">ряды</span>
         </button>
-        <button class="step" id="step-2" type="button" aria-pressed="false"
-                data-caption="Толстая линия — медиана по всем рядам панели, общее движение страны.">
+        <button class="step" id="step-2" type="button" aria-pressed="false">
           <span class="step-num">Шаг 02<span class="step-hint" aria-hidden="true">показать →</span></span>
           <span class="step-title">Общее движение</span>
-          <span class="step-text">
-            Медиана по рядам повторяет почти всю динамику.
-            Его прогнозирует первый этап модели — по длинному федеральному ряду СберИндекса.
-          </span>
+          <span class="step-text">Медиана по рядам повторяет почти всю динамику; общее движение прогнозирует первый этап модели по федеральному ряду.</span>
           <span class="step-short">общее движение</span>
         </button>
-        <button class="step" id="step-3" type="button" aria-pressed="false"
-                data-caption="Те же ряды, делённые на общее движение: не менее чем у ${spread_share}% значений по всей панели отклонение от него не больше ±${spread_pct}%.">
+        <button class="step" id="step-3" type="button" aria-pressed="false">
           <span class="step-num">Шаг 03<span class="step-hint" aria-hidden="true">показать →</span></span>
           <span class="step-title">Что остаётся</span>
-          <span class="step-text">
-            Если разделить каждый ряд на общее движение, остаётся узкий разброс —
-            его и разносит двухэтапная модель долями.
-          </span>
+          <span class="step-text">Не менее чем у ${spread_share}% значений по всей панели отклонение от общего движения не больше ±${spread_pct}%.</span>
           <span class="step-short">остаток</span>
         </button>
       </div>
@@ -151,16 +139,10 @@
           </svg>
         </div>
         <div class="plot-axis" id="story-axis" aria-hidden="true"></div>
-        <p class="plot-caption" id="story-caption" aria-live="polite"></p>
+        <p class="visually-hidden" id="story-caption" aria-live="polite"></p>
         <p class="story-text" id="story-text"></p>
       </div>
     </div>
-
-    <p class="story-proof" id="story-proof">
-      Не только на картинке: межрядовая составляющая ошибки не двигается ни одной из моделей,
-      для которых посчитано разложение.
-      <a href="report/report.html#механизм-ошибка-состоит-из-двух-частей-и-двигается-только-одна" target="_blank" rel="noopener">Разложение ошибки — в отчёте<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
-    </p>
   </div>
 </section>
 
@@ -186,8 +168,7 @@
     <p class="eyebrow">03 · Проверка фактом</p>
     <h2 class="section-title" id="fact-title">Прогноз от ${agg_origin_label} против факта ${forecast_year} года</h2>
     <p class="section-lead" id="fact-lead">
-      Федеральный ряд СберИндекс уже опубликовал за весь ${forecast_year} год, а муниципальный разрез — ещё нет.
-      Поэтому первый этап двухэтапной модели — единственный прогноз работы, который можно сверить с фактом.
+      Федеральный ряд за весь ${forecast_year} год опубликован, муниципальный разрез — нет: с фактом сверяется только первый этап модели.
     </p>
 
     <div class="fact">
@@ -251,11 +232,6 @@
   <div class="wrap">
     <p class="eyebrow">04 · Изломы</p>
     <h2 class="section-title" id="breaks-title">Изломы&nbsp;— точки структурных изменений</h2>
-    <p class="section-lead" id="breaks-lead">
-      Помимо прогноза, работа ищет точки структурных изменений — изломы: месяцы, когда динамика расходов
-      меняется. Детекторы проверены на стенде с врезками: в реальные ряды вносят сдвиг известной величины
-      и смотрят, найдёт ли его метод и не тревожит ли он нетронутые ряды.
-    </p>
     <p class="breaks-claim" id="breaks-claim">${cp_claim}</p>
 
     <div class="plot-card breaks-card">
@@ -265,11 +241,7 @@
         <div class="breaks-cols" id="breaks-cols"></div>
       </div>
       <div class="plot-axis" id="breaks-axis" aria-hidden="true"></div>
-      <p class="plot-caption" id="breaks-caption">
-        Найдено задним числом, по полному ряду (${cp_method}, штраф ${cp_penalty}): это не сигнал в реальном
-        времени. Штраф — настройка детектора: чем он выше, тем меньше изломов находится.
-      </p>
-      <div class="breaks-caveats" id="breaks-caveats">${cp_caveats}</div>
+      <p class="breaks-note" id="breaks-note">Найдено задним числом, не в реальном времени. ${cp_caveats}</p>
     </div>
 
     <p class="breaks-more">
@@ -285,11 +257,8 @@
         <p class="eyebrow">05 · Прогноз по муниципалитету</p>
         <h2 class="section-title" id="city-title">Покажите мой город</h2>
         <p class="stand-lead" id="stand-lead">
-          Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год,
-          изломы ряда (точки структурных изменений) и то, как ошибались модели.
-          Пунктир — доли муниципалитета по прошлым месяцам, умноженные на опубликованный федеральный индекс.
+          Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год от рекомендуемой модели и изломы ряда.
         </p>
-        <p class="stand-fineprint" id="stand-recommended">${recommended_note}</p>
         <div class="chips" id="t-chips" role="group" aria-label="Примеры муниципальных образований"></div>
         <a class="btn btn-primary stand-cta" id="t-go" href="demo/">Открыть прогноз →</a>
       </div>
@@ -319,21 +288,6 @@
     <p class="eyebrow">06 · Метод</p>
     <h2 class="section-title" id="method-title">Как устроено решение</h2>
 
-    <ul class="method-cards">
-      <li class="card">
-        <p class="mono-label">Данные</p>
-        <p>Панель СберИндекса по муниципалитетам, категории трат и длинные федеральные ряды — обрезанные по origin, чтобы модель не видела будущего.</p>
-      </li>
-      <li class="card">
-        <p class="mono-label">Модели</p>
-        <p>Панельный бустинг с внешними источниками и двухэтапная модель: прогноз федерального ряда и разнос его по территориям долями.</p>
-      </li>
-      <li class="card">
-        <p class="mono-label">Проверка</p>
-        <p>Скользящий origin на горизонтах от наукаста до года, MAE и R² по пулу; эталон — Prophet с настройками по умолчанию.</p>
-      </li>
-    </ul>
-
     <figure class="method-figure">
       <a href="report/method.svg" target="_blank" rel="noopener">
         <img src="report/method.svg" width="1113" height="566" loading="lazy"
@@ -356,35 +310,35 @@
           <path d="M6 3h8l4 4v14H6z M14 3v4h4 M9 12h6 M9 16h6"/>
         </svg>
         <h3 class="material-title"><a class="material-link" href="report/report.html" target="_blank" rel="noopener">Отчёт<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></h3>
-        <p class="material-note">полный текст · <span class="material-pair">HTML и <a class="material-extra" href="report/report.pdf" target="_blank" rel="noopener">PDF · ${report_pdf_size}<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></span></p>
+        <p class="material-note"><span class="material-pair">HTML и <a class="material-extra" href="report/report.pdf" target="_blank" rel="noopener">PDF · ${report_pdf_size}<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></span></p>
       </li>
       <li class="card card-link material">
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M3 5h18v11H3z M12 16v4 M8 20h8 M7 12l3-3 3 2 4-4"/>
         </svg>
         <h3 class="material-title"><a class="material-link" href="report/slides.html" target="_blank" rel="noopener">Слайды<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></h3>
-        <p class="material-note">коротко о главном · <span class="material-pair">HTML и <a class="material-extra" href="report/slides.pdf" target="_blank" rel="noopener">PDF · ${slides_pdf_size}<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></span></p>
+        <p class="material-note"><span class="material-pair">HTML и <a class="material-extra" href="report/slides.pdf" target="_blank" rel="noopener">PDF · ${slides_pdf_size}<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></span></p>
       </li>
       <li class="card card-link material">
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z M16 16l5 5"/>
         </svg>
         <h3 class="material-title"><a class="material-link" href="demo/">Прогноз по муниципалитету</a></h3>
-        <p class="material-note">расходы, прогноз и изломы</p>
+        <p class="material-note">страница</p>
       </li>
       <li class="card card-link material">
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M8 7l-5 5 5 5 M16 7l5 5-5 5 M14 4l-4 16"/>
         </svg>
         <h3 class="material-title"><a class="material-link" href="https://github.com/kr1zal/sberindex_konkurs" target="_blank" rel="noopener">Код<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></h3>
-        <p class="material-note">GitHub · воспроизводимые прогоны</p>
+        <p class="material-note">GitHub</p>
       </li>
       <li class="card card-link material">
         <svg class="material-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M4 4h16v16H4z M4 9h16 M9 9v11 M12 13l2 2 3-4"/>
         </svg>
         <h3 class="material-title"><a class="material-link" id="material-forecast" href="results/forecast_2025.csv.gz">Прогноз на ${forecast_year} год</a></h3>
-        <p class="material-note">все ряды панели · csv.gz · ${forecast_size}, архив gzip</p>
+        <p class="material-note">csv.gz · ${forecast_size}</p>
       </li>
     </ul>
   </div>

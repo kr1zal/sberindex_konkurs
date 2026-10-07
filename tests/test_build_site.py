@@ -236,7 +236,7 @@ class _TextCollector(HTMLParser):
     с экрана и поисковики (`alt`, `aria-label`, `title`, `content` у description), — без
     содержимого `<script>` и `<style>`. Нужен проверке «вписанных руками чисел нет»."""
 
-    TEXT_ATTRS = ("alt", "aria-label", "title", "data-caption")
+    TEXT_ATTRS = ("alt", "aria-label", "title")
 
     def __init__(self) -> None:
         super().__init__()
@@ -662,29 +662,6 @@ class BuildSiteTest(unittest.TestCase):
                          ("Лучшая в среднем по панели", "new_model"))
         with self.assertRaises(ValueError):
             build_site.model_names("prophet", ["champion"])
-
-    def test_recommended_model_phrase_matches_the_forecast_rule_of_the_config(self) -> None:
-        # Прогноз на год вперёд строит рекомендуемая модель, а не «лучшая в среднем»: фраза на главной называет,
-        # какая именно и на какие месяцы, и повторяет формулировку отчёта. Месяцы и модели пересчитаны здесь по
-        # configs/forecast_forward.yaml: шаг s берёт наименьший горизонт, который его покрывает.
-        recommended = self.forward_cfg["recommended"]
-        horizons = sorted(recommended)
-        origin = pd.Period(self.forward_cfg["origin"], "M")
-        by_month = [(origin + step, recommended[min(h for h in horizons if h >= step)])
-                    for step in range(1, horizons[-1] + 1)]
-        groups: list[list] = []
-        for month, model in by_month:
-            if groups and groups[-1][0] == model:
-                groups[-1][2] = month
-            else:
-                groups.append([model, month, month])
-        parts = [f"с {_MONTH_OF[a.month - 1]} по {_MONTH_NOM[b.month - 1]} — «{build_site.MODEL_LABELS[m]}»"
-                 for m, a, b in groups]
-        text = _IdsOf(self.html).text("stand-recommended")
-        self.assertEqual(text, (
-            f"Прогноз на {origin.year + 1} год строит рекомендуемая модель: {', '.join(parts)}. "
-            "Рекомендуемая модель выбирается по длине истории, а не по верхней строке таблицы."))
-        self.assertGreaterEqual(len(groups), 2)
 
     def test_model_roles_match_docstring_rule(self) -> None:
         """`models` — пять ролей по правилу докстринга модуля (его начало): prophet —
@@ -1237,16 +1214,16 @@ class BuildSiteTest(unittest.TestCase):
         self.assertNotEqual([str(self.wide.columns[i]) for i in other], self.landing["story"]["ids"])
 
     def test_story_spread_in_template_is_recomputed_from_all_series(self) -> None:
-        # Третий шаг: «не менее чем у N% значений … не больше ±M%» — по всей панели. M — процентиль
+        # Строка третьего шага: «не менее чем у N% значений … не больше ±M%» — по всей панели. M — процентиль
         # отклонений, округлённый вверх: при 7,03% полоса ±7% вмещала бы меньше заявленной доли.
         norm = self._story_norm()
         deviation = norm.div(norm.median(axis=1), axis=0).sub(1).abs().to_numpy()
         share = build_site.STORY_SPREAD_SHARE
         self.assertTrue(50 < share < 100)
         band = math.ceil(round(float(np.percentile(deviation, share)) * 100, 6))
-        caption = _IdsOf(self.html).attr("step-3", "data-caption")
-        self.assertIn(f"не менее чем у {share}% значений", caption)
-        self.assertIn(f"не больше ±{band}%", caption)
+        line = _IdsOf(self.html).text("step-3")
+        self.assertIn(f"Не менее чем у {share}% значений по всей панели", line)
+        self.assertIn(f"отклонение от общего движения не больше ±{band}%", line)
         # Утверждение верно, и полоса не шире нужного: на один процент уже она бы доли не вмещала.
         self.assertGreaterEqual(float((deviation <= band / 100).mean()), share / 100)
         self.assertLess(float((deviation <= (band - 1) / 100).mean()), share / 100)
@@ -1555,19 +1532,20 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIsNotNone(base, "панель начинается не с января: проверке нужна своя подпись периода")
 
         self.assertEqual(nodes.text("hero-sub"), f"и его разнос по {n_series} муниципалитетам")
-        # Шаг 01: число рядов и период — и в тексте шага, и в подписи под графиком.
-        self.assertIn(f"{sample_label} из {n_series}: расходы к среднему за {base}.", nodes.text("step-1"))
-        self.assertIn(f"от его среднего за {base}.", nodes.attr("step-1", "data-caption"))
+        # Шаг 01: выборка, число рядов и период — в одной строке шага; видимой подписи под графиком нет.
+        self.assertIn(f"{sample_label} из {n_series}, расходы к среднему за {base}.", nodes.text("step-1"))
         # Прогнозирует первый этап — по федеральному ряду; медиана рядов только показывает общее движение.
-        self.assertIn("Его прогнозирует первый этап модели", nodes.text("step-2"))
-        self.assertIn(f"Любой из {n_series} муниципалитетов", nodes.text("stand-lead"))
-        # Изломы — это точки структурных изменений (термин конкурса), а пунктир объяснён в лиде, а не только в легенде.
-        self.assertIn("изломы ряда (точки структурных изменений)", nodes.text("stand-lead"))
-        self.assertIn("Пунктир — доли муниципалитета по прошлым месяцам, умноженные на опубликованный федеральный индекс",
-                      nodes.text("stand-lead"))
-        self.assertIn(f"прогноз на {year} год", nodes.text("stand-lead"))
+        self.assertIn("общее движение прогнозирует первый этап модели по федеральному ряду", nodes.text("step-2"))
+        # Блок «Прогноз по муниципалитету» — одна строка: число рядов, год прогноза и рекомендуемая модель.
+        self.assertEqual(
+            nodes.text("stand-lead"),
+            f"Любой из {n_series} муниципалитетов: расходы по месяцам, прогноз на {year} год от рекомендуемой модели "
+            "и изломы ряда.")
         self.assertEqual(nodes.text("fact-title"), f"Прогноз от {origin_label} против факта {year} года")
-        self.assertIn(f"за весь {year} год", nodes.text("fact-lead"))
+        self.assertEqual(
+            nodes.text("fact-lead"),
+            f"Федеральный ряд за весь {year} год опубликован, муниципальный разрез — нет: с фактом сверяется только "
+            "первый этап модели.")
         self.assertEqual(nodes.text("fact-k-label"), f"Месяц {year}")
         self.assertEqual(nodes.text("material-forecast"), f"Прогноз на {year} год")
         meta = re.search(r'<meta name="description" content="([^"]*)"', self.html).group(1)
@@ -1634,23 +1612,25 @@ class BuildSiteTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_site.horizon_folds(self.horizons_cfg, mixed)
 
-    def test_story_proof_links_to_the_error_decomposition_section_of_the_report(self) -> None:
-        nodes = _IdsOf(self.html)
-        text = nodes.text("story-proof")
-        self.assertIn("межрядовая составляющая ошибки не двигается ни одной из моделей", text)
-        self.assertIn("для которых посчитано разложение", text)
-        # В строке нет числа ни цифрой, ни словом: «ни одной из шести моделей» пишет отчёт, страница — без числа.
-        self.assertEqual(re.findall(r"\d", text), [])
-        self.assertEqual(_number_words_in(text), [])
-        link = re.search(r'<a href="(report/report\.html#[^"]+)"[^>]*>', self.html[self.html.index('id="story-proof"'):])
-        self.assertIsNotNone(link)
-        # Якорь — раздел отчёта о механизме: в отрендеренном отчёте такой id есть.
-        anchor = unquote(link.group(1).split("#", 1)[1])
-        report_html = (ROOT / "report" / "report.html").read_text(encoding="utf-8")
-        report = _IdCollector()
-        report.feed(report_html)
-        self.assertIn(anchor, report.ids)
-        self.assertIn(f'<h3 class="anchored" data-anchor-id="{anchor}">Механизм: ошибка состоит из двух частей', report_html)
+    def test_section_one_is_three_steps_with_a_title_and_one_sentence_each_and_no_caption_under_the_chart(self) -> None:
+        # Заголовок, интерактив и одна строка текста: у каждого шага — название и одно предложение; подписи под
+        # графиком и строки-опоры со ссылкой на разложение ошибки нет. Подпись графика для программ чтения с экрана
+        # — скрытая живая область, которую скрипт заполняет названием и строкой выбранного шага.
+        for step in (1, 2, 3):
+            line = re.search(rf'id="step-{step}".*?<span class="step-text">(.*?)</span>', self.html, re.S).group(1)
+            with self.subTest(step=step):
+                self.assertEqual(len(re.findall(r"[.!?](?:\s|$)", line.strip())), 1, line)
+                self.assertTrue(line.strip().endswith("."))
+        for gone in ("story-proof", "plot-caption", "data-caption", "механизм-ошибка-состоит"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, self.html)
+        ids = _IdCollector()
+        ids.feed(self.html)
+        self.assertEqual(ids.ids["story-caption"]["class"], "visually-hidden")
+        self.assertEqual(ids.ids["story-caption"]["aria-live"], "polite")
+        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        self.assertIn("caption.textContent = label;", js)
+        self.assertIn('plot.setAttribute("aria-label", label);', js)
 
     # -- раздел «Изломы» ---------------------------------------------------------------------------------
 
@@ -1703,17 +1683,28 @@ class BuildSiteTest(unittest.TestCase):
             labels.append(f"{text[:-2] if text.endswith(',0') else text}%")
         self.assertEqual(breaks["top_labels"], labels)
 
-    def test_breaks_section_says_what_the_bars_are_and_what_they_are_not(self) -> None:
+    def test_breaks_section_is_the_claim_the_bars_and_one_note_that_says_what_the_bars_are_not(self) -> None:
         nodes = _IdsOf(self.html)
-        caption = nodes.text("breaks-caption")
-        # Подпись: найдено задним числом, не сигнал в реальном времени; метод и штраф — из конфига и PENALTY.
-        self.assertIn("Найдено задним числом, по полному ряду (PELT на темпах роста, штраф 1)", caption)
-        self.assertIn("это не сигнал в реальном времени", caption)
-        self.assertIn("Штраф — настройка детектора: чем он выше, тем меньше изломов находится.", caption)
-        # Изломы названы точками структурных изменений — термином конкурса.
+        # Изломы названы точками структурных изменений — термином конкурса. Абзаца о стенде с врезками и подписи
+        # из двух предложений нет: в разделе фраза резюме, столбики и одна строка оговорок.
         # Неразрывный пробел перед тире: на узком экране заголовок не переносится так, чтобы строка начиналась с тире.
         self.assertEqual(nodes.text("breaks-title"), "Изломы\u00a0— точки структурных изменений")
-        self.assertIn("точки структурных изменений — изломы", nodes.text("breaks-lead"))
+        for gone in ("breaks-lead", "breaks-caption", "breaks-caveats", "breaks-more-text"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, self.html)
+        section = self.html[self.html.index('<section class="section" id="breaks"'):self.html.index('id="city"')]
+        self.assertEqual(re.findall(r'<p class="([^"]+)"', section),
+                         ["eyebrow", "breaks-claim", "chart-unit", "breaks-note", "breaks-more"])
+        # Строка под столбиками: найдено задним числом, не сигнал в реальном времени — и оговорки отчёта одной фразой.
+        note = nodes.text("breaks-note")
+        self.assertTrue(note.startswith("Найдено задним числом, не в реальном времени. "), note)
+        self.assertEqual(note.count("; "), 1, "обе оговорки — одной фразой через точку с запятой")
+        self.assertTrue(note.endswith("территорий."))
+        # Порядок: заголовок, фраза резюме, график, строка под ним, ссылка на отчёт.
+        marks = [section.index(mark) for mark in
+                 ('id="breaks-title"', 'id="breaks-claim"', 'id="breaks-plot"', 'id="breaks-note"',
+                  'href="report/report.html#sec-cp"')]
+        self.assertEqual(marks, sorted(marks))
         # Раздел стоит после проверки фактом и перед блоком прогноза по муниципалитету; ссылка ведёт
         # в раздел отчёта об обнаружении (якорь проверяет тест ссылок), в новой вкладке.
         self.assertLess(self.html.index('id="fact"'), self.html.index('id="breaks"'))
@@ -1800,20 +1791,23 @@ class BuildSiteTest(unittest.TestCase):
             f"с изломом в {prepositional(first)} есть излом и в {prepositional(second)}, ровно через {gap} "
             f"{_plural(gap, 'месяц', 'месяца', 'месяцев')}: это начало и конец отрезка {span(segment)}. "
             f"{nom(last).capitalize()} открывает такой же отрезок в конце панели — {span(tail)}.")
-        segments_paragraph = (
+        # На странице обе оговорки — одной фразой под столбиками, без доказательства (числа рядов и отрезков —
+        # в отчёте): первая часть про отрезки, вторая про штраф.
+        segments_clause = (
             f"Подсвеченные столбики — не {shocks}, а концы {genitive[len(segment)]}месячных отрезков с декабрём "
-            f"внутри. {evidence}")
-        penalty_paragraph = (
-            f"Штраф {pen(offline_penalty)} стенд отвергает: при нём потоковый {detector.upper()} тревожит на "
-            f"{pct(false_alarm)} нетронутых рядов. При выбранном по стенду штрафе {pen(selected)} и по полному ряду "
-            f"излом в любой месяц находится не больше чем у {pct(ceiling_up)} территорий.")
+            "внутри")
+        penalty_clause = (
+            f"штраф {pen(offline_penalty)} стенд отвергает: при нём потоковый {detector.upper()} тревожит на "
+            f"{pct(false_alarm)} нетронутых рядов, а при выбранном по стенду штрафе {pen(selected)} и по полному ряду "
+            f"излом в любой месяц находится не больше чем у {pct(ceiling_up)} территорий")
 
-        text = _IdsOf(self.html).text("breaks-caveats")
-        self.assertEqual(text, f"{segments_paragraph} {penalty_paragraph}")
-        block = re.search(r'<div class="breaks-caveats" id="breaks-caveats">(.*?)</div>', self.html, re.S).group(1)
-        self.assertEqual(len(re.findall(r"<p>", block)), 2, "каждая оговорка — свой абзац")
+        note = _IdsOf(self.html).text("breaks-note")
+        self.assertEqual(note, f"Найдено задним числом, не в реальном времени. {segments_clause}; {penalty_clause}.")
+        self.assertNotIn("<p>", self.html[self.html.index('id="breaks-note"'):self.html.index('id="city"')])
 
-        # Слова — отчёта: тот же тезис, те же два предложения про отрезки, та же оговорка про штраф.
+        # Слова — отчёта: тот же тезис про отрезки, та же оговорка про штраф; числа доказательства («у N из M рядов
+        # … ровно через три месяца»), пересчитанные здесь из CSV, — те же, что в отчёте: фраза на странице
+        # опирается на них, хотя сами они остались в отчёте.
         report = self._report_text()
         for fragment in (
             f"не {shocks}, а концы {genitive[len(segment)]}месячных отрезков с декабрём внутри",
@@ -1826,9 +1820,9 @@ class BuildSiteTest(unittest.TestCase):
             with self.subTest(fragment=fragment[:60]):
                 self.assertIn(fragment, report)
 
-    def test_breaks_caveats_sit_under_the_caption_of_the_bars_before_the_link_to_the_report(self) -> None:
-        # Оговорки стоят в карточке с графиком, сразу под подписью, а не отдельным разделом: столбики и их оговорки
-        # читаются вместе. Ссылка на отчёт идёт после карточки.
+    def test_breaks_note_sits_in_the_card_under_the_bars_before_the_link_to_the_report(self) -> None:
+        # Строка с оговорками стоит в карточке с графиком, сразу под столбиками, а не отдельным разделом: столбики
+        # и их оговорки читаются вместе. Ссылка на отчёт идёт после карточки.
         self.assertEqual(self.html.count('<div class="plot-card breaks-card">'), 1)
         start = self.html.index('<div class="plot-card breaks-card">')
         depth, end = 0, None
@@ -1837,10 +1831,10 @@ class BuildSiteTest(unittest.TestCase):
             if depth == 0:
                 end = start + match.end()
                 break
-        caption = self.html.index('id="breaks-caption"')
-        caveats = self.html.index('id="breaks-caveats"')
+        axis = self.html.index('id="breaks-axis"')
+        note = self.html.index('id="breaks-note"')
         link = self.html.index('href="report/report.html#sec-cp"')
-        self.assertTrue(start < caption < caveats < end < link, (start, caption, caveats, end, link))
+        self.assertTrue(start < axis < note < end < link, (start, axis, note, end, link))
 
     def test_sections_are_numbered_in_page_order(self) -> None:
         # Разделы нумеруются подряд, в порядке на странице: новый раздел «Изломы» сдвинул три следующих.
@@ -1904,8 +1898,8 @@ class BuildSiteTest(unittest.TestCase):
             for match in found:
                 with self.subTest(page=name, at=text[max(0, match.start() - 30): match.end() + 40]):
                     self.assertIn("врезк", text[match.start(): match.end() + 40])
-            if name == "шаблон главной":  # раздел «Изломы» и схема метода говорят о стенде с врезками — проверка их видит
-                self.assertGreaterEqual(len(found), 2)
+            if name == "шаблон главной":  # подпись схемы метода говорит о стенде с врезками — проверка её видит
+                self.assertGreaterEqual(len(found), 1)
         # И в строках скриптов — тексты, которые видит читатель: ошибки, подсказки, подписи.
         for name in ("site/landing.js", "demo/demo.js"):
             code = self._js_without_comments((ROOT / name).read_text(encoding="utf-8"))
@@ -1955,8 +1949,26 @@ class BuildSiteTest(unittest.TestCase):
         for href in ("report/report.pdf", "report/slides.pdf"):
             with self.subTest(href=href):
                 self.assertTrue(by_href[href]["text"].startswith(f"PDF · {size(href)}"), by_href[href]["text"])
-        note = re.search(r'<p class="material-note">(все ряды панели[^<]*)</p>', self.html).group(1)
-        self.assertEqual(note, f"все ряды панели · csv.gz · {size('results/forecast_2025.csv.gz')}, архив gzip")
+        note = re.search(r'<p class="material-note">(csv\.gz[^<]*)</p>', self.html).group(1)
+        self.assertEqual(note, f"csv.gz · {size('results/forecast_2025.csv.gz')}")
+
+    def test_materials_cards_are_a_title_and_a_format_or_size_without_descriptions(self) -> None:
+        # Карточка материала — название и формат или размер: описаний («полный текст», «коротко о главном»,
+        # «воспроизводимые прогоны») нет, что внутри — понятно по названию.
+        def size(path: str) -> str:
+            return f"{_fmt((ROOT / path).stat().st_size / 1024 ** 2, 1)}\u00a0МБ"
+
+        cards = re.findall(r'<li class="card card-link material">(.*?)</li>', self.html, re.S)
+        self.assertEqual(len(cards), 5)
+        notes = [_collapse(unescape(re.sub(r"<[^>]+>", "", re.search(r'<p class="material-note">(.*?)</p>', card, re.S).group(1))))
+                 for card in cards]
+        self.assertTrue(notes[0].startswith(f"HTML и PDF · {size('report/report.pdf')}"), notes[0])
+        self.assertTrue(notes[1].startswith(f"HTML и PDF · {size('report/slides.pdf')}"), notes[1])
+        self.assertEqual(notes[2:], ["страница", "GitHub", f"csv.gz · {size('results/forecast_2025.csv.gz')}"])
+        for gone in ("полный текст", "коротко о главном", "воспроизводимые прогоны", "все ряды панели",
+                     "расходы, прогноз и изломы"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, self.html)
 
     def test_file_size_label_uses_megabytes_and_falls_back_to_kilobytes(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -2139,21 +2151,17 @@ class ChangepointClaimTest(unittest.TestCase):
 class ChangepointCaveatsTest(unittest.TestCase):
     """Оговорки к столбикам раздела «Изломы» на таблицах, которые подставляют ветки отчёта, не встречающиеся в
     текущем прогоне: хвост без декабря, пики не одного отрезка, равные штрафы, верхняя граница «не больше».
+    Оговорка — часть предложения со строчной буквы и без точки; на странице обе стоят одной фразой.
     Таблицы синтетические, генератор не запускается."""
 
     MONTHS = [f"{2023 + i // 12}-{i % 12 + 1:02d}" for i in range(24)]
     EVENTS = ["2023-10", "2024-01", "2024-10"]
     CFG = {"realtime": {"detector": "pelt", "mode": "ratio", "events": EVENTS}, "bench": {"detectors": ["pelt"]}}
 
-    SEGMENTS = (
-        "Подсвеченные столбики — не три независимых шока, а концы трёхмесячных отрезков с декабрём внутри. "
-        "У 10 из 10 рядов с изломом в октябре 2023 есть излом и в январе 2024, ровно через 3 месяца: "
-        "это начало и конец отрезка октябрь–декабрь 2023. Октябрь 2024 открывает такой же отрезок в конце панели — "
-        "октябрь–декабрь 2024.")
+    SEGMENTS = "подсвеченные столбики — не три независимых шока, а концы трёхмесячных отрезков с декабрём внутри"
     ONE_SEGMENT = (
-        "Подсвеченные столбики — не три независимых шока. "
-        "У 10 из 10 рядов с изломом в октябре 2023 есть излом и в январе 2024, ровно через 3 месяца: "
-        "октябрь 2023 и январь 2024 — начало и конец одного отрезка, а не два независимых события.")
+        "подсвеченные столбики — не три независимых шока: октябрь 2023 и январь 2024 — начало и конец одного "
+        "отрезка, а не два независимых события")
 
     def tables(self, *, offline=1.0, selected=5.0, ceiling=0.14, together=10, alone=0, tail_breaks=(),
                false_alarm=100.0):
@@ -2198,8 +2206,8 @@ class ChangepointCaveatsTest(unittest.TestCase):
         got = self.caveats()
         self.assertEqual(got, [
             self.SEGMENTS,
-            "Штраф 1 стенд отвергает: при нём потоковый PELT тревожит на 100% нетронутых рядов. При выбранном по "
-            "стенду штрафе 5 и по полному ряду излом в любой месяц находится не больше чем у 0,2% территорий."])
+            "штраф 1 стенд отвергает: при нём потоковый PELT тревожит на 100% нетронутых рядов, а при выбранном по "
+            "стенду штрафе 5 и по полному ряду излом в любой месяц находится не больше чем у 0,2% территорий"])
 
     def test_ceiling_is_rounded_up_so_that_not_more_than_stays_true(self) -> None:
         # Максимум 0,14%: обычное округление дало бы «0,1%» — меньше самого максимума.
@@ -2222,9 +2230,10 @@ class ChangepointCaveatsTest(unittest.TestCase):
         # Из рядов с изломом в октябре 2023 в январе 2024 он есть у половины, меньше девяти десятых: отрезка нет.
         got = self.caveats(together=5, alone=5)
         self.assertEqual(len(got), 1)
-        self.assertTrue(got[0].startswith("Штраф 1 стенд отвергает"))
+        self.assertTrue(got[0].startswith("штраф 1 стенд отвергает"))
         # Девять десятых — граница включительно.
-        self.assertIn("У 9 из 10 рядов с изломом в октябре 2023", self.caveats(together=9, alone=1)[0])
+        self.assertEqual(self.caveats(together=9, alone=1)[0], self.SEGMENTS)
+        self.assertEqual(len(self.caveats(together=9, alone=1)), 2)
 
     def test_no_penalty_caveat_when_the_picture_is_taken_at_the_penalty_the_stand_chose(self) -> None:
         got = self.caveats(offline=5.0, selected=5.0)
@@ -2244,12 +2253,25 @@ class ChangepointCaveatsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_site.changepoint_caveats(tables, self.CFG, 1.0)
 
-    def test_build_breaks_puts_the_paragraphs_into_the_page_block(self) -> None:
+    def test_note_joins_the_caveats_into_one_phrase(self) -> None:
+        # Одна фраза: части через «;», первая с заглавной, в конце точка; оговорок нет — пустая строка.
+        note = build_site.changepoint_note(self.caveats())
+        self.assertEqual(note, (
+            "Подсвеченные столбики — не три независимых шока, а концы трёхмесячных отрезков с декабрём внутри; "
+            "штраф 1 стенд отвергает: при нём потоковый PELT тревожит на 100% нетронутых рядов, а при выбранном по "
+            "стенду штрафе 5 и по полному ряду излом в любой месяц находится не больше чем у 0,2% территорий."))
+        self.assertEqual(note.count(". "), 0)
+        self.assertEqual(build_site.changepoint_note([self.SEGMENTS]), self.SEGMENTS[:1].upper() + self.SEGMENTS[1:] + ".")
+        self.assertTrue(build_site.changepoint_note(self.caveats(together=5, alone=5)).startswith("Штраф 1 стенд"))
+        self.assertEqual(build_site.changepoint_note([]), "")
+
+    def test_build_breaks_puts_the_phrase_into_the_page_block(self) -> None:
         tables = self.tables()
         tables["cp_summary"] = self._summary_for_the_claim(tables["cp_summary"])
         built = build_site.build_breaks(tables, {**self.CFG, "bench": {"detectors": ["pelt", "cusum"]}}, 1.0)
-        self.assertEqual(built.caveats_html.count("<p>"), 2)
-        self.assertTrue(built.caveats_html.startswith("<p>Подсвеченные столбики"))
+        self.assertNotIn("<p>", built.caveats_html)
+        self.assertTrue(built.caveats_html.startswith("Подсвеченные столбики"))
+        self.assertTrue(built.caveats_html.endswith("территорий."))
 
     @staticmethod
     def _summary_for_the_claim(summary: pd.DataFrame) -> pd.DataFrame:

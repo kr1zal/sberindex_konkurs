@@ -303,6 +303,12 @@
       return buttons[step].querySelector(".step-text").textContent.replace(/\s+/g, " ").trim();
     }
 
+    // Видимой подписи под графиком нет: название шага и его строка — подпись графика для программ чтения
+    // с экрана и текст скрытой живой области, которая объявляет смену шага.
+    function stepLabel(step) {
+      const title = buttons[step].querySelector(".step-title").textContent.replace(/\s+/g, " ").trim();
+      return `${title}: ${stepText(step)}`;
+    }
 
     function select(step, animateMove) {
       const target = states[step];
@@ -310,9 +316,9 @@
       if (running) running.cancel();
       active = step;
       buttons.forEach((button, index) => button.setAttribute("aria-pressed", String(index === step)));
-      const captionText = buttons[step].getAttribute("data-caption");
-      caption.textContent = captionText;
-      plot.setAttribute("aria-label", captionText);
+      const label = stepLabel(step);
+      caption.textContent = label;
+      plot.setAttribute("aria-label", label);
       text.textContent = stepText(step);
       linesLayer.classList.toggle("is-faded", target.faded);
       medianLayer.style.opacity = target.medianVisible ? "1" : "0";
@@ -589,10 +595,10 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 05 · Стенд: три муниципалитета, мини-график, ссылка на стенд с выбранным
+  // 05 · Прогноз по муниципалитету: три муниципалитета, мини-график, ссылка на страницу прогноза с выбранным
   // ---------------------------------------------------------------------------
 
-  // Подпись пунктира короткая: что это за линия, объясняет лид блока; полное название — заголовок столбца стенда.
+  // Подпись пунктира короткая; полное название линии — в заголовке столбца таблицы на странице прогноза.
   const KNOWN_LABEL = "доли × известный федеральный индекс";
 
   function standUrl(seriesId) {
