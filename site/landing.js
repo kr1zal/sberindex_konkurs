@@ -6,9 +6,17 @@
  * Библиотек нет: SVG собирается вручную. Положение линий — в единицах viewBox 0…1000,
  * подписи и точки — в процентах блока графика (раскладка — site/landing.css).
  * При prefers-reduced-motion всё показывается сразу, без анимаций.
+ *
+ * Всё, что не касается страницы (шкалы, подписи оси, разбор чисел, ранжирование поиска), живёт
+ * в site/landing-lib.js и подключается перед этим файлом: там его проверяют тесты через node.
  */
 (function () {
   "use strict";
+
+  const {
+    formatInt, pluralRu, niceScale, formatTick, percentTick, createTickSets, historyKeep,
+    numberTokens, countedText, rowsFromIndex, searchRows, pickTarget,
+  } = LandingLib;
 
   let data;
   try {
@@ -50,24 +58,6 @@
     return element;
   }
 
-  // Неразрывный пробел в разрядах, как в отчёте.
-  function groupDigits(digits) {
-    return digits.replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
-  }
-
-  function formatInt(value) {
-    return groupDigits(String(Math.round(value)));
-  }
-
-  function pluralRu(n, one, few, many) {
-    const m = Math.abs(Math.trunc(n)) % 100;
-    if (m >= 11 && m <= 14) return many;
-    const last = m % 10;
-    if (last === 1) return one;
-    if (last >= 2 && last <= 4) return few;
-    return many;
-  }
-
   // «ГГГГ-ММ» → «янв ГГГГ».
   function monthLabel(ym) {
     return `${MONTH_ABBR[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
@@ -82,23 +72,6 @@
       if (value > max) max = value;
     }));
     return { min, max };
-  }
-
-  // «Красивая» шкала: шаг из ряда 1, 2, 2,5, 5 × 10^k, границы кратны шагу и охватывают
-  // все значения; ticks — отметки оси внутри границ.
-  function niceScale(min, max, wanted) {
-    const span = max - min || Math.abs(max) || 1;
-    const raw = span / wanted;
-    const power = Math.pow(10, Math.floor(Math.log10(raw)));
-    const fraction = raw / power;
-    const step = (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 2.5 ? 2.5 : fraction <= 5 ? 5 : 10) * power;
-    const lo = Math.floor(min / step + 1e-9) * step;
-    const hi = Math.ceil(max / step - 1e-9) * step;
-    const ticks = [];
-    for (let tick = lo; tick <= hi + step * 1e-6; tick += step) {
-      ticks.push(Math.round(tick * 1e6) / 1e6);
-    }
-    return { lo, hi, ticks };
   }
 
   const spacedX = (count) => Array.from({ length: count }, (_, i) => (i / (count - 1)) * VIEW);
@@ -138,25 +111,44 @@
     return { cancel() { cancelled = true; cancelAnimationFrame(frame); } };
   }
 
-  // Подписи оси: новый набор проявляется, прежний гаснет и убирается.
+  // Подписи оси: новый набор проявляется, все прежние гаснут и убираются. Какие наборы живые,
+  // какие уходят, помнит модель (LandingLib.createTickSets): так быстрые клики подряд не оставляют
+  // на оси второй шкалы, а элементы находятся по номеру набора, а не по порядку в разметке.
+  const tickModels = new WeakMap();
+  const TICK_FADE_MS = 450;
+
   function setTicks(box, scale, label, swap) {
-    const previous = box.querySelector(".tick-set");
+    if (!tickModels.has(box)) tickModels.set(box, createTickSets());
+    const model = tickModels.get(box);
+    const animated = Boolean(swap) && !reducedMotion();
+    const plan = model.show(animated);
+    const setOf = (id) => box.querySelector(`.tick-set[data-set="${id}"]`);
+    const drop = (id) => {
+      const old = setOf(id);
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+    };
+
     const set = node("div", "tick-set", null, box);
+    set.dataset.set = String(plan.added);
     scale.ticks.forEach((value) => {
       const tick = node("div", "tick", null, set);
       tick.style.top = `${percentTop(value, scale).toFixed(2)}%`;
       node("span", null, label(value), tick);
     });
-    if (!previous) return;
-    if (!swap || reducedMotion()) {
-      box.removeChild(previous);
-      return;
-    }
+    plan.removed.forEach(drop);
+    if (!animated) return;
+
     set.classList.add("is-entering");
-    previous.classList.add("is-leaving");
     // Два кадра: стартовое состояние должно успеть примениться, иначе проявления не будет.
     requestAnimationFrame(() => requestAnimationFrame(() => set.classList.remove("is-entering")));
-    setTimeout(() => { if (previous.parentNode) previous.parentNode.removeChild(previous); }, 450);
+    plan.leaving.forEach((id) => {
+      const old = setOf(id);
+      if (old) old.classList.add("is-leaving");
+      setTimeout(() => {
+        model.finish(id);
+        drop(id);
+      }, TICK_FADE_MS);
+    });
   }
 
   // Подписи месяцев по оси X: у левого края, в заданной точке и у правого.
@@ -228,43 +220,8 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Пять чисел: при появлении в окне — счёт от нуля, в конце — исходный текст как есть
+  // Четыре числа в карточках: при появлении в окне — счёт от нуля, в конце — исходный текст
   // ---------------------------------------------------------------------------
-
-  // Число в тексте: разряды через неразрывный пробел, десятичная запятая. Диапазон
-  // «от–до%» даёт два числа, «N рядов × M месяцев» — тоже два.
-  const NUMBER_PATTERN = /\d+(?:\u00a0\d{3})*(?:,\d+)?/g;
-
-  function numberTokens(text) {
-    const tokens = [];
-    NUMBER_PATTERN.lastIndex = 0;
-    let match = NUMBER_PATTERN.exec(text);
-    while (match) {
-      const raw = match[0];
-      const comma = raw.indexOf(",");
-      tokens.push({
-        start: match.index,
-        end: match.index + raw.length,
-        value: parseFloat(raw.replace(/\u00a0/g, "").replace(",", ".")),
-        digits: comma >= 0 ? raw.length - comma - 1 : 0,
-        grouped: raw.indexOf(NBSP) >= 0,
-      });
-      match = NUMBER_PATTERN.exec(text);
-    }
-    return tokens;
-  }
-
-  function countedText(original, tokens, progress) {
-    let out = "";
-    let position = 0;
-    tokens.forEach((token) => {
-      const parts = (token.value * progress).toFixed(token.digits).split(".");
-      out += original.slice(position, token.start);
-      out += (token.grouped ? groupDigits(parts[0]) : parts[0]) + (parts.length > 1 ? `,${parts[1]}` : "");
-      position = token.end;
-    });
-    return out + original.slice(position);
-  }
 
   function countUp(element) {
     const original = element.textContent;
@@ -277,8 +234,10 @@
     });
   }
 
+  // Строка панели («N рядов × M месяцев») не считается: на полпути формы слов не пересчитываются,
+  // и выходило «946 рядов × 11 месяца». Считаются числа карточек.
   function initCounters() {
-    const numbers = document.querySelectorAll(".stat-number");
+    const numbers = document.querySelectorAll(".stat:not(.stat-panel) .stat-number");
     if (!numbers.length || reducedMotion() || !("IntersectionObserver" in window)) return;
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
@@ -308,7 +267,6 @@
     const count = story.months.length;
     const xs = spacedX(count);
     const paths = story.series.map(() => svgNode("path", {}, linesLayer));
-    const percent = (value) => `${Math.round(value * 100)}%`;
 
     // Шаг 1 — ряды, шаг 2 — те же ряды бледнеют и видна медиана, шаг 3 — каждый ряд,
     // делённый на медиану, и ровная линия на единице: на ней все ряды были бы, если бы
@@ -362,7 +320,7 @@
       text.textContent = stepText(step);
       linesLayer.classList.toggle("is-faded", target.faded);
       medianLayer.style.opacity = target.medianVisible ? "1" : "0";
-      setTicks(ticksBox, target.scale, percent, animateMove);
+      setTicks(ticksBox, target.scale, (value) => percentTick(value, target.scale.step), animateMove);
       running = animate(animateMove ? 800 : 0, (progress) => {
         draw(mix(from, target, easeOut(progress, 4)));
       }, () => {
@@ -388,7 +346,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 02 · Пять горизонтов: полосы MAE четырёх моделей
+  // 02 · Горизонты: полосы MAE четырёх моделей
   // ---------------------------------------------------------------------------
 
   function initHorizons(horizons) {
@@ -441,73 +399,38 @@
   // 03 · Проверка фактом: история, прогноз первого этапа, два правила, факт по месяцам
   // ---------------------------------------------------------------------------
 
+  // Шаг между кружками месяцев проверки, px, не меньше этого: кружок — 11 px, и при меньшем шаге
+  // на телефоне они наползали друг на друга. Чтобы шаг был таким, история на узком графике короче
+  // (LandingLib.historyKeep); на широком остаётся вся.
+  const FACT_MIN_DOT_STEP = 14;
+  // Зазор между подписями оси лет, px.
+  const FACT_LABEL_GAP = 10;
+
   function initFact(fact) {
     const plot = byId("fact-plot");
     const slider = byId("fact-k");
     if (!plot || !slider) return;
 
-    const history = fact.history;
     const check = fact.check;
-    const nHistory = history.values.length;
     const nCheck = check.months.length;
-    const total = nHistory + nCheck;
-    const months = history.months.concat(check.months);
-    const xs = spacedX(total);
+    const nFull = fact.history.values.length;
     const rules = [
       { key: "naive", line: byId("fact-r1-line"), toggle: byId("fact-r1"), text: byId("fact-r1-text") },
       { key: "seasonal_naive", line: byId("fact-r2-line"), toggle: byId("fact-r2"), text: byId("fact-r2-text") },
     ];
-
-    const { min, max } = extent([
-      history.values, check.actual, check.forecast.two_stage, check.forecast.naive, check.forecast.seasonal_naive,
-    ]);
-    const scale = niceScale(min, max, 5);
-    const left = (index) => `${((index / (total - 1)) * 100).toFixed(2)}%`;
-    const yPoints = (values) => values.map((v) => yOf(v, scale));
-
-    // Прогноз и правила продолжают историю от её последней точки.
-    function tail(values) {
-      const lastX = xs[nHistory - 1];
-      const lastY = yOf(history.values[nHistory - 1], scale);
-      return `M${lastX.toFixed(1)},${lastY.toFixed(1)}${linePath(yPoints(values), xs.slice(nHistory)).replace(/^M/, "L")}`;
-    }
-
-    byId("fact-unit").textContent = `Федеральный агрегат, ${fact.unit}`;
-    setTicks(byId("fact-ticks"), scale, formatInt, false);
-    byId("fact-hist").setAttribute("d", linePath(yPoints(history.values), xs.slice(0, nHistory)));
-    byId("fact-fc").setAttribute("d", tail(check.forecast.two_stage));
-    byId("fact-r1-line").setAttribute("d", tail(check.forecast.naive));
-    byId("fact-r2-line").setAttribute("d", tail(check.forecast.seasonal_naive));
-    byId("fact-end").style.left = left(nHistory - 1);
-
-    const years = byId("fact-years");
-    years.textContent = "";
-    months.forEach((month, index) => {
-      if (month.slice(5, 7) !== "01") return;
-      const span = node("span", null, month.slice(0, 4), years);
-      span.style.left = left(index);
-    });
-
-    plot.setAttribute("aria-label",
-      `График федерального агрегата: история с ${monthLabel(history.months[0])} по ${monthLabel(history.months[nHistory - 1])}, ` +
-      `прогноз первого этапа и факт за ${check.months.length} ${pluralRu(check.months.length, "месяц", "месяца", "месяцев")} ${check.months[0].slice(0, 4)} года`);
-
     const dotsBox = byId("fact-dots");
-    const dots = check.actual.map((value, index) => {
-      const dot = node("div", "dot is-off", null, dotsBox);
-      dot.style.left = left(nHistory + index);
-      dot.style.top = `${percentTop(value, scale).toFixed(2)}%`;
-      return dot;
-    });
-
     const cursor = byId("fact-cursor");
     const readout = { month: byId("ro-month"), fc: byId("ro-fc"), act: byId("ro-act"), err: byId("ro-err") };
     const unit = `${NBSP}млрд${NBSP}₽`;
 
+    let view = null; // раскладка под текущую ширину графика
+    let shownMonth = nCheck;
+
     function showMonth(k) {
+      shownMonth = k;
       const i = k - 1;
-      cursor.style.left = left(nHistory + i);
-      dots.forEach((dot, index) => dot.classList.toggle("is-off", index >= k));
+      cursor.style.left = view.left(view.nHistory + i);
+      view.dots.forEach((dot, index) => dot.classList.toggle("is-off", index >= k));
       const month = check.months[i];
       const name = `${MONTH_NOM[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
       const fc = check.forecast_rub.two_stage[i] + unit;
@@ -520,12 +443,85 @@
       slider.setAttribute("aria-valuetext", `${name}: прогноз ${fc}, факт ${act}, ошибка месяца ${err}`);
     }
 
+    // Линии, шкала, подписи и кружки для keep последних месяцев истории. Данных генератора это
+    // не меняет: на узком экране показывается их конец.
+    function layout(keep) {
+      const skip = nFull - keep;
+      const history = { months: fact.history.months.slice(skip), values: fact.history.values.slice(skip) };
+      const nHistory = keep;
+      const total = nHistory + nCheck;
+      const months = history.months.concat(check.months);
+      const xs = spacedX(total);
+
+      const { min, max } = extent([
+        history.values, check.actual, check.forecast.two_stage, check.forecast.naive, check.forecast.seasonal_naive,
+      ]);
+      const scale = niceScale(min, max, 5);
+      const left = (index) => `${((index / (total - 1)) * 100).toFixed(2)}%`;
+      const yPoints = (values) => values.map((v) => yOf(v, scale));
+
+      // Прогноз и правила продолжают историю от её последней точки.
+      function tail(values) {
+        const lastX = xs[nHistory - 1];
+        const lastY = yOf(history.values[nHistory - 1], scale);
+        return `M${lastX.toFixed(1)},${lastY.toFixed(1)}${linePath(yPoints(values), xs.slice(nHistory)).replace(/^M/, "L")}`;
+      }
+
+      setTicks(byId("fact-ticks"), scale, (value) => formatTick(value, scale.step), false);
+      byId("fact-hist").setAttribute("d", linePath(yPoints(history.values), xs.slice(0, nHistory)));
+      byId("fact-fc").setAttribute("d", tail(check.forecast.two_stage));
+      byId("fact-r1-line").setAttribute("d", tail(check.forecast.naive));
+      byId("fact-r2-line").setAttribute("d", tail(check.forecast.seasonal_naive));
+      byId("fact-end").style.left = left(nHistory - 1);
+
+      const years = byId("fact-years");
+      years.textContent = "";
+      months.forEach((month, index) => {
+        if (month.slice(5, 7) !== "01") return;
+        const span = node("span", null, month.slice(0, 4), years);
+        span.style.left = left(index);
+      });
+      // История на узком графике начинается не с января: левый край подписан месяцем, иначе не
+      // видно, с чего она начинается. Подпись, которой не хватает места до ближайшей, не ставится.
+      if (history.months[0].slice(5, 7) !== "01") {
+        const first = node("span", null, monthLabel(history.months[0]), years);
+        first.style.left = "0";
+        const next = Array.from(years.children).filter((span) => span !== first).map((span) => span.offsetLeft);
+        if (next.length && first.offsetWidth + FACT_LABEL_GAP > Math.min.apply(null, next)) years.removeChild(first);
+      }
+
+      plot.setAttribute("aria-label",
+        `График федерального агрегата: история с ${monthLabel(history.months[0])} по ${monthLabel(history.months[nHistory - 1])}, ` +
+        `прогноз первого этапа и факт за ${nCheck} ${pluralRu(nCheck, "месяц", "месяца", "месяцев")} ${check.months[0].slice(0, 4)} года`);
+
+      dotsBox.textContent = "";
+      const dots = check.actual.map((value, index) => {
+        const dot = node("div", "dot is-off", null, dotsBox);
+        dot.style.left = left(nHistory + index);
+        dot.style.top = `${percentTop(value, scale).toFixed(2)}%`;
+        return dot;
+      });
+
+      view = { keep, nHistory, left, dots };
+      showMonth(shownMonth);
+    }
+
+    const keepFor = () => historyKeep(nFull, nCheck, plot.clientWidth, FACT_MIN_DOT_STEP);
+
+    byId("fact-unit").textContent = `Федеральный агрегат, ${fact.unit}`;
     slider.min = "1";
     slider.max = String(nCheck);
     slider.step = "1";
     slider.value = String(nCheck);
     slider.addEventListener("input", () => showMonth(Number(slider.value)));
-    showMonth(nCheck);
+    layout(keepFor());
+    // Ширина графика меняется при повороте телефона и изменении окна: число точек истории — вместе с ней.
+    if ("ResizeObserver" in window) {
+      new ResizeObserver(() => {
+        const keep = keepFor();
+        if (keep !== view.keep) layout(keep);
+      }).observe(plot);
+    }
 
     rules.forEach((rule) => {
       const name = `«${fact.rule_names[rule.key]}»`;
@@ -671,32 +667,9 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Поиск «Покажите мой город»: список рядов из demo/data/index.json — при первом фокусе
+  // Поиск «Покажите мой город»: список рядов из demo/data/index.json — при первом фокусе.
+  // Ранжирование — LandingLib.searchRows, то же, что на стенде.
   // ---------------------------------------------------------------------------
-
-  const normalize = (s) => s.toLowerCase().replace(/ё/g, "е");
-
-  // Ранжирование как на стенде (demo/demo.js): название с начала запроса, затем слово
-  // названия с начала запроса, затем любое вхождение; внутри яруса — по алфавиту.
-  // Запрос ищется и в названии, и в регионе.
-  function searchRows(rows, query, limit) {
-    const q = normalize(query.trim());
-    if (!q) return { matches: [], total: 0 };
-    const words = q.split(/\s+/).filter(Boolean);
-    const first = [];
-    const second = [];
-    const third = [];
-    rows.forEach((row) => {
-      if (!words.every((word) => row.haystack.indexOf(word) >= 0)) return;
-      if (row.name.indexOf(q) === 0) first.push(row);
-      else if (row.name.split(/\s+/).some((word) => word.indexOf(q) === 0)) second.push(row);
-      else third.push(row);
-    });
-    const collator = new Intl.Collator("ru");
-    const byName = (a, b) => collator.compare(a.id, b.id);
-    const all = first.sort(byName).concat(second.sort(byName), third.sort(byName));
-    return { matches: all.slice(0, limit), total: all.length };
-  }
 
   function initSearch() {
     const input = byId("mo-q");
@@ -707,6 +680,7 @@
     if (!input || !list || !go || !note) return;
 
     const LIMIT = 6;
+    const STAND = "demo/";
     const defaultNote = note.textContent;
     let rows = null;
     let loading = null;
@@ -725,12 +699,7 @@
             return response.json();
           })
           .then((index) => {
-            rows = index.series.map((entry) => ({
-              id: entry[0],
-              region: entry[1],
-              name: normalize(entry[0]),
-              haystack: normalize(entry[1] ? `${entry[0]} ${entry[1]}` : entry[0]),
-            }));
+            rows = rowsFromIndex(index.series);
             failed = false;
             // Подсказка о сбое устарела: список загрузился при повторной попытке.
             if (failureShown) resetNote();
@@ -747,13 +716,36 @@
       return loading;
     }
 
+    // Куда ведёт кнопка «Открыть прогноз»: выбранный в списке ряд, иначе подсвеченная подсказка,
+    // иначе первое совпадение набранного запроса; пустой запрос и запрос без совпадений — стенд
+    // без выбора, поиск там покажет сам стенд.
+    function targetUrl() {
+      const row = selected || pickTarget(rows, input.value, active >= 0 ? options[active] : null);
+      return row ? standUrl(row.id) : STAND;
+    }
+
+    // Адрес кнопки держится в ссылке заранее: так он верен и при открытии в новой вкладке.
+    function syncGo() {
+      go.href = targetUrl();
+    }
+
+    // Переход по кнопке или клавише Enter. Запрос уже набран, а список ещё грузится (быстрый
+    // набор, поле заполнено браузером после возврата на страницу): ждём список и идём по нему.
+    function openStand() {
+      if (rows || selected || !input.value.trim()) {
+        window.location.href = targetUrl();
+        return;
+      }
+      load().then(() => { window.location.href = targetUrl(); }, () => { window.location.href = STAND; });
+    }
+
     function showFailure() {
       closeList();
       failureShown = true;
       note.textContent = "";
       note.appendChild(document.createTextNode("Список муниципалитетов не загрузился. Найти свой город можно "));
       const link = node("a", null, "на стенде", note);
-      link.href = "demo/";
+      link.href = STAND;
       note.appendChild(document.createTextNode("."));
     }
 
@@ -765,6 +757,8 @@
     function openList() {
       list.hidden = false;
       input.setAttribute("aria-expanded", "true");
+      // Поле стоит низко, и список выходит за нижний край окна: докручиваем ровно настолько, чтобы он влез.
+      list.scrollIntoView({ block: "nearest" });
     }
 
     function closeList() {
@@ -772,6 +766,7 @@
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
       active = -1;
+      syncGo();
     }
 
     function setActive(index) {
@@ -785,6 +780,7 @@
       } else {
         input.removeAttribute("aria-activedescendant");
       }
+      syncGo();
     }
 
     function statusRow(text) {
@@ -800,7 +796,6 @@
       failureShown = false;
       input.value = row.id;
       closeList();
-      go.href = standUrl(row.id);
       note.textContent = "";
       note.appendChild(document.createTextNode("Выбран: "));
       node("span", "picked", row.id, note);
@@ -809,7 +804,7 @@
       link.href = standUrl(row.id);
     }
 
-    function render() {
+    function renderList() {
       const query = input.value;
       if (!query.trim()) {
         list.textContent = "";
@@ -853,12 +848,24 @@
       openList();
     }
 
+    function render() {
+      renderList();
+      syncGo();
+    }
+
+    // Список загрузился: раскрывается он, только если поле всё ещё в фокусе — иначе медленная сеть
+    // открыла бы подсказки у человека, который уже ушёл с поля.
+    function afterLoad() {
+      if (document.activeElement === input) render();
+      else syncGo();
+    }
+
     // mousedown до click: иначе фокус успевает уйти с поля раньше, чем сработает выбор.
     list.addEventListener("mousedown", (event) => event.preventDefault());
 
     input.addEventListener("focus", () => {
       // Первый фокус загружает список; после отказа каждый следующий пробует снова.
-      load().then(() => { if (input.value.trim() && document.activeElement === input) render(); }, () => {});
+      load().then(afterLoad, () => {});
     });
 
     // Уход с поля (Tab) закрывает список; выбор мышью поле не покидает — см. mousedown выше.
@@ -867,7 +874,6 @@
     input.addEventListener("input", () => {
       if (selected) {
         selected = null;
-        go.href = "demo/";
         resetNote();
       }
       if (!rows && failed) {
@@ -875,7 +881,7 @@
         return;
       }
       render();
-      if (!rows) load().then(render, () => {});
+      if (!rows) load().then(afterLoad, () => {});
     });
 
     input.addEventListener("keydown", (event) => {
@@ -890,12 +896,26 @@
         if (!list.hidden && options.length) {
           event.preventDefault();
           choose(options[active >= 0 ? active : 0]);
-        } else if (selected) {
-          window.location.href = standUrl(selected.id);
+        } else if (input.value.trim()) {
+          // Список закрыт или подсказок нет: то же, что кнопка «Открыть прогноз».
+          event.preventDefault();
+          openStand();
         }
-      } else if (event.key === "Escape") {
-        closeList();
       }
+    });
+
+    go.addEventListener("click", (event) => {
+      if (rows || selected || !input.value.trim()) {
+        syncGo();
+        return;
+      }
+      event.preventDefault();
+      openStand();
+    });
+
+    // Escape закрывает список всегда, где бы ни стоял фокус.
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !list.hidden) closeList();
     });
 
     document.addEventListener("click", (event) => {
