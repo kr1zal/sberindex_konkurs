@@ -39,10 +39,10 @@ scripts/crawl_news.py             выкачка заголовков регио
 scripts/forecast_forward.py       прогноз на 2025 год по 2 028 МО и проверка федерального агрегата по факту → results/forecast_2025*.csv
 scripts/export_results.py         снимок .csv.gz пяти крупных results/ для публикации (per_series, horizons_per_series, forecast_2025, cp_bench, cp_v1/cp_bench); --check сверяет снимки с текущими CSV
 scripts/build_site.py   генератор главной страницы и данных демонстрационного стенда → index.html, demo/data/*.json
-site/                   шаблон главной (index.template.html), общая тема (site.css), раскладка главной (landing.css) и её скрипт landing.js: графики, счёт чисел, поиск; данные берёт из <script id="landing-data"> в index.html
+site/                   шаблон главной (index.template.html), общая тема (site.css — её подключает и стенд: шрифты, токены двух тем, цвета графиков, шапка, поле поиска, чипы, подвал), раскладка главной (landing.css) и её скрипт landing.js: графики, счёт чисел, поиск; данные берёт из <script id="landing-data"> в index.html
 site/fonts/             шрифты Unbounded, Onest, JetBrains Mono (woff2, кириллица и латиница) и тексты их лицензий OFL — страница не ходит за шрифтами в сеть
 index.html              главная страница GitHub Pages — сгенерирована build_site.py, коммитится
-demo/                   демонстрационный стенд «покажите мой город»: index.html, demo.js, linechart.js, demo.css и данные data/ (генерирует build_site.py)
+demo/                   демонстрационный стенд «покажите мой город» в стиле главной: index.html, demo.js (поиск, быстрые кнопки, адрес ?mo=, тексты), linechart.js (свои SVG-графики), demo.css (раскладка стенда) и данные data/ (генерирует build_site.py)
 data/raw/               панель СберИндекса (parquet)
 data/news/              агрегаты новостного корпуса (monthly.parquet, national.parquet); headlines.parquet — только локально
 data/reference/         справочник МО, ключевая ставка
@@ -148,6 +148,10 @@ python -m venv .venv
 и падает, если любой из них больше порога модуля (`build_site.MAX_DEMO_BYTES`,
 `build_site.MAX_LANDING_BYTES`). Числа на главной — только подстановки шаблона или
 данные `landing-data`; в `site/landing.js` и в шаблоне вписанных чисел нет (проверяют тесты).
+То же для стенда: в `demo/index.html`, `demo/demo.js` и `demo/linechart.js` чисел данных нет,
+они приходят из `demo/data/`. Быстрые кнопки под полем поиска — константа
+`build_site.STAND_QUICK_MO`, поле `quick` файла `index.json`; цвета рядов графика стенд
+берёт из `site/site.css`, своих `--chart-*` в `demo/demo.css` нет (тоже под тестом).
 
 Перед первым прогоном моделей с длинными рядами:
 
