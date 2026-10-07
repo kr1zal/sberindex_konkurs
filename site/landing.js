@@ -741,6 +741,7 @@
     const STAND = "demo/";
     const defaultNote = note.textContent;
     let rows = null;
+    let defaultMo = null; // index.json::default_mo — пример, который открывает кнопка без совпадений
     let loading = null;
     let failed = false;
     let failureShown = false;
@@ -758,6 +759,7 @@
           })
           .then((index) => {
             rows = rowsFromIndex(index.series, index.quick, index.mean_unit);
+            defaultMo = index.default_mo;
             failed = false;
             // Подсказка о сбое устарела: список загрузился при повторной попытке.
             if (failureShown) resetNote();
@@ -787,11 +789,16 @@
     }
 
     // Строка под полем говорит, что откроет кнопка, пока ряд не выбран из списка: набранный запрос
-    // без выбора ведёт на первое совпадение, и узнавать об этом уже на стенде поздно. У выбранного
+    // без выбора ведёт на первое совпадение, и узнавать об этом уже на странице прогноза поздно. Запрос без
+    // совпадений ведёт на пример — это тоже сказано, а не возвращается подпись пустого поля. У выбранного
     // ряда (choose) и при сбое загрузки (showFailure) у строки свой текст.
     function showTarget(row) {
       if (selected || failureShown) return;
-      const text = row && input.value.trim() ? `Откроется: ${row.id} · ${regionLabel(row)}` : defaultNote;
+      let text = defaultNote;
+      if (input.value.trim()) {
+        if (row) text = `Откроется: ${row.id} · ${regionLabel(row)}`;
+        else if (rows) text = `Совпадений нет — откроется пример: ${defaultMo}`;
+      }
       if (note.textContent !== text) note.textContent = text;
     }
 

@@ -1,9 +1,10 @@
-"""Скрипты стенда: ранжирование поиска и ключ изломов в легенде графика.
+"""Скрипты страницы прогноза и главной: ранжирование поиска, поле поиска и ключ изломов в легенде графика.
 
-Поиск стенда (`demo/demo.js::searchMunicipalities`) и поиск на обложке главной
+Поиск страницы прогноза (`demo/demo.js::searchMunicipalities`) и поиск на обложке главной
 (`site/landing-lib.js::searchRows`) — две копии одного правила, и подсказки у них обязаны совпадать.
-Файл стенда целиком загружается в пустом контексте с заглушками страницы: настоящий код, а не его
-копия в тесте. Без node проверки поиска пропускаются.
+Файл страницы целиком загружается в пустом контексте с заглушками страницы: настоящий код, а не его
+копия в тесте. Поле поиска проверяется на заглушке DOM, у которой обработчики вызываются событиями.
+Без node проверки поиска пропускаются.
 """
 from __future__ import annotations
 
@@ -58,6 +59,54 @@ def run_both(queries: list[str], limit: int) -> dict:
          str(ROOT / "demo" / "data" / "index.json"), json.dumps({"queries": queries, "limit": limit})],
         capture_output=True, text=True, check=True, timeout=120,
     )
+    return json.loads(done.stdout)
+
+
+# Страница, которой нет: ровно столько DOM, чтобы скрипт запустился, а его обработчики можно было вызвать событиями.
+# Скрипт настоящий, а не копия его логики в тесте; всё, чего заглушка не умеет, скрипты страниц ловят сами
+# (каждый блок главной запускается под try).
+FAKE_DOM = r"""
+const vm = require('vm'), fs = require('fs');
+const noop = () => {};
+function makeElement(id) {
+  return {
+    id, value: "", textContent: "", hidden: false, className: "", innerHTML: "", href: "",
+    style: {}, dataset: {}, listeners: {}, attrs: {}, calls: [],
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    addEventListener(type, handler) { (this.listeners[type] = this.listeners[type] || []).push(handler); },
+    setAttribute(name, value) { this.attrs[name] = String(value); },
+    getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; },
+    removeAttribute(name) { delete this.attrs[name]; },
+    appendChild(child) { return child; }, append: noop, focus: noop, scrollIntoView: noop,
+    querySelector: () => null, querySelectorAll: () => [], closest: () => null, contains: () => false,
+    select() { this.calls.push('select'); },
+    setSelectionRange(start, end) { this.calls.push(`range ${start}-${end}`); },
+  };
+}
+const elements = {};
+const document = {
+  activeElement: null,
+  getElementById: (id) => elements[id] || (elements[id] = makeElement(id)),
+  createElement: (tag) => makeElement(tag),
+  createTextNode: (text) => ({ textContent: text }),
+  querySelectorAll: () => [],
+  addEventListener: noop,
+};
+function fire(target, type, extra) {
+  const event = Object.assign({ defaultPrevented: false, target, preventDefault() { this.defaultPrevented = true; } }, extra);
+  (target.listeners[type] || []).forEach((handler) => handler(event));
+  return event;
+}
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const input = JSON.parse(process.argv[1]);
+"""
+
+
+def run_page(body: str, payload: object) -> object:
+    """Выполняет `body` над заглушкой страницы (`FAKE_DOM`); `input` — payload, результат — через `return`."""
+    script = FAKE_DOM + "(async () => {" + body + "})().then((result) => console.log(JSON.stringify(result)));"
+    done = subprocess.run(["node", "-e", script, json.dumps(payload)], capture_output=True, text=True, check=True,
+                          timeout=60)
     return json.loads(done.stdout)
 
 
@@ -139,6 +188,171 @@ class SearchRankingTest(unittest.TestCase):
         demo = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
         body = re.search(r"function openListbox\(\) \{.*?\n  \}\n", demo, re.S).group(0)
         self.assertIn('listbox.scrollIntoView({ block: "nearest" })', body)
+
+
+@unittest.skipUnless(shutil.which("node"), "для скриптов стенда нужен node")
+class SearchFieldSelectionTest(unittest.TestCase):
+    """Страница прогноза: в заполненном поле фокус выделяет имя, и набор заменяет его, а не дописывается к нему
+    («городской округ город Орёлказан», и список отвечал «Ничего не нашлось»). Выделение мышью не теряется."""
+
+    SCRIPT = """
+        const page = vm.createContext({ document, window: {}, console: { error: noop }, LineChart: {}, setTimeout,
+          fetch: () => Promise.reject(new Error('в тесте нет сети')) });
+        vm.runInContext(fs.readFileSync(input.demo, 'utf8'), page);
+        page.index = { n_series: input.series.length };
+        page.index.searchRows = vm.runInContext('buildSearchIndex', page)(input.series, [], input.unit);
+        vm.runInContext('setupCombobox(index)', page);
+        const field = document.getElementById('mo-search');
+        const leave = () => { document.activeElement = null; fire(field, 'blur'); };
+        field.value = 'городской округ город Орёл';
+        const out = {};
+
+        // Щелчок мышью по полю без фокуса: mousedown, focus, mouseup в той же точке. Имя выделяется на mouseup, и
+        // щелчок каретку поверх выделения не ставит. Выделение, оставшееся от прошлого раза, щелчок не отменяет.
+        field.selectionStart = 0;
+        field.selectionEnd = 26;
+        fire(field, 'mousedown', { clientX: 300, clientY: 200 });
+        document.activeElement = field;
+        fire(field, 'focus');
+        out.onFocus = field.calls.slice();
+        out.clickUp = fire(field, 'mouseup', { clientX: 301, clientY: 200 }).defaultPrevented;
+        out.afterClick = field.calls.slice();
+        // Следующий щелчок по полю, где фокус уже есть: каретка как обычно.
+        field.calls.length = 0;
+        fire(field, 'mousedown', { clientX: 300, clientY: 200 });
+        out.secondUp = fire(field, 'mouseup', { clientX: 300, clientY: 200 }).defaultPrevented;
+        out.afterSecond = field.calls.slice();
+
+        // Протяжка мышью, начатая в поле без фокуса: выделение читателя остаётся, имя целиком не выделяется.
+        leave();
+        field.calls.length = 0;
+        fire(field, 'mousedown', { clientX: 300, clientY: 200 });
+        document.activeElement = field;
+        fire(field, 'focus');
+        out.dragUp = fire(field, 'mouseup', { clientX: 360, clientY: 202 }).defaultPrevented;
+        out.afterDrag = field.calls.slice();
+        delete field.selectionStart;
+        delete field.selectionEnd;
+
+        // Фокус клавишей Tab: mousedown не было, имя выделяется сразу.
+        leave();
+        field.calls.length = 0;
+        document.activeElement = field;
+        fire(field, 'focus');
+        out.byTab = field.calls.slice();
+
+        // Мышь отпустили вне поля (mouseup поля не было), фокус ушёл: признак щелчка не залипает, и следующий
+        // фокус с клавиатуры выделяет имя.
+        leave();
+        fire(field, 'mousedown', { clientX: 300, clientY: 200 });
+        document.activeElement = field;
+        fire(field, 'focus');
+        leave();
+        field.calls.length = 0;
+        document.activeElement = field;
+        fire(field, 'focus');
+        out.afterStaleClick = field.calls.slice();
+
+        // Пустое поле: выделять нечего, и список не открывается.
+        leave();
+        field.value = '';
+        field.calls.length = 0;
+        document.activeElement = field;
+        fire(field, 'focus');
+        out.empty = field.calls.slice();
+        out.listHidden = document.getElementById('mo-listbox').hidden;
+        return out;
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        series = [["городской округ город Орёл", "Орловская область", "54-701-000-000", 0]]
+        cls.got = run_page(cls.SCRIPT, {"demo": str(ROOT / "demo" / "demo.js"), "series": series, "unit": "тыс. ₽"})
+        cls.whole = ["select", f"range 0-{len('городской округ город Орёл')}"]
+
+    def test_click_selects_the_whole_name_when_it_ends_and_leaves_no_caret_over_it(self) -> None:
+        # Даже если в поле осталось выделение с прошлого раза: браузер не сворачивает его до mouseup (выделенный текст
+        # можно перетащить), и по состоянию выделения щелчок от протяжки не отличить — отличают по сдвигу мыши.
+        self.assertEqual(self.got["onFocus"], [], "на mousedown имя не выделяют: mouseup всё равно поставил бы каретку")
+        self.assertTrue(self.got["clickUp"])
+        self.assertEqual(self.got["afterClick"], self.whole)
+
+    def test_next_clicks_in_the_focused_field_work_as_usual(self) -> None:
+        self.assertFalse(self.got["secondUp"])
+        self.assertEqual(self.got["afterSecond"], [])
+
+    def test_a_selection_made_by_dragging_is_kept(self) -> None:
+        # Мышь сместилась от точки нажатия — это протяжка, и выделение читателя остаётся как есть.
+        self.assertFalse(self.got["dragUp"])
+        self.assertEqual(self.got["afterDrag"], [])
+
+    def test_keyboard_focus_selects_the_name_at_once(self) -> None:
+        self.assertEqual(self.got["byTab"], self.whole)
+        # Щелчок, мышь от которого отпустили вне поля, не оставляет признака: фокус с клавиатуры после него — тоже выделяет.
+        self.assertEqual(self.got["afterStaleClick"], self.whole)
+
+    def test_empty_field_has_nothing_to_select_and_opens_no_list(self) -> None:
+        self.assertEqual(self.got["empty"], ["select", "range 0-0"])
+        self.assertTrue(self.got["listHidden"])
+
+    def test_the_name_stays_selected_when_a_choice_replaces_the_value_of_the_focused_field(self) -> None:
+        # Выбор из списка не уводит фокус с поля: имя нового МО выделено, и следующий набор заменяет его.
+        demo = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
+        start = demo.index("searchInput.value = seriesId;")
+        self.assertIn("if (document.activeElement === searchInput) selectFieldText(searchInput);",
+                      demo[start:start + 300])
+
+
+@unittest.skipUnless(shutil.which("node"), "для скриптов стенда нужен node")
+class CoverSearchNoteTest(unittest.TestCase):
+    """Подпись под полем обложки говорит, куда ведёт кнопка: на совпадение, на пример (пустой запрос и запрос без
+    совпадений) — с именем примера из данных."""
+
+    SCRIPT = """
+        const page = vm.createContext({ document, window: {}, console: { error: noop }, setTimeout,
+          requestAnimationFrame: noop, fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve(input.index) }) });
+        document.getElementById('landing-data').textContent = '{}';
+        const note = document.getElementById('mo-note');
+        note.textContent = input.defaultNote;
+        vm.runInContext(fs.readFileSync(input.lib, 'utf8'), page);
+        vm.runInContext(fs.readFileSync(input.landing, 'utf8'), page);
+        const field = document.getElementById('mo-q');
+        const log = {};
+        const type = (text) => { field.value = text; document.activeElement = field; fire(field, 'input'); return note.textContent; };
+        log.loading = type('ъъъ');            // список ещё грузится: совпадений «нет» говорить рано
+        await tick();
+        log.noMatch = note.textContent;       // загрузился: совпадений нет, кнопка ведёт на пример
+        log.match = type('казань');
+        log.region = type('михайловский');
+        log.empty = type('');
+        log.again = type('ъъъ');
+        log.blank = type('   ');
+        return log;
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = {
+            "series": [["городской округ город Казань", "Республика Татарстан", "x", 0],
+                       ["Михайловский муниципальный район #1", None, None, 1, "23,7"]],
+            "quick": [], "mean_unit": "тыс. ₽ на человека в месяц за год панели", "default_mo": "Пример из данных",
+        }
+        cls.default_note = "Например: казань. Пустой запрос откроет пример — Пример из данных."
+        cls.got = run_page(cls.SCRIPT, {"lib": str(ROOT / "site" / "landing-lib.js"),
+                                        "landing": str(ROOT / "site" / "landing.js"), "index": cls.index,
+                                        "defaultNote": cls.default_note})
+
+    def test_query_without_matches_says_which_example_the_button_opens(self) -> None:
+        self.assertEqual(self.got["noMatch"], "Совпадений нет — откроется пример: Пример из данных")
+        self.assertEqual(self.got["again"], "Совпадений нет — откроется пример: Пример из данных")
+
+    def test_other_states_keep_their_notes(self) -> None:
+        self.assertEqual(self.got["loading"], self.default_note, "пока список грузится, «совпадений нет» не говорят")
+        self.assertEqual(self.got["match"], "Откроется: городской округ город Казань · Республика Татарстан")
+        self.assertEqual(self.got["region"], "Откроется: Михайловский муниципальный район #1 · регион не определён · "
+                         "23,7\u00a0тыс. ₽ на человека в месяц за год панели")
+        self.assertEqual(self.got["empty"], self.default_note)
+        self.assertEqual(self.got["blank"], self.default_note, "пробелы — не запрос")
 
 
 class MarkerKeyInLegendTest(unittest.TestCase):

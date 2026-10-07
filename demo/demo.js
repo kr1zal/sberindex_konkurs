@@ -785,7 +785,10 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
     invalidNote.hidden = false;
   }
 
-  document.getElementById("mo-search").value = seriesId;
+  const searchInput = document.getElementById("mo-search");
+  searchInput.value = seriesId;
+  // Поле с фокусом (выбор из списка не уводит его) держит имя выделенным: новый набор заменяет его.
+  if (document.activeElement === searchInput) selectFieldText(searchInput);
   document.getElementById("mo-name").textContent = seriesId;
   markQuickChip(seriesId);
   // Заголовок вкладки — с названием текущего МО: у ссылки с ?mo= иначе был бы всегда
@@ -899,6 +902,12 @@ function setupNav() {
 // ---------------------------------------------------------------------------
 // Поиск: комбобокс + listbox по образцу ARIA (WAI-ARIA APG combobox).
 // ---------------------------------------------------------------------------
+
+/** Выделяет весь текст поля. setSelectionRange — для iOS Safari, где select() после фокуса не срабатывает. */
+function selectFieldText(input) {
+  input.select();
+  input.setSelectionRange(0, input.value.length);
+}
 
 function setupCombobox(index) {
   const input = document.getElementById("mo-search");
@@ -1015,10 +1024,33 @@ function setupCombobox(index) {
   listbox.addEventListener("mousedown", (event) => event.preventDefault());
 
   input.addEventListener("input", () => renderOptions(input.value));
-  input.addEventListener("focus", () => { if (input.value.trim()) renderOptions(input.value); });
+  // Фокус в заполненном поле выделяет имя целиком: набор заменяет его, а не дописывается к нему («…Орёлказан»,
+  // и список отвечал «Ничего не нашлось»). С клавиатуры (Tab) — сразу. Щелчок мышью: focus срабатывает на
+  // mousedown, а mouseup по умолчанию ставит каретку и снял бы выделение, поэтому имя выделяется на mouseup
+  // щелчка, давшего фокус, и каретку он не ставит. Протяжка (мышь сместилась от точки нажатия) — выделение самого
+  // читателя, его не трогаем. Следующие щелчки по полю с фокусом работают как обычно.
+  const CLICK_SLOP = 4; // сдвиг мыши, px, не больше которого нажатие и отпускание — один щелчок
+  let pointerFocus = null; // точка нажатия, давшего фокус
+  input.addEventListener("mousedown", (event) => {
+    pointerFocus = document.activeElement === input ? null : { x: event.clientX, y: event.clientY };
+  });
+  input.addEventListener("mouseup", (event) => {
+    const down = pointerFocus;
+    pointerFocus = null;
+    if (!down || Math.hypot(event.clientX - down.x, event.clientY - down.y) > CLICK_SLOP) return;
+    event.preventDefault();
+    selectFieldText(input);
+  });
+  input.addEventListener("focus", () => {
+    if (!pointerFocus) selectFieldText(input);
+    if (input.value.trim()) renderOptions(input.value);
+  });
   // Уход с поля клавишей Tab закрывает список: следом идут быстрые кнопки, и открытый
   // список закрывал бы их от глаз. Выбор мышью поле не покидает — см. mousedown выше.
-  input.addEventListener("blur", closeListbox);
+  input.addEventListener("blur", () => {
+    pointerFocus = null;
+    closeListbox();
+  });
 
   input.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown") {
