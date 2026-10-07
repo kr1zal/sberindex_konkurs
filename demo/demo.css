@@ -198,6 +198,13 @@
   border-top-width: 2px;
 }
 
+/* Ключ изломов: тот же цвет и штрих, что у линии отметки на графике (.chart-marker-break). */
+.chart-legend-key-marker-break {
+  --legend-color: var(--chart-break);
+  border-top-style: dashed;
+  border-top-width: 2px;
+}
+
 .chart-legend-unit {
   font-family: var(--font-mono);
   font-size: 0.75rem;

@@ -173,8 +173,10 @@ function breaksMethodologyText(breaksInfo) {
 
 // ---------------------------------------------------------------------------
 // Поиск МО: без учёта регистра, «ё» = «е», по всем словам запроса в строке
-// «название + регион»; три яруса — с начала названия, с начала какого-то из его
-// слов, внутри слова — и по алфавиту внутри яруса.
+// «название + регион»; три яруса — название начинается с запроса; каждое слово запроса
+// начинает какое-то слово названия; любое вхождение — и по алфавиту внутри яруса.
+// Тот же порядок на главной (site/landing-lib.js::searchRows): подсказки там и здесь
+// совпадают.
 // ---------------------------------------------------------------------------
 
 function normalizeSearchText(s) {
@@ -191,16 +193,18 @@ function buildSearchIndex(seriesRows) {
 }
 
 function searchMunicipalities(query, rows, limit) {
-  const q = normalizeSearchText(query.trim());
-  if (!q) return { matches: [], total: 0 };
-  const words = q.split(/\s+/).filter(Boolean);
+  const words = normalizeSearchText(query.trim()).split(/\s+/).filter(Boolean);
+  if (!words.length) return { matches: [], total: 0 };
+  const phrase = words.join(" ");
   const tierA = [];
   const tierB = [];
   const tierC = [];
   for (const row of rows) {
     if (!words.every((w) => row.haystack.includes(w))) continue;
-    if (row.nameNorm.startsWith(q)) tierA.push(row);
-    else if (row.nameNorm.split(/\s+/).some((word) => word.startsWith(q))) tierB.push(row);
+    // «город орёл»: слово «орел» внутри «Горелово» — не начало слова, и Орёл идёт выше него.
+    const nameWords = row.nameNorm.split(/\s+/);
+    if (row.nameNorm.startsWith(phrase)) tierA.push(row);
+    else if (words.every((w) => nameWords.some((nameWord) => nameWord.startsWith(w)))) tierB.push(row);
     else tierC.push(row);
   }
   const collator = new Intl.Collator("ru");
@@ -426,6 +430,8 @@ function buildMoChartSpec(index, seriesId, mo, legendEl) {
     markers,
     yFormat: rubFmt,
     yUnit: index.unit,
+    // Вертикальные штриховые линии — изломы: без ключа в легенде не видно, что они значат.
+    markerKeys: [{ kind: "break", label: "изломы" }],
     ariaLabel: `Линейный график: расходы «${seriesId}» по месяцам — факт ` +
       `${monthSpanText(months[0], months[nPanel - 1])} и прогноз ` +
       `${monthSpanText(months[nPanel], months[months.length - 1])}, ${index.unit}.`,

@@ -18,6 +18,8 @@
  *       values,                  // number|null по одному на месяц, длина = months.length
  *     }, ...],
  *     markers: [{ atMonth, kind: "end" | "break", label }],
+ *     markerKeys: [{ kind, label }],   // ключи отметок в легенде: только у тех видов, что есть
+ *                                       //   среди markers (например, { kind: "break", label: "изломы" })
  *     yFormat: (value) => string,
  *     yUnit: "руб. на человека в месяц",
  *     ariaLabel: "...",
@@ -228,6 +230,19 @@ const LineChart = (() => {
         key.style.setProperty("--legend-color", s.color);
         const text = document.createElement("span");
         text.textContent = s.label;
+        item.append(key, text);
+        list.appendChild(item);
+      });
+      // Ключ отметки — тем же штрихом и цветом, что сама отметка: вертикальная линия без ключа в
+      // легенде ничего не говорит. Ключ — только у вида отметки, который на графике нарисован.
+      (currentSpec.markerKeys || []).forEach(({ kind, label }) => {
+        if (!(currentSpec.markers || []).some((marker) => marker.kind === kind)) return;
+        const item = document.createElement("li");
+        item.className = "chart-legend-item";
+        const key = document.createElement("span");
+        key.className = `chart-legend-key chart-legend-key-marker-${kind}`;
+        const text = document.createElement("span");
+        text.textContent = label;
         item.append(key, text);
         list.appendChild(item);
       });
