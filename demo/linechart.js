@@ -278,6 +278,13 @@ const LineChart = (() => {
       head.className = "chart-tooltip-month";
       head.textContent = formatMonthShort(month, true);
       tooltip.appendChild(head);
+      // Единица — под месяцем: число без неё («Факт 21 722») читается как «чего?».
+      if (currentSpec.yUnit) {
+        const unit = document.createElement("div");
+        unit.className = "chart-tooltip-unit";
+        unit.textContent = currentSpec.yUnit;
+        tooltip.appendChild(unit);
+      }
       rows.forEach(({ s, v }) => {
         const row = document.createElement("div");
         row.className = "chart-tooltip-row";
@@ -320,6 +327,11 @@ const LineChart = (() => {
     function onDocPointerDown(event) {
       if (!container.contains(event.target)) hideTooltip();
     }
+    // Escape закрывает подсказку, не двигая указателя: содержимое, появившееся при наведении, должно
+    // закрываться без движения мыши (WCAG 1.4.13).
+    function onDocKeyDown(event) {
+      if (event.key === "Escape") hideTooltip();
+    }
 
     svg.addEventListener("pointermove", onPointerMove);
     svg.addEventListener("pointerdown", onPointerMove);
@@ -330,6 +342,7 @@ const LineChart = (() => {
       if (event.pointerType !== "touch") hideTooltip();
     });
     document.addEventListener("pointerdown", onDocPointerDown);
+    document.addEventListener("keydown", onDocKeyDown);
 
     function draw() {
       width = container.clientWidth;
@@ -534,6 +547,7 @@ const LineChart = (() => {
         alive = false;
         resizeObserver.disconnect();
         document.removeEventListener("pointerdown", onDocPointerDown);
+        document.removeEventListener("keydown", onDocKeyDown);
         container.innerHTML = "";
       },
     };

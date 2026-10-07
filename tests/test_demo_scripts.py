@@ -163,5 +163,50 @@ class MarkerKeyInLegendTest(unittest.TestCase):
         self.assertRegex(line, r"stroke-dasharray")
 
 
+class TooltipTest(unittest.TestCase):
+    """Подсказка графика: единица измерения и закрытие клавишей Escape."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.chart = (ROOT / "demo" / "linechart.js").read_text(encoding="utf-8")
+
+    def test_tooltip_names_the_unit_under_the_month(self) -> None:
+        # Число без единицы («Факт 21 722») читалось как «чего?»: единица спецификации графика — в подсказке.
+        show = re.search(r"function showTooltip\(.*?\n    \}\n", self.chart, re.S).group(0)
+        self.assertIn("if (currentSpec.yUnit)", show)
+        self.assertIn('unit.className = "chart-tooltip-unit"', show)
+        self.assertIn("unit.textContent = currentSpec.yUnit", show)
+        self.assertLess(show.index("chart-tooltip-month"), show.index("chart-tooltip-unit"))
+        self.assertLess(show.index("chart-tooltip-unit"), show.index("chart-tooltip-row"))
+
+    def test_escape_closes_the_tooltip_and_the_listener_is_removed_with_the_chart(self) -> None:
+        # Подсказка, появившаяся при наведении, закрывается без движения указателя (WCAG 1.4.13).
+        self.assertRegex(
+            self.chart, r'function onDocKeyDown\(event\) \{\s*if \(event\.key === "Escape"\) hideTooltip\(\);\s*\}')
+        self.assertIn('document.addEventListener("keydown", onDocKeyDown);', self.chart)
+        destroy = re.search(r"destroy\(\) \{.*?\n      \},", self.chart, re.S).group(0)
+        self.assertIn('document.removeEventListener("keydown", onDocKeyDown);', destroy)
+
+    def test_unit_line_is_styled_for_the_dark_tooltip(self) -> None:
+        css = (ROOT / "demo" / "demo.css").read_text(encoding="utf-8")
+        rule = re.search(r"\.chart-tooltip-unit \{([^}]*)\}", css).group(1)
+        self.assertIn("var(--night-soft)", rule)
+
+
+class TableScrollHintTest(unittest.TestCase):
+    def test_scrollable_tables_have_an_edge_shadow_that_appears_only_when_there_is_more_to_scroll(self) -> None:
+        # На телефоне таблица шире рамки прокручивалась вбок без признака: два правых столбца были невидимы.
+        # Тень — фон: закраска «local» едет с содержимым и скрывает тень «scroll» там, где прокручивать нечего.
+        css = (ROOT / "demo" / "demo.css").read_text(encoding="utf-8")
+        rule = re.search(r"\n\.table-scroll \{([^}]*)\}", css).group(1)
+        self.assertIn("overflow-x: auto", rule)
+        self.assertEqual(rule.count("linear-gradient"), 2)
+        self.assertEqual(rule.count("radial-gradient"), 2)
+        self.assertEqual(len(re.findall(r"no-repeat local", rule)), 2)
+        self.assertEqual(len(re.findall(r"no-repeat scroll", rule)), 2)
+        # Закраска — цвета карточки, на которой лежит таблица (и светлой, и ночной).
+        self.assertEqual(rule.count("var(--surface)"), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

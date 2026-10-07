@@ -340,6 +340,13 @@
   text-transform: uppercase;
 }
 
+/* Единица измерения — под месяцем, мельче и бледнее: она относится ко всем числам подсказки. */
+.chart-tooltip-unit {
+  margin-top: 2px;
+  color: var(--night-soft);
+  font-size: 0.75rem;
+}
+
 .chart-tooltip-row {
   display: flex;
   align-items: center;
@@ -412,12 +419,23 @@
 
 /* -- таблицы с числами: на телефоне прокручиваются в своей рамке, не вся страница ----------- */
 
+/* Тень на краю, за которым у таблицы есть ещё столбцы, — признак прокрутки: без неё на телефоне два правых
+   столбца таблицы были невидимы, и читатель не знал, что они есть. Тень нарисована фоном: «scroll» держит её на
+   краю рамки, а «local» кладёт поверх неё закраску цвета карточки, которая едет вместе с содержимым и открывает
+   тень только там, где есть что прокручивать. Без скрипта; у таблицы, которая помещается, теней нет. */
 .table-scroll {
   margin: 14px 0 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--rule);
   border-radius: 14px;
+  background:
+    linear-gradient(to right, var(--surface) 30%, transparent) left center / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--surface) 30%, transparent) right center / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 24%, transparent), transparent)
+      left center / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 24%, transparent), transparent)
+      right center / 12px 100% no-repeat scroll;
 }
 
 table.data-table {
