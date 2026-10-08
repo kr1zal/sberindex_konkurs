@@ -302,6 +302,59 @@ class SearchFieldSelectionTest(unittest.TestCase):
                       demo[start:start + 300])
 
 
+class ErrorsCaptionTest(unittest.TestCase):
+    """Пояснение к таблице ошибок страницы прогноза: столбцы — «окна проверки», как на главной, и один мостик к слову
+    отчёта в скобках. Отчёт зовёт их фолдами везде, а главная этого слова не пишет, поэтому читатель, который сверяет
+    таблицу с отчётом, находит его здесь, в ближайшем к отчёту месте."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.demo = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
+        cls.index = json.loads((ROOT / "demo" / "data" / "index.json").read_text(encoding="utf-8"))
+
+    def test_the_report_word_stands_once_in_the_texts_of_the_page_and_only_as_the_bridge(self) -> None:
+        # Тексты страницы — разметка и строки скрипта. Комментарии скрипта о фолдах — про его данные (`index.folds`,
+        # протокол отчёта) и читателю не видны: в счёт идут только строки кода.
+        code = [line.strip() for line in self.demo.splitlines()
+                if re.search(r"(?i)фолд", line) and not line.strip().startswith(("//", "/*", "*"))]
+        self.assertEqual(len(code), 1, f"слово отчёта стоит больше чем в одном тексте страницы: {code}")
+        self.assertIn("(в отчёте — фолды)", code[0])
+        markup = (ROOT / "demo" / "index.html").read_text(encoding="utf-8")
+        self.assertNotRegex(markup, r"(?i)фолд")
+        self.assertNotIn("проверочные окна", self.demo)
+
+    @unittest.skipUnless(shutil.which("node"), "для скриптов стенда нужен node")
+    def test_caption_names_the_windows_and_takes_their_length_from_the_data(self) -> None:
+        script = """
+            const vm = require('vm'), fs = require('fs');
+            const [demoPath, indexPath] = process.argv.slice(1);
+            const noop = () => {};
+            const page = {
+              document: { getElementById: () => null, addEventListener: noop },
+              window: {}, console: { error: noop }, LineChart: {},
+              fetch: () => Promise.reject(new Error('в тесте нет сети')),
+            };
+            const stand = vm.runInNewContext(fs.readFileSync(demoPath, 'utf8') + '\\n({errorsCaptionText});', page);
+            console.log(JSON.stringify(stand.errorsCaptionText(JSON.parse(fs.readFileSync(indexPath, 'utf8')))));
+        """
+        done = subprocess.run(
+            ["node", "-e", script, str(ROOT / "demo" / "demo.js"), str(ROOT / "demo" / "data" / "index.json")],
+            capture_output=True, text=True, check=True, timeout=120)
+        caption = json.loads(done.stdout)
+        # Длина окна — по границам первого окна проверки из данных, своим счётом и своим склонением.
+        first = self.index["folds"][0]
+        (y1, m1), (y2, m2) = (tuple(int(part) for part in first[key].split("-")) for key in ("test_from", "test_to"))
+        months = (y2 - y1) * 12 + (m2 - m1) + 1
+        tail = months % 100
+        word = ("месяцев" if 11 <= tail <= 14
+                else {1: "месяцу", 2: "месяца", 3: "месяца", 4: "месяца"}.get(tail % 10, "месяцев"))
+        self.assertEqual(
+            caption,
+            f"Средняя абсолютная ошибка (MAE), {self.index['unit']}. Столбцы — окна проверки (в отчёте — фолды) "
+            f"по\u00a0{months}\u00a0{word}: модель учится на всех месяцах до окна и прогнозирует его. "
+            "Крупно — этот муниципалитет, мелко под числом — MAE той же модели в среднем по всей панели.")
+
+
 class MarkerKeyInLegendTest(unittest.TestCase):
     """Вертикальные штриховые линии на графике МО — изломы; ключ в легенде говорит об этом."""
 

@@ -781,9 +781,10 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual(best_bar["role"], "best_mean")
         self.assertTrue(best_bar["label"].startswith("Лучшая в среднем"))
 
-    def test_the_site_says_validation_window_and_never_fold(self) -> None:
-        # «Фолд» — слово отчёта; на сайте то же самое называется «окно проверки»: ни в тексте страницы, ни в данных
-        # главной, ни в шаблоне слова нет. Страница прогноза (demo/) не меняется и в проверку не входит.
+    def test_the_landing_says_validation_window_and_never_fold(self) -> None:
+        # «Фолд» — слово отчёта; на главной то же самое называется «окно проверки»: ни в тексте страницы, ни в данных
+        # главной, ни в шаблоне слова нет. Страница прогноза (demo/) проверяется отдельно: слово отчёта стоит там один
+        # раз, мостиком к отчёту (`test_demo_scripts.ErrorsCaptionTest`).
         template = (ROOT / "site" / "index.template.html").read_text(encoding="utf-8")
         for name, page in (("index.html", self.html), ("шаблон", template)):
             collector = _TextCollector()
