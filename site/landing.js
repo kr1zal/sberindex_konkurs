@@ -398,7 +398,9 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 03 · Проверка фактом: история, прогноз первого этапа, два правила, факт по месяцам
+  // 03 · Проверка фактом: история, прогноз первого этапа, два правила, факт по месяцам.
+  // Факт проверки — та же линия, что и история, с кружками в месяцах; ползунок под месяцами
+  // проверки открывает её по месяцу, бегунок стоит под кружком выбранного месяца.
   // ---------------------------------------------------------------------------
 
   // Шаг между кружками месяцев проверки, px, не меньше этого: кружок — 11 px, и при меньшем шаге
@@ -422,6 +424,10 @@
     ];
     const dotsBox = byId("fact-dots");
     const cursor = byId("fact-cursor");
+    const reveal = byId("fact-act-reveal"); // прямоугольник, которым обрезана линия факта проверки
+    const scrubTrack = byId("fact-scrub");
+    const scrubTicks = byId("fact-scrub-ticks");
+    const scrubValue = byId("fact-k-value");
     const readout = { month: byId("ro-month"), fc: byId("ro-fc"), act: byId("ro-act"), err: byId("ro-err") };
     const unit = `${NBSP}млрд${NBSP}₽`;
 
@@ -432,7 +438,11 @@
       shownMonth = k;
       const i = k - 1;
       cursor.style.left = view.left(view.nHistory + i);
+      // Линия факта проверки нарисована целиком и открыта до выбранного месяца: обрезка по x
+      // в единицах viewBox, как у точек линии.
+      reveal.style.width = `${view.xs[view.nHistory + i].toFixed(1)}px`;
       view.dots.forEach((dot, index) => dot.classList.toggle("is-off", index >= k));
+      view.ticks.forEach((tick, index) => tick.classList.toggle("is-on", index < k));
       const month = check.months[i];
       const name = `${MONTH_NOM[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
       const fc = check.forecast_rub.two_stage[i] + unit;
@@ -442,6 +452,7 @@
       readout.fc.textContent = fc;
       readout.act.textContent = act;
       readout.err.textContent = err;
+      scrubValue.textContent = MONTH_NOM[Number(month.slice(5, 7)) - 1];
       slider.setAttribute("aria-valuetext", `${name}: прогноз ${fc}, факт ${act}, ошибка месяца ${err}`);
     }
 
@@ -471,10 +482,23 @@
 
       setTicks(byId("fact-ticks"), scale, (value) => formatTick(value, scale.step), false);
       byId("fact-hist").setAttribute("d", linePath(yPoints(history.values), xs.slice(0, nHistory)));
+      byId("fact-act").setAttribute("d", tail(check.actual));
       byId("fact-fc").setAttribute("d", tail(check.forecast.two_stage));
       byId("fact-r1-line").setAttribute("d", tail(check.forecast.naive));
       byId("fact-r2-line").setAttribute("d", tail(check.forecast.seasonal_naive));
       byId("fact-end").style.left = left(nHistory - 1);
+
+      // Ползунок стоит под месяцами проверки: его бегунок — на одной вертикали с кружком месяца и
+      // линией курсора. Ширина дорожки — от первого до последнего месяца плюс бегунок (его центр
+      // не доходит до краёв поля на половину своей ширины — поле на столько же шире).
+      scrubTrack.style.left = `calc(${left(nHistory)} - var(--scrub-thumb) / 2)`;
+      scrubTrack.style.width = `calc(${((nCheck - 1) / (total - 1) * 100).toFixed(2)}% + var(--scrub-thumb))`;
+      scrubTicks.textContent = "";
+      const ticks = check.months.map((_, index) => {
+        const tick = node("span", "scrub-tick", null, scrubTicks);
+        tick.style.left = `${((index / (nCheck - 1)) * 100).toFixed(2)}%`;
+        return tick;
+      });
 
       const years = byId("fact-years");
       years.textContent = "";
@@ -504,7 +528,7 @@
         return dot;
       });
 
-      view = { keep, nHistory, left, dots };
+      view = { keep, nHistory, left, xs, dots, ticks };
       showMonth(shownMonth);
     }
 

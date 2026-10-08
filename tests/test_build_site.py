@@ -1467,6 +1467,30 @@ class BuildSiteTest(unittest.TestCase):
             self.agg_check.loc[self.agg_check["method"] == "seasonal_naive", "aggregate_model"].iloc[0],
         )
 
+    def test_fact_check_line_slider_and_rule_toggles_are_tied_to_the_chart(self) -> None:
+        # Факт проверки — та же линия, что и история (кружки без линии читались как отдельный ряд): нарисована
+        # по `check.actual` целиком и обрезана по выбранному месяцу. Ползунок стоит под месяцами проверки —
+        # бегунок на одной вертикали с кружком месяца, — подписан названием месяца, а переключатели правил
+        # стоят в легенде, где правила подписаны.
+        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        self.assertIn('byId("fact-act").setAttribute("d", tail(check.actual));', js)
+        self.assertIn("reveal.style.width = `${view.xs[view.nHistory + i].toFixed(1)}px`;", js)
+        self.assertIn("scrubTrack.style.left = `calc(${left(nHistory)} - var(--scrub-thumb) / 2)`;", js)
+        self.assertIn("scrubValue.textContent = MONTH_NOM[Number(month.slice(5, 7)) - 1];", js)
+        ids = _IdsOf(self.html)
+        self.assertEqual(ids.attr("fact-act", "clip-path"), "url(#fact-act-clip)")
+        self.assertEqual(ids.attr("fact-act-reveal", "tag"), "rect")
+        self.assertEqual(ids.attr("fact-k-value", "for"), "fact-k")
+        self.assertEqual(ids.attr("fact-k-label", "for"), "fact-k")
+        legend = re.search(r'<ul class="legend legend-fact"[^>]*>(.*?)</ul>', self.html, re.S)
+        self.assertIsNotNone(legend, "нет легенды раздела 03")
+        for toggle in ("fact-r1", "fact-r2"):
+            with self.subTest(toggle=toggle):
+                self.assertIn(f'<input type="checkbox" id="{toggle}" checked>', legend.group(1))
+        # Ползунок — один на странице, со своей дорожкой и делениями под ней.
+        self.assertEqual(self.html.count('type="range"'), 1)
+        self.assertLess(self.html.index('id="fact-k"'), self.html.index('id="fact-scrub-ticks"'))
+
     def _check_no_data_numbers_in(self, js: str, name: str) -> None:
         # Числа страницы: всё, что стоит в пунктах «пяти чисел», средние ошибки года и MAE
         # горизонтов. Нужны «данные-подобные» значения: с десятичной запятой, с неразрывным

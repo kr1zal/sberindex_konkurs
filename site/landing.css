@@ -863,6 +863,7 @@
 }
 
 .fact-card {
+  --scrub-thumb: 18px; /* бегунок ползунка; на столько же дорожка шире промежутка между месяцами */
   padding: 26px 26px 20px 74px;
 }
 
@@ -910,6 +911,9 @@
 }
 
 .vline-cursor {
+  /* Снизу линия выходит за график: через ось лет (10 + 18 px) и отступ до ползунка — к центру
+     его дорожки (22 px от верха строки). */
+  bottom: -56px;
   border-left: 1.5px solid var(--ink);
   opacity: 0.18;
   transition: left 0.3s ease;
@@ -920,9 +924,15 @@
   vector-effect: non-scaling-stroke;
 }
 
-.fact-hist {
+.fact-hist, .fact-act {
   stroke: var(--chart-fact);
   stroke-width: 2.2;
+}
+
+/* Прямоугольник обрезки линии факта проверки: его ширина — x выбранного месяца в единицах viewBox,
+   меняется вместе с курсором. */
+#fact-act-reveal {
+  transition: width 0.3s ease;
 }
 
 .fact-fc {
@@ -967,27 +977,145 @@
   transform: translate(-50%, -50%) scale(0.3);
 }
 
-.slider-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 16px;
-  margin-top: 18px;
-}
-
-.slider-row input[type="range"] {
-  flex: 1;
-  min-width: 200px;
+/* Ползунок месяца: дорожка стоит под месяцами проверки (положение и ширину считает скрипт),
+   бегунок — под кружком выбранного месяца; слева, под историей, — подпись, значение и подсказка. */
+.scrub {
+  position: relative;
   min-height: 44px;
-  margin: 0;
-  accent-color: var(--ink);
+  margin-top: 6px;
 }
 
-.toggles {
-  display: flex;
-  flex-wrap: wrap;
+.scrub-label {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  line-height: 1.4;
+  transform: translateY(-50%);
+}
+
+.scrub-label .mono-label {
+  display: inline;
+}
+
+/* Значение — тем же моноширинным капсом, что и подпись, но цветом текста: «МЕСЯЦ … · ДЕКАБРЬ». */
+.scrub-value {
+  display: inline;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scrub-value::before {
+  margin: 0 6px;
+  color: var(--ink-soft);
+  content: "·";
+}
+
+.scrub-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+}
+
+.scrub-track {
+  position: absolute;
+  top: 0;
+  height: 44px;
+}
+
+.scrub-track input[type="range"] {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.scrub-track input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--chart-mark);
+  border-radius: 1px;
+}
+
+.scrub-track input[type="range"]::-moz-range-track {
+  height: 2px;
+  background: var(--chart-mark);
+  border-radius: 1px;
+}
+
+.scrub-track input[type="range"]::-webkit-slider-thumb {
+  width: var(--scrub-thumb);
+  height: var(--scrub-thumb);
+  margin-top: calc((2px - var(--scrub-thumb)) / 2);
+  background: var(--ink);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--ink);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.scrub-track input[type="range"]::-moz-range-thumb {
+  width: var(--scrub-thumb);
+  height: var(--scrub-thumb);
+  box-sizing: border-box;
+  background: var(--ink);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+/* Кольцо фокуса — вокруг бегунка, не вокруг всей дорожки. */
+.scrub-track input[type="range"]:focus-visible {
+  outline: none;
+}
+
+.scrub-track input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 1px var(--ink), 0 0 0 3px var(--surface), 0 0 0 5px var(--focus);
+}
+
+.scrub-track input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 1px var(--ink), 0 0 0 3px var(--surface), 0 0 0 5px var(--focus);
+}
+
+/* Деления под дорожкой — по одному на месяц, на одной вертикали с кружками графика; пройденные
+   месяцы темнее. Внутренние края — на половину бегунка от краёв дорожки, как ход его центра. */
+.scrub-ticks {
+  position: absolute;
+  top: 29px;
+  right: calc(var(--scrub-thumb) / 2);
+  left: calc(var(--scrub-thumb) / 2);
+  height: 6px;
+  pointer-events: none;
+}
+
+.scrub-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: var(--chart-mark);
+  opacity: 0.5;
+  transform: translateX(-50%);
+  transition: opacity 0.3s ease, background-color 0.3s ease;
+}
+
+.scrub-tick.is-on {
+  background: var(--ink);
+  opacity: 0.7;
+}
+
+/* Переключатели правил — в строке легенды: правило включается там же, где подписано. */
+.legend-fact {
+  align-items: center;
   gap: 0 18px;
-  margin-top: 4px;
 }
 
 .toggle {
@@ -1021,7 +1149,14 @@
   min-width: 0;
 }
 
+/* Обе карточки делят высоту карточки графика поровну: низ колонки — вровень с низом графика. */
+.fact-side > * {
+  flex: 1 1 auto;
+}
+
 .readout {
+  display: flex;
+  flex-direction: column;
   padding: 26px;
   border: 1px solid var(--night-rule);
   border-radius: 20px;
@@ -1059,7 +1194,8 @@
 }
 
 .readout-err {
-  margin: 18px 0 0;
+  margin: auto 0 0;
+  padding-top: 18px;
   color: var(--amber);
   font-family: var(--font-display);
   font-size: 2.5rem;
@@ -1075,11 +1211,15 @@
 }
 
 .mean-card {
+  display: flex;
+  flex-direction: column;
   padding: 22px 24px;
 }
 
 .mean-rows {
   display: grid;
+  flex: 1;
+  align-content: space-evenly;
   gap: 12px;
   margin: 14px 0 0;
 }
@@ -1144,9 +1284,26 @@
     height: 240px;
   }
 
-  .slider-row input[type="range"] {
-    min-width: 0;
-    flex-basis: 100%;
+  /* Под историей места для подписи нет: подпись над строкой ползунка, дорожка — в строке под ней. */
+  .scrub {
+    min-height: 0;
+    margin-top: 10px;
+    padding-bottom: 44px;
+  }
+
+  .scrub-label {
+    position: static;
+    transform: none;
+  }
+
+  .scrub-track {
+    top: auto;
+    bottom: 0;
+  }
+
+  /* До бегунка курсор здесь не дотянуть (между ними подпись) — он идёт только через ось лет. */
+  .vline-cursor {
+    bottom: -28px;
   }
 
   .readout {
@@ -1557,7 +1714,7 @@
   }
 
   .step, .bar-fill, .dot, .vline-cursor, .tick-set, .story-lines, .story-median-layer,
-  .fact-r1, .fact-r2 {
+  .fact-r1, .fact-r2, .scrub-tick, #fact-act-reveal {
     transition: none;
   }
 

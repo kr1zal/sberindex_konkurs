@@ -174,33 +174,42 @@
     <div class="fact">
       <div class="plot-card fact-card">
         <p class="chart-unit" id="fact-unit"></p>
-        <ul class="legend" aria-label="Обозначения линий">
+        <ul class="legend legend-fact" aria-label="Обозначения линий">
           <li><span class="key key-fact"></span>факт</li>
           <li><span class="key key-fc"></span>прогноз первого этапа</li>
+          <li><label class="toggle"><input type="checkbox" id="fact-r1" checked>
+            <span class="key key-r1" aria-hidden="true"></span><span id="fact-r1-text"></span></label></li>
+          <li><label class="toggle"><input type="checkbox" id="fact-r2" checked>
+            <span class="key key-r2" aria-hidden="true"></span><span id="fact-r2-text"></span></label></li>
         </ul>
         <div class="plot fact-plot" id="fact-plot" role="img" aria-label="График федерального агрегата">
           <div class="ticks" id="fact-ticks"></div>
           <div class="vline vline-end" id="fact-end"><span>конец панели</span></div>
           <div class="vline vline-cursor" id="fact-cursor"></div>
           <svg class="plot-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+            <defs>
+              <clipPath id="fact-act-clip"><rect id="fact-act-reveal" x="0" y="-100" width="1000" height="1200"/></clipPath>
+            </defs>
             <path class="fact-line fact-hist" id="fact-hist"/>
             <path class="fact-line fact-r1" id="fact-r1-line"/>
             <path class="fact-line fact-r2" id="fact-r2-line"/>
             <path class="fact-line fact-fc" id="fact-fc"/>
+            <path class="fact-line fact-act" id="fact-act" clip-path="url(#fact-act-clip)"/>
           </svg>
           <div class="dots" id="fact-dots"></div>
         </div>
         <div class="plot-axis plot-axis-years" id="fact-years" aria-hidden="true"></div>
 
-        <div class="slider-row">
-          <label class="mono-label" for="fact-k" id="fact-k-label">Месяц 2025</label>
-          <input id="fact-k" type="range">
-        </div>
-        <div class="toggles">
-          <label class="toggle"><input type="checkbox" id="fact-r1" checked>
-            <span class="key key-r1" aria-hidden="true"></span><span id="fact-r1-text"></span></label>
-          <label class="toggle"><input type="checkbox" id="fact-r2" checked>
-            <span class="key key-r2" aria-hidden="true"></span><span id="fact-r2-text"></span></label>
+        <div class="scrub">
+          <div class="scrub-label">
+            <label class="mono-label" for="fact-k" id="fact-k-label">Месяц 2025</label>
+            <output class="scrub-value" id="fact-k-value" for="fact-k"></output>
+            <span class="scrub-hint">потяните ползунок — факт открывается по месяцам</span>
+          </div>
+          <div class="scrub-track" id="fact-scrub">
+            <input id="fact-k" type="range">
+            <div class="scrub-ticks" id="fact-scrub-ticks" aria-hidden="true"></div>
+          </div>
         </div>
       </div>
 
