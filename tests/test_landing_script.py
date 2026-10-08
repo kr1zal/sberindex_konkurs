@@ -50,10 +50,10 @@ class LandingScriptWiringTest(unittest.TestCase):
         for gone in ("initSearch", "mo-q", "mo-list", "mo-note", "demo/data/index.json", "fetch("):
             with self.subTest(gone=gone):
                 self.assertNotIn(gone, source)
-        # Блоки запускаются под try: без поиска их восемь — шапка, обложка, числа, история, горизонты, факт,
-        # изломы, прогноз по муниципалитету.
+        # Блоки запускаются под try: без поиска их девять — шапка, обложка, числа, история, горизонты, факт,
+        # изломы, прогноз по муниципалитету, метод.
         launch = source[source.index("  [\n    [\"шапка\""):source.index("].forEach((block) => {")]
-        self.assertEqual(len(re.findall(r'^\s*\["', launch, re.M)), 8)
+        self.assertEqual(len(re.findall(r'^\s*\["', launch, re.M)), 9)
 
     def test_axis_labels_follow_the_scale_step(self) -> None:
         # Подписи оси графиков проверки фактом и примера муниципалитета считает помощник по шагу шкалы:

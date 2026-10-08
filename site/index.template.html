@@ -342,15 +342,91 @@
   <div class="wrap">
     <p class="eyebrow">06 · Метод</p>
     <h2 class="section-title" id="method-title">Как устроено решение</h2>
+    <p class="section-lead" id="method-lead">
+      Данные идут в обе модели и в детекторы, проверка у всех общая. Наведите на блок: подсветятся его связи, каждый блок ведёт в свой раздел отчёта.
+    </p>
 
-    <figure class="method-figure">
-      <a href="report/method.svg" target="_blank" rel="noopener">
-        <img src="report/method.svg" width="1113" height="566" loading="lazy"
-             alt="Схема метода. Панель СберИндекса с категориями трат и прогнозом длинного федерального ряда идёт в панельный бустинг и в двухэтапную модель — прогноз федерального ряда, разнесённый долями. Обе вместе с эталоном Prophet, наивной и фундаментальными моделями проверяются на скользящем origin, от наукаста до года вперёд, по MAE, R² по пулу, MASE и sMAPE. Детекторы изломов на темпах роста, со штрафом, выбранным на стенде с врезками известной величины, дают долю территорий с сигналом.">
-        <span class="visually-hidden"> (откроется в новой вкладке)</span>
+    <div class="method-map" id="method-map">
+      <svg class="method-links" id="method-links" aria-hidden="true" focusable="false">
+        <defs>
+          <marker id="method-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 L2.5,5 Z"/></marker>
+          <marker id="method-arrow-on" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="13" markerHeight="13" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 L2.5,5 Z"/></marker>
+          <marker id="method-dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse"><circle cx="5" cy="5" r="4"/></marker>
+          <marker id="method-dot-on" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse"><circle cx="5" cy="5" r="4"/></marker>
+        </defs>
+      </svg>
+
+      <p class="mono-label method-head" data-col="1">Данные и источники</p>
+      <p class="mono-label method-head" data-col="2">Модели</p>
+      <p class="mono-label method-head" data-col="3">Проверка</p>
+
+      <a class="method-node" id="mn-panel" data-col="1" data-row="2" href="report/report.html#данные" target="_blank" rel="noopener">
+        <span class="method-node-title">Панель СберИндекса</span>
+        <span class="method-node-text">расходы ${n_series_rub} муниципалитетов по месяцам, ${panel_months_label}</span>
+        <span class="method-node-link">в отчёте: данные<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
       </a>
-      <figcaption><a href="report/method.svg" target="_blank" rel="noopener">Открыть схему крупно<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></figcaption>
-    </figure>
+      <a class="method-node" id="mn-federal" data-col="1" data-row="3" href="report/report.html#перенос-с-длинных-рядов" target="_blank" rel="noopener">
+        <span class="method-node-title">Длинные федеральные ряды</span>
+        <span class="method-node-text">годы истории, обрезаны по origin каждого окна проверки</span>
+        <span class="method-node-link">в отчёте: перенос с длинных рядов<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+      <a class="method-node" id="mn-categories" data-col="1" data-row="4" href="report/report.html#категории-как-обучающие-ряды-а-не-как-признаки" target="_blank" rel="noopener">
+        <span class="method-node-title">Категории трат</span>
+        <span class="method-node-text">обучающие ряды для панельной модели, а не признаки</span>
+        <span class="method-node-link">в отчёте: категории как ряды<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+      <a class="method-node" id="mn-baselines" data-col="1" data-row="5" href="report/report.html#сравнение-моделей-прогнозирования" target="_blank" rel="noopener">
+        <span class="method-node-title">Эталоны сравнения</span>
+        <span class="method-node-text">Prophet по умолчанию, наивная, фундаментальные модели</span>
+        <span class="method-node-link">в отчёте: сравнение моделей<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+      <a class="method-node" id="mn-bench" data-col="1" data-row="6" href="report/report.html#sec-cp" target="_blank" rel="noopener">
+        <span class="method-node-title">Стенд с врезками</span>
+        <span class="method-node-text">штраф детекторов выбран до реальных данных</span>
+        <span class="method-node-link">в отчёте: обнаружение<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+
+      <a class="method-node" id="mn-agg" data-col="2" data-row="2" href="report/report.html#перенос-с-длинных-рядов" target="_blank" rel="noopener">
+        <span class="method-node-title">Прогноз федерального ряда</span>
+        <span class="method-node-text">по его собственной длинной истории: общий фактор</span>
+        <span class="method-node-link">в отчёте: перенос с длинных рядов<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+      <a class="method-node method-node-hero method-node-drop" id="mn-gbm" data-col="2" data-row="3" href="report/report.html#глобальная-модель" target="_blank" rel="noopener">
+        <span class="method-node-title">Панельный бустинг</span>
+        <span class="method-node-text">общий для всех муниципалитетов, предсказывает, во сколько раз изменится ряд</span>
+        <span class="method-node-link">в отчёте: глобальная модель<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+      <a class="method-node method-node-hero method-node-drop" id="mn-two" data-col="2" data-row="4" href="report/report.html#конструктивная-проверка-прогноз-одного-числа-и-разнос" target="_blank" rel="noopener">
+        <span class="method-node-title">Двухэтапная модель</span>
+        <span class="method-node-text">одно число и разнос по историческим долям</span>
+        <span class="method-node-link">в отчёте: прогноз одного числа и разнос<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+      <a class="method-node" id="mn-cp" data-col="2" data-row="6" href="report/report.html#sec-cp" target="_blank" rel="noopener">
+        <span class="method-node-title">Детекторы изломов</span>
+        <span class="method-node-text">в расширяющемся окне, на темпах роста ряда</span>
+        <span class="method-node-link">в отчёте: обнаружение<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+
+      <a class="method-node method-node-drop" id="mn-origin" data-col="3" data-row="3" href="report/report.html#протокол-оценки" target="_blank" rel="noopener">
+        <span class="method-node-title">Скользящий origin</span>
+        <span class="method-node-text">наукаст и горизонты ${method_horizons}; основной протокол — ${method_windows}</span>
+        <span class="method-node-link">в отчёте: протокол оценки<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+      <a class="method-node method-node-drop" id="mn-metrics" data-col="3" data-row="4" href="report/report.html#про-метрики" target="_blank" rel="noopener">
+        <span class="method-node-title">Метрики</span>
+        <span class="method-node-text">MAE в рублях как основная, рядом R² по пулу, MASE и sMAPE</span>
+        <span class="method-node-link">в отчёте: про метрики<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+      <a class="method-node" id="mn-signal" data-col="3" data-row="6" href="report/report.html#sec-cp-real" target="_blank" rel="noopener">
+        <span class="method-node-title">Сигнал по панели</span>
+        <span class="method-node-text">доля территорий, где в месяце началась тревога</span>
+        <span class="method-node-link">в отчёте: сигнал на панели<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></span>
+      </a>
+    </div>
+
+    <p class="method-more">
+      <a href="report/method.svg" target="_blank" rel="noopener">Схема целиком<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a>
+    </p>
   </div>
 </section>
 
@@ -411,7 +487,10 @@
       <a href="site/fonts/unbounded-OFL.txt">Unbounded</a>, <a href="site/fonts/onest-OFL.txt">Onest</a>
       и <a href="site/fonts/jetbrains-mono-OFL.txt">JetBrains Mono</a> — SIL OFL.
     </p>
-    <p class="built">собрано ${built}</p>
+    <div class="site-footer-meta">
+      <p class="author">Автор — <a href="https://avinogradov.pro" target="_blank" rel="noopener">Александр Виноградов<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></p>
+      <p class="built">собрано ${built}</p>
+    </div>
   </div>
 </footer>
 

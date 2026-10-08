@@ -446,14 +446,16 @@ class ContrastTest(unittest.TestCase):
                 self.assertGreaterEqual(_contrast(self.tokens[scope]["--chart-mark"], self.surface(scope)["card"]), 3.0)
         self.assertRegex(self.landing, r"\.vline-panel \{\s*border-left: 1px dashed var\(--chart-mark\);")
 
-    def test_method_figure_caption_stays_readable(self) -> None:
-        # Подпись схемы и ссылка в ней на подложке схемы — 4,5:1 и выше.
-        text = re.search(r"\.method-figure figcaption \{[^}]*color:\s*(#[0-9a-fA-F]{6})", self.landing).group(1)
-        link = re.search(r"\.method-figure figcaption a \{[^}]*color:\s*(#[0-9a-fA-F]{6})", self.landing).group(1)
-        for scope in ("light",):
-            for name, color in (("подпись", text), ("ссылка", link)):
-                with self.subTest(scope=scope, part=name):
-                    self.assertGreaterEqual(_contrast(color, self.tokens[scope]["--surface-card"]), 4.5)
+    def test_method_map_links_are_marked_and_hidden_on_narrow_screens(self) -> None:
+        # Карта решения: связи — svg поверх сетки, подсвеченная связь цветом прогноза; на узком экране связи и
+        # их подписи скрыты, блоки идут одной колонкой (сброс явного места в сетке сильнее правил размещения).
+        self.assertRegex(self.landing, r"\.method-link\.is-on \{\s*stroke: var\(--chart-forecast\);")
+        self.assertRegex(self.landing, r"\.method-head\[data-col\], \.method-node\[data-col\] \{\s*grid-column: auto;")
+        narrow = self.landing[self.landing.index(".method-head[data-col], .method-node[data-col]"):]
+        self.assertRegex(narrow, r"\.method-links, \.method-link-label \{\s*display: none;")
+        template = _read("site/index.template.html")
+        self.assertIn('<marker id="method-arrow"', template)
+        self.assertIn('<marker id="method-arrow-on"', template)
 
 
 class SkipLinkTargetTest(unittest.TestCase):

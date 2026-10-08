@@ -481,7 +481,7 @@ def _load_penalty() -> float:
 def compute_placeholders(
     *, wide: pd.DataFrame, summary: pd.DataFrame, ok: pd.DataFrame,
     horizons_summary: pd.DataFrame, horizons_folds: pd.DataFrame, decomposition: pd.DataFrame,
-    agg_check: pd.DataFrame, full_cfg: dict, forward_cfg: dict, today: dt.date,
+    agg_check: pd.DataFrame, full_cfg: dict, forward_cfg: dict, horizons_cfg: dict, today: dt.date,
 ) -> dict[str, str]:
     """Считает все подстановки `${имя}` шаблона `site/index.template.html`.
 
@@ -516,6 +516,10 @@ def compute_placeholders(
       число, если границы совпадают после округления).
     - ``agg_horizon_range`` — горизонты проверки, «1–12»: без них диапазон ошибок читался бы как помесячный.
     - ``agg_origin_label`` — месяц и год origin словами, «декабря 2024».
+    - ``panel_months_label`` — длина панели с единицей, «24 месяца» (форма матрицы).
+    - ``method_horizons`` / ``method_windows`` — карта решения, блок «Скользящий origin»: горизонты
+      `configs/horizons.yaml` списком «1, 3, 6 и 12 мес.» и окна основного протокола словом,
+      «три окна по 3 месяца» (`configs/full.yaml::split`).
     - ``n_series_rub`` — число рядов панели, из формы матрицы `build_matrix`
       (`configs/forecast_forward.yaml::data`).
     - ``sample_label`` — «30 случайных муниципалитетов»: выборка обложки с согласованными формами.
@@ -621,6 +625,15 @@ def compute_placeholders(
     placeholders["spread_share"] = str(STORY_SPREAD_SHARE)
     placeholders["spread_pct"] = str(story_spread_pct(wide))
     placeholders["story_base"] = story_base_label(wide)
+
+    # Карта решения: длина панели, горизонты протокола и окна основного — словами и списком.
+    n_months = int(len(wide))
+    placeholders["panel_months_label"] = f"{n_months}\u00a0{plural(n_months, 'месяц', 'месяца', 'месяцев')}"
+    horizons = sorted(int(item["horizon"]) for item in horizons_cfg["horizons"])
+    placeholders["method_horizons"] = f"{and_join([str(h) for h in horizons])}\u00a0мес."
+    n_folds = int(full_cfg["split"]["n_folds"])
+    placeholders["method_windows"] = (
+        f"{in_words(n_folds, 'им_с')} {plural(n_folds, 'окно', 'окна', 'окон')} по {placeholders['horizon_main_months']}")
 
     # Четвёртый шаг: разброс между муниципалитетами по всем сочетаниям модели и окна проверки.
     spreads = decomposition[DECOMP_SPREAD].astype(float)
@@ -1676,7 +1689,7 @@ def main(argv: list[str] | None = None) -> int:
     placeholders = compute_placeholders(
         wide=wide, summary=summary, ok=ok, horizons_summary=horizons_summary,
         horizons_folds=horizons_folds, decomposition=decomposition, agg_check=agg_check,
-        full_cfg=full_cfg, forward_cfg=forward_cfg, today=today,
+        full_cfg=full_cfg, forward_cfg=forward_cfg, horizons_cfg=horizons_cfg, today=today,
     )
 
     # Структура агрегата одна на стенд и на главную: стенд пишет её в aggregate.json,

@@ -1950,35 +1950,206 @@
 
 /* -- 06 · метод -------------------------------------------------------------------- */
 
-.method-figure {
-  margin: 30px 0 0;
-  padding: 28px;
-  background: var(--surface-card);
-  border: 1px solid var(--rule);
-  border-radius: 20px;
+/* Карта решения: три колонки блоков, связи между ними рисует скрипт по положению блоков
+   (svg поверх сетки); блоки лежат над линиями, подписи связей — над всем. */
+.method-map {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px 120px; /* широкие промежутки — для линий связей и капсул-подписей на них, блоки компактные */
+  margin-top: 26px;
 }
 
-.method-figure img {
-  display: block;
+.method-head {
+  grid-row: 1;
+  margin: 0 0 4px;
+}
+
+.method-head[data-col="1"] { grid-column: 1; }
+.method-head[data-col="2"] { grid-column: 2; }
+.method-head[data-col="3"] { grid-column: 3; }
+
+.method-node[data-col="1"] { grid-column: 1; }
+.method-node[data-col="2"] { grid-column: 2; }
+.method-node[data-col="3"] { grid-column: 3; }
+.method-node[data-row="2"] { grid-row: 2; }
+.method-node[data-row="3"] { grid-row: 3; }
+.method-node[data-row="4"] { grid-row: 4; }
+.method-node[data-row="5"] { grid-row: 5; }
+.method-node[data-row="6"] { grid-row: 6; }
+
+.method-node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 14px 9px;
+  background: var(--surface);
+  border: 1.5px solid var(--rule);
+  border-radius: 16px;
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 0.2s, transform 0.15s ease, box-shadow 0.2s;
+}
+
+.method-node:hover, .method-node:focus-visible {
+  border-color: var(--ink);
+  box-shadow: 0 6px 18px rgba(11, 16, 32, 0.08);
+  transform: translateY(-1px);
+}
+
+.method-node.is-near {
+  border-color: var(--chart-forecast);
+}
+
+/* Две главные модели — с подложкой цвета прогноза. */
+.method-node-hero {
+  background: color-mix(in srgb, var(--chart-forecast) 9%, var(--surface));
+  border-color: color-mix(in srgb, var(--chart-forecast) 45%, var(--surface));
+}
+
+.method-node-title {
+  font-family: var(--font-display);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.method-node-text {
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.method-node-link {
+  margin-top: auto;
+  padding-top: 3px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+}
+
+.method-links {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
 }
 
-.method-figure figcaption {
-  margin-top: 12px;
-  color: #535c6b;
+/* Блоки моделей и проверки опущены так, что двухэтапная модель стоит прямо над связью «эталоны → origin»,
+   а между прогнозом федерального ряда и бустингом есть место под ярлык «общий фактор». Величину сдвига
+   считает скрипт от положения этой связи (--method-drop), на узком экране сдвига нет. */
+.method-map {
+  --method-drop: 0px;
+}
+
+.method-node-drop {
+  transform: translateY(var(--method-drop));
+}
+
+.method-node-drop:hover, .method-node-drop:focus-visible {
+  transform: translateY(calc(var(--method-drop) - 1px));
+}
+
+.method-link {
+  fill: none;
+  stroke: var(--chart-mark);
+  stroke-width: 1.5;
+  transition: stroke 0.25s, stroke-width 0.25s, opacity 0.25s;
+}
+
+.method-link.is-on {
+  stroke: var(--chart-forecast);
+  stroke-width: 2.2;
+}
+
+.method-link.is-off {
+  opacity: 0.35;
+}
+
+/* Наконечник — закрашенный треугольник фиксированного размера, точка начала — кружок; у подсвеченной
+   связи оба цветом прогноза. */
+#method-arrow path, #method-dot circle {
+  fill: var(--chart-mark);
+}
+
+#method-arrow-on path, #method-dot-on circle {
+  fill: var(--chart-forecast);
+}
+
+/* Подпись связи — островок посреди своей линии, в две строки, линия проходит под ним; при подсветке связи
+   подсвечивается вместе с линией, при подсветке чужой — гаснет. */
+.method-link-label {
+  position: absolute;
+  z-index: 2;
+  max-width: 66px;
+  padding: 3px 8px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: color 0.25s, border-color 0.25s, background-color 0.25s, opacity 0.25s;
+}
+
+.method-link-label.is-off {
+  opacity: 0.35;
+}
+
+.method-link-label.is-on {
+  background: color-mix(in srgb, var(--chart-forecast) 9%, var(--surface));
+  border-color: var(--chart-forecast);
+  color: var(--chart-forecast);
+}
+
+.method-more {
+  margin: 14px 0 0;
   font-size: 0.85rem;
   text-align: right;
 }
 
-/* Ссылка подписи читается и на светлой подложке, и на смягчённой тёмной темы (#e3e6ec): 4,5:1 и выше. */
-.method-figure figcaption a {
-  color: #174f93;
-}
+/* На узком экране колонки идут одна под другой в порядке чтения, связей и их подписей нет. */
+@media (max-width: 959px) {
+  .method-map {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
 
-@media (max-width: 639px) {
-  .method-figure {
-    padding: 14px;
+  .method-head[data-col], .method-node[data-col] {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  /* Заголовок колонки — перед её блоками, а не все три подряд: порядок задаёт order. */
+  .method-head[data-col="1"] { order: 10; }
+  .method-node[data-col="1"] { order: 11; }
+  .method-head[data-col="2"] { order: 20; }
+  .method-node[data-col="2"] { order: 21; }
+  .method-head[data-col="3"] { order: 30; }
+  .method-node[data-col="3"] { order: 31; }
+
+  .method-head {
+    margin-top: 14px;
+  }
+
+  .method-head[data-col="1"] {
+    margin-top: 0;
+  }
+
+  .method-links, .method-link-label {
+    display: none;
   }
 }
 

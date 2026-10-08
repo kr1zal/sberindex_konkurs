@@ -733,6 +733,25 @@ main:focus {
   color: var(--night-ink);
 }
 
+/* Правая колонка подвала: автор со ссылкой на его сайт и дата сборки, выровнены по правому краю. */
+.site-footer-meta {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.site-footer .author {
+  color: var(--night-ink-2);
+}
+
+.site-footer .author a {
+  color: var(--night-ink);
+  font-weight: 500;
+}
+
 .site-footer .built {
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -741,6 +760,11 @@ main:focus {
 @media (max-width: 639px) {
   .site-footer {
     margin-top: 56px;
+  }
+
+  .site-footer-meta {
+    align-items: flex-start;
+    text-align: left;
   }
 
   .site-footer-inner {

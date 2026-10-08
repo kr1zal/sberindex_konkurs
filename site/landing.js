@@ -862,6 +862,141 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 06 · Метод: карта решения. Блоки стоят сеткой в разметке, связи между ними рисуются по их
+  // положению на странице и перерисовываются при изменении ширины; наведение на блок (и фокус
+  // с клавиатуры) подсвечивает его связи и соседей. На узком экране связей нет — колонки идут
+  // одна под другой, порядок читается по заголовкам колонок.
+  // ---------------------------------------------------------------------------
+
+  // Связи карты: откуда, куда, подпись на линии. Идентификаторы — узлов разметки (id="mn-…").
+  const METHOD_EDGES = [
+    ["federal", "agg", ""], ["panel", "gbm", ""], ["categories", "gbm", "обучающие ряды"],
+    ["agg", "gbm", "общий фактор"], ["panel", "two", ""], ["agg", "two", "разнос долями"],
+    ["baselines", "origin", ""], ["gbm", "origin", ""], ["two", "origin", ""], ["origin", "metrics", ""],
+    ["panel", "cp", ""], ["bench", "cp", ""], ["cp", "signal", ""],
+  ];
+  const METHOD_LOOP = 52; // вынос связи внутри одной колонки вправо от блоков, px: в пределах промежутка колонок
+  const METHOD_ELBOW = 64; // связь через колонку: до этого расстояния от цели идёт прямо по своей строке, дальше — изгиб
+  const METHOD_LOOP_LABEL_T = 0.35; // где на петле стоит островок-подпись: ещё до следующего блока, в свободном месте
+  const METHOD_START = 2; // точка начала связи — сразу за краем блока-источника, px
+  const METHOD_END = 3; // остриё наконечника — перед рамкой блока-цели, px
+  const METHOD_DROP_GAP = 10; // низ опущенных блоков — на столько выше связи «эталоны → origin», px
+  const METHOD_DOWN_MAX = 120; // соседи по колонке ближе этого — связь прямо вниз, дальше — петля
+
+  function initMethod() {
+    const map = byId("method-map");
+    const svg = byId("method-links");
+    if (!map || !svg) return;
+    const nodes = Array.from(map.querySelectorAll(".method-node"));
+    const nodeOf = (id) => byId(`mn-${id}`);
+    const edges = METHOD_EDGES.filter(([from, to]) => nodeOf(from) && nodeOf(to)).map(([from, to, label]) => ({
+      from, to,
+      path: svgNode("path", {
+        class: "method-link", "marker-start": "url(#method-dot)", "marker-end": "url(#method-arrow)",
+      }, svg),
+      text: label ? node("span", "method-link-label", label, map) : null,
+    }));
+    const bezier = (p0, p1, p2, p3, t) => {
+      const u = 1 - t;
+      return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
+    };
+
+    // Блоки моделей и проверки опускаются так, чтобы двухэтапная модель стояла прямо над связью
+    // «эталоны → origin» (она идёт по строке эталонов): сдвиг — от положения блоков без сдвига.
+    function settleDrop() {
+      map.style.setProperty("--method-drop", "0px");
+      const two = nodeOf("two");
+      const baselines = nodeOf("baselines");
+      if (!two || !baselines) return;
+      const line = baselines.getBoundingClientRect();
+      const drop = line.top + line.height / 2 - METHOD_DROP_GAP - two.getBoundingClientRect().bottom;
+      map.style.setProperty("--method-drop", `${Math.max(0, drop).toFixed(1)}px`);
+    }
+
+    function draw() {
+      if (getComputedStyle(svg).display === "none") {
+        map.style.setProperty("--method-drop", "0px");
+        return;
+      }
+      settleDrop();
+      const box = map.getBoundingClientRect();
+      svg.setAttribute("viewBox", `0 0 ${box.width.toFixed(1)} ${box.height.toFixed(1)}`);
+      edges.forEach((edge) => {
+        const a = nodeOf(edge.from).getBoundingClientRect();
+        const b = nodeOf(edge.to).getBoundingClientRect();
+        const sameColumn = Math.abs(a.left - b.left) < 1;
+        let x1 = a.right - box.left + METHOD_START;
+        let y1 = a.top + a.height / 2 - box.top;
+        let x2 = b.left - box.left - METHOD_END;
+        let y2 = b.top + b.height / 2 - box.top;
+        let d;
+        let mx;
+        let my;
+        if (sameColumn && b.top - a.bottom < METHOD_DOWN_MAX) {
+          // Соседи по колонке: прямо вниз, подпись — посередине.
+          x1 = a.left + a.width / 2 - box.left; y1 = a.bottom - box.top + METHOD_START;
+          x2 = x1; y2 = b.top - box.top - METHOD_END;
+          d = `M${x1},${y1} L${x2},${y2}`;
+          mx = x1; my = (y1 + y2) / 2;
+        } else if (sameColumn) {
+          // Через блок: петля справа от колонки, входит в блок сбоку; подпись — в начале петли, где свободно.
+          x2 = b.right - box.left + METHOD_END;
+          d = `M${x1},${y1} C${x1 + METHOD_LOOP},${y1} ${x2 + METHOD_LOOP},${y2} ${x2},${y2}`;
+          mx = bezier(x1, x1 + METHOD_LOOP, x2 + METHOD_LOOP, x2, METHOD_LOOP_LABEL_T);
+          my = bezier(y1, y1, y2, y2, METHOD_LOOP_LABEL_T);
+        } else if (x2 - x1 > b.width) {
+          // Через колонку: прямо по своей строке (там, где у промежуточной колонки нет блока), и уже в
+          // последнем промежутке — изгиб к цели: линия вся на виду, а не под чужими блоками.
+          const xh = x2 - METHOD_ELBOW;
+          d = `M${x1},${y1} L${xh},${y1} C${xh + METHOD_ELBOW * 0.6},${y1} ${xh + METHOD_ELBOW * 0.4},${y2} ${x2},${y2}`;
+          mx = (x1 + xh) / 2; my = y1;
+        } else {
+          const cx = (x2 - x1) * 0.5;
+          d = `M${x1},${y1} C${x1 + cx},${y1} ${x2 - cx},${y2} ${x2},${y2}`;
+          mx = (x1 + x2) / 2; my = (y1 + y2) / 2;
+        }
+        edge.path.setAttribute("d", d);
+        if (edge.text) {
+          // Островок-подпись сидит посреди своей линии.
+          edge.text.style.left = `${mx.toFixed(1)}px`;
+          edge.text.style.top = `${my.toFixed(1)}px`;
+        }
+      });
+    }
+
+    function highlight(id) {
+      edges.forEach((edge) => {
+        const on = id !== null && (edge.from === id || edge.to === id);
+        edge.path.classList.toggle("is-on", on);
+        edge.path.classList.toggle("is-off", id !== null && !on);
+        edge.path.setAttribute("marker-end", on ? "url(#method-arrow-on)" : "url(#method-arrow)");
+        edge.path.setAttribute("marker-start", on ? "url(#method-dot-on)" : "url(#method-dot)");
+        if (edge.text) {
+          edge.text.classList.toggle("is-on", on);
+          edge.text.classList.toggle("is-off", id !== null && !on);
+        }
+      });
+      nodes.forEach((element) => {
+        const own = element.id.slice(3);
+        const near = id !== null && own !== id
+          && edges.some((edge) => (edge.from === id && edge.to === own) || (edge.to === id && edge.from === own));
+        element.classList.toggle("is-near", near);
+      });
+    }
+
+    nodes.forEach((element) => {
+      const id = element.id.slice(3);
+      ["mouseenter", "focus"].forEach((type) => element.addEventListener(type, () => highlight(id)));
+      ["mouseleave", "blur"].forEach((type) => element.addEventListener(type, () => highlight(null)));
+    });
+
+    draw();
+    if ("ResizeObserver" in window) new ResizeObserver(draw).observe(map);
+    // Шрифты подгружаются после первого кадра: высота блоков меняется, связи — вместе с ней.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+  }
+
+  // ---------------------------------------------------------------------------
   // Запуск: сбой одного блока не должен останавливать остальные
   // ---------------------------------------------------------------------------
 
@@ -874,6 +1009,7 @@
     ["факт", () => initFact(data.fact)],
     ["изломы", () => initBreaks(data.breaks)],
     ["прогноз по муниципалитету", () => initTeaser(data.teaser)],
+    ["метод", initMethod],
   ].forEach((block) => {
     try {
       block[1]();

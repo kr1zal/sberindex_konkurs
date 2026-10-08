@@ -377,7 +377,7 @@ _NOT_NUMBERS = (
     "Один из",
     r"миллионник\w*",
     r"перв\w+ этап\w*",
-    r"двухэтапн\w*",
+    r"[Дд]вухэтапн\w*",
     r"ни одн\w+",
 )
 
@@ -2048,16 +2048,18 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIsNone(landing_nav["demo/"]["target"])
         self.assertEqual(landing_nav["report/slides.html"]["target"], "_blank")
 
-    def test_the_method_diagram_link_says_it_opens_in_a_new_tab_to_screen_readers_too(self) -> None:
-        # Картинка-ссылка на схему метода открывается в новой вкладке, как остальные ссылки на документы: у неё нет
-        # видимого текста, а имя — длинный alt, поэтому скрытая подпись стоит прямо в ссылке, после картинки.
-        link = re.search(r'<a href="report/method\.svg" target="_blank" rel="noopener">\s*<img .*?>\s*(.*?)\s*</a>',
-                         self.html, re.S)
-        self.assertIsNotNone(link, "не нашлась ссылка-картинка схемы метода")
-        self.assertEqual(link.group(1), '<span class="visually-hidden"> (откроется в новой вкладке)</span>')
-        # И подпись под картинкой — со знаком и скрытым текстом, как у остальных ссылок.
-        caption = re.search(r"<figcaption>(.*?)</figcaption>", self.html, re.S).group(1)
-        self.assertIn("(откроется в новой вкладке)", caption)
+    def test_the_method_map_links_say_they_open_in_a_new_tab_to_screen_readers_too(self) -> None:
+        # Блоки карты решения и ссылка на схему целиком ведут в отчёт в новой вкладке, как остальные ссылки
+        # на документы: у каждой знак «↗» и скрытая подпись.
+        links = re.findall(r'<a class="method-node[^"]*"[^>]*target="_blank" rel="noopener">(.*?)</a>', self.html, re.S)
+        self.assertGreaterEqual(len(links), 12)
+        for body in links:
+            with self.subTest(link=re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", body)).strip()[:40]):
+                self.assertIn('<span class="ext" aria-hidden="true">&nbsp;↗</span>', body)
+                self.assertIn('<span class="visually-hidden"> (откроется в новой вкладке)</span>', body)
+        scheme = re.search(r'<a href="report/method\.svg" target="_blank" rel="noopener">(.*?)</a>', self.html, re.S)
+        self.assertIsNotNone(scheme, "не нашлась ссылка на схему целиком")
+        self.assertIn("(откроется в новой вкладке)", scheme.group(1))
 
     def test_the_word_stand_names_only_the_protocol_with_injections(self) -> None:
         # Страница прогноза по муниципалитету на сайте нигде не «стенд»: слово зарезервировано за стендом с
@@ -2194,6 +2196,40 @@ class BuildSiteTest(unittest.TestCase):
                 lib = page.index('<script src="site/landing-lib.js" defer></script>')
                 script = page.index('<script src="site/landing.js" defer></script>')
                 self.assertLess(lib, script)
+
+    def test_method_map_nodes_lead_to_report_sections_and_edges_join_existing_nodes(self) -> None:
+        # Карта решения: каждый блок — ссылка в существующий раздел отчёта (в новой вкладке); связи в скрипте
+        # соединяют только блоки разметки; числа блоков — подстановки генератора из конфигов и формы матрицы.
+        report_ids = _IdCollector()
+        report_ids.feed((ROOT / "report" / "report.html").read_text(encoding="utf-8"))
+        nodes = re.findall(r'<a class="method-node[^"]*" id="mn-([a-z]+)" data-col="(\d)" data-row="(\d)" '
+                           r'href="report/report\.html#([^"]+)" target="_blank" rel="noopener">', self.html)
+        self.assertGreaterEqual(len(nodes), 12)
+        ids = {node_id for node_id, _, _, _ in nodes}
+        self.assertEqual(len(ids), len(nodes), "блоки карты повторяются")
+        for node_id, _, _, anchor in nodes:
+            with self.subTest(node=node_id):
+                self.assertIn(anchor, report_ids.ids, f"в отчёте нет раздела #{anchor}")
+        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        edges = js[js.index("const METHOD_EDGES = ["):js.index("];", js.index("const METHOD_EDGES = ["))]
+        pairs = re.findall(r'\["([a-z]+)", "([a-z]+)", "[^"]*"\]', edges)
+        self.assertGreaterEqual(len(pairs), 10)
+        for start, finish in pairs:
+            with self.subTest(edge=f"{start}→{finish}"):
+                self.assertIn(start, ids)
+                self.assertIn(finish, ids)
+        text = _IdsOf(self.html)
+        n_months = len(self.wide)
+        self.assertIn(f"{_fmt(self.wide.shape[1], 0)} муниципалитетов по месяцам, {n_months}\u00a0"
+                      f"{_plural(n_months, 'месяц', 'месяца', 'месяцев')}", text.text("mn-panel"))
+        horizons = sorted(int(h["horizon"]) for h in self.horizons_cfg["horizons"])
+        listed = ", ".join(str(h) for h in horizons[:-1]) + f" и {horizons[-1]}\u00a0мес."
+        n_folds = int(self.full_cfg["split"]["n_folds"])
+        words = {1: "одно", 2: "два", 3: "три", 4: "четыре", 5: "пять"}
+        self.assertIn(f"горизонты {listed}; основной протокол — {words[n_folds]} "
+                      f"{_plural(n_folds, 'окно', 'окна', 'окон')} по {self.full_cfg['split']['horizon']}\u00a0",
+                      text.text("mn-origin"))
+        self.assertIn("report/method.svg", self.html)
 
     def test_page_links_to_the_expected_materials(self) -> None:
         collector = _LinkCollector()
