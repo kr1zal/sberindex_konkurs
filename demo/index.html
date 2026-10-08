@@ -46,8 +46,12 @@
     <p class="eyebrow">Прогноз по муниципалитету</p>
     <h1 class="stand-title" id="stand-title">Покажите мой город</h1>
     <p class="stand-intro" id="intro-text">Загрузка данных…</p>
+  </div>
+</section>
 
-    <div class="stand-search">
+<div class="wrap mo-wrap">
+  <section class="mo-card" aria-labelledby="mo-name">
+    <div class="finder">
       <div class="search" role="search">
         <label class="search-label" for="mo-search">Муниципалитет или регион</label>
         <div class="field">
@@ -60,40 +64,55 @@
         <ul id="mo-listbox" role="listbox" class="suggestions" aria-label="Результаты поиска" hidden></ul>
         <p id="mo-search-status" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
       </div>
-
-      <div class="quick" id="quick-chips" role="group" aria-label="Быстрый выбор муниципального образования"></div>
-      <p class="search-hint" id="search-hint"></p>
       <p class="stand-alert" id="mo-invalid-note" role="alert" hidden></p>
       <noscript>
         <p class="stand-alert">Страница работает с включённым JavaScript: данные и графики строит скрипт.</p>
       </noscript>
-    </div>
-  </div>
-</section>
 
-<div class="wrap mo-wrap">
-  <section class="mo-card" aria-labelledby="mo-name">
-    <div class="mo-title">
-      <p class="mono-label">Выбранный муниципалитет</p>
-      <h2 class="mo-name" id="mo-name">—</h2>
-      <p class="mo-meta" id="mo-meta"></p>
-    </div>
-    <p class="mo-note" id="mo-no-region-note" hidden></p>
+      <p class="finder-label">Примеры разного масштаба</p>
+      <div class="quick" id="quick-chips" role="group" aria-label="Примеры разного масштаба"></div>
+      <button type="button" class="pick pick-random" id="mo-random">
+        <span id="mo-random-label">Случайный муниципалитет</span>
+        <span class="pick-icon" aria-hidden="true">↻</span>
+      </button>
 
-    <div class="chart-legend" id="mo-legend"></div>
-    <div class="chart-container" id="mo-chart"></div>
-
-    <div class="chart-notes">
-      <p class="chart-caption" id="mo-forecast-caption"></p>
-      <p class="chart-caption" id="mo-breaks-caption"></p>
-    </div>
-
-    <details class="numbers-details">
-      <summary>Числа графика</summary>
-      <div class="table-scroll">
-        <table class="data-table" id="mo-numbers-table"></table>
+      <label class="finder-label" for="mo-region">Или по региону</label>
+      <div class="select-wrap">
+        <select id="mo-region" class="finder-select">
+          <option value="">Все регионы</option>
+        </select>
       </div>
-    </details>
+      <div class="select-wrap" id="mo-in-region-wrap" hidden>
+        <select id="mo-in-region" class="finder-select" aria-label="Муниципалитет выбранного региона"></select>
+      </div>
+
+      <p class="search-hint" id="search-hint"></p>
+    </div>
+
+    <div class="mo-main">
+      <div class="mo-head">
+        <div class="mo-title">
+          <p class="mono-label">Выбранный муниципалитет</p>
+          <h2 class="mo-name" id="mo-name">—</h2>
+          <p class="mo-meta" id="mo-meta"></p>
+        </div>
+        <div class="chart-legend" id="mo-legend"></div>
+      </div>
+      <div class="chart-container" id="mo-chart"></div>
+
+      <div class="chart-notes">
+        <p class="chart-caption" id="mo-forecast-caption"></p>
+        <p class="chart-caption" id="mo-breaks-caption"></p>
+        <p class="chart-caption mo-note" id="mo-no-region-note" tabindex="-1" hidden></p>
+      </div>
+
+      <details class="numbers-details">
+        <summary>Числа графика</summary>
+        <div class="table-scroll">
+          <table class="data-table" id="mo-numbers-table"></table>
+        </div>
+      </details>
+    </div>
   </section>
 </div>
 

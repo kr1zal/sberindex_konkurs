@@ -168,11 +168,12 @@ function normalizeSearchText(s) {
   return s.toLowerCase().replace(/ё/g, "е");
 }
 
-function buildSearchIndex(seriesRows, quick, meanUnit) {
+function buildSearchIndex(seriesRows, featuredIds, meanUnit) {
   // seriesRows — index.json.series: [[series_id, регион|null, ОКТМО|null, файл, средние расходы], ...];
-  // пятый элемент есть только у рядов без региона. quick — index.json.quick: [{id, short}, ...].
+  // пятый элемент есть только у рядов без региона. featuredIds — index.json.featured: ряды, которые
+  // идут первыми среди подошедших под запрос (известные города; не то же, что примеры index.json.quick).
   // meanUnit — index.json.mean_unit: единица этого числа вместе с периодом, её пишет генератор.
-  const featured = new Set((quick || []).map((item) => item.id));
+  const featured = new Set(featuredIds || []);
   return seriesRows.map(([seriesId, region, oktmo, fileNumber, mean]) => ({
     seriesId, region, oktmo, fileNumber,
     mean: mean === undefined ? null : mean,
@@ -279,7 +280,7 @@ function introText(index) {
   const total = index.n_series;
   return `Любой из ${rubFmt(total)} ` +
     `${pluralRu(total, "муниципалитета", "муниципалитетов", "муниципалитетов")} панели: ` +
-    `расходы по месяцам, прогноз на ${forecastYear} год, изломы ряда (точки структурных изменений) и то, как модели ошибались ` +
+    `расходы по месяцам, прогноз на ${forecastYear} год, точки структурных изменений и то, как модели ошибались ` +
     `на нём при проверке на истории — ${monthSpanText(firstFold.test_from, lastFold.test_to)}.`;
 }
 
@@ -287,18 +288,14 @@ function searchHintText(index) {
   const total = index.n_series;
   const noRegion = index.n_no_region;
   // Ряды с суффиксом « #N» в series_id — те самые, о которых говорит последняя фраза
-  // («их различает номер после «#»»), а не любые ряды с неуникальным базовым именем:
+  // («различает номер после «#»»), а не любые ряды с неуникальным базовым именем:
   // у части омонимов вторая копия выпала из панели по пропускам, и счёт по имени
-  // занижал бы число.
-  const names = index.n_hash_names;
+  // занижал бы число. Единицу различителя рядов без региона подсказка не объясняет:
+  // он идёт в самой подсказке поиска вместе с единицей (regionLabel).
   const series = index.n_hash_series;
   return "Ищите по любым словам из названия или региона. " +
-    `У ${rubFmt(noRegion)} из ${rubFmt(total)} ` +
-    `${pluralRu(total, "муниципального образования", "муниципальных образований", "муниципальных образований")} ` +
-    `регион не определён, в том числе у ${rubFmt(series)} ` +
-    `${pluralRu(series, "одноимённого ряда", "одноимённых рядов", "одноимённых рядов")} ` +
-    `(${rubFmt(names)} ${pluralRu(names, "название", "названия", "названий")}) — их различает номер после «#», ` +
-    `а в подсказках рядом — средние расходы, ${index.mean_unit}.`;
+    `У ${rubFmt(noRegion)} из ${rubFmt(total)} ${pluralRu(total, "ряда", "рядов", "рядов")} регион не определён, ` +
+    `${rubFmt(series)} ${pluralRu(series, "одноимённый", "одноимённых", "одноимённых")} среди них различает номер после «#».`;
 }
 
 function invalidMoMessage(seriesId) {
@@ -794,6 +791,7 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
   if (document.activeElement === searchInput) selectFieldText(searchInput);
   document.getElementById("mo-name").textContent = seriesId;
   markQuickChip(seriesId);
+  syncRegionPicker(seriesId);
   // Заголовок вкладки — с названием текущего МО: у ссылки с ?mo= иначе был бы всегда
   // один и тот же заголовок вне зависимости от того, что на ней открыто.
   document.title = `${seriesId} — прогноз по муниципалитету`;
@@ -814,9 +812,25 @@ async function selectMo(index, requestedSeriesId, { pushUrl }) {
       metaEl.append(separator, code);
     }
     noteEl.hidden = true;
+    noteEl.textContent = "";
   } else {
-    metaEl.textContent = "Регион не определён";
-    noteEl.textContent = noRegionExplanationText(seriesId);
+    // Строка региона есть у каждого МО и одной высоты, а пояснение, почему регион не приписан, —
+    // под графиком среди подписей, не над ним: иначе график сдвигался бы на высоту пояснения
+    // при каждой смене МО. Ссылка «почему?» ставит фокус на пояснение (оно прокручивается в окно),
+    // адрес и история при этом не меняются.
+    metaEl.textContent = "Регион не определён · ";
+    const why = document.createElement("a");
+    why.href = "#mo-no-region-note";
+    why.textContent = "почему?";
+    why.addEventListener("click", (event) => {
+      event.preventDefault();
+      noteEl.scrollIntoView({ block: "nearest" });
+      noteEl.focus({ preventScroll: true });
+    });
+    metaEl.appendChild(why);
+    const lead = document.createElement("strong");
+    lead.textContent = "Регион не определён. ";
+    noteEl.replaceChildren(lead, document.createTextNode(noRegionExplanationText(seriesId)));
     noteEl.hidden = false;
   }
 
@@ -848,9 +862,9 @@ function selectMoSafe(index, seriesId, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Быстрые кнопки: несколько МО одним нажатием. Список и подписи — index.quick (константа
-// генератора), выбор — тем же путём, что из поиска, поэтому адрес ?mo=, кнопка «назад»
-// и защита от гонки работают так же.
+// Примеры: четыре МО разного масштаба одним нажатием, с подписью, чем пример отличается от
+// соседей. Список и подписи — index.quick (константа генератора), выбор — тем же путём, что
+// из поиска, поэтому адрес ?mo=, кнопка «назад» и защита от гонки работают так же.
 // ---------------------------------------------------------------------------
 
 function setupQuickChips(index) {
@@ -858,9 +872,14 @@ function setupQuickChips(index) {
   (index.quick || []).forEach((item) => {
     const chip = document.createElement("button");
     chip.type = "button";
-    chip.className = "chip";
-    chip.textContent = item.short;
-    // Полное название — подсказкой при наведении: короткая подпись («Михайловский р-н #2»)
+    chip.className = "pick";
+    const name = document.createElement("span");
+    name.textContent = item.short;
+    const kind = document.createElement("span");
+    kind.className = "pick-kind";
+    kind.textContent = item.kind;
+    chip.append(name, kind);
+    // Полное название — подсказкой при наведении: короткая подпись («Михайловский #2»)
     // не говорит, какой именно ряд за ней стоит.
     chip.title = item.id;
     chip.dataset.mo = item.id;
@@ -873,9 +892,83 @@ function setupQuickChips(index) {
 /** Нажатой выглядит кнопка того МО, которое показано сейчас, — а не того, что выбрано
  * и ещё грузится: вызывается из selectMo после смены содержимого страницы. */
 function markQuickChip(seriesId) {
-  document.getElementById("quick-chips").querySelectorAll(".chip").forEach((chip) => {
+  document.getElementById("quick-chips").querySelectorAll(".pick").forEach((chip) => {
     chip.setAttribute("aria-pressed", String(chip.dataset.mo === seriesId));
   });
+}
+
+// ---------------------------------------------------------------------------
+// Случайный муниципалитет: любой ряд панели — так видно, что их не четыре, а две тысячи.
+// ---------------------------------------------------------------------------
+
+function setupRandomPick(index) {
+  document.getElementById("mo-random-label").textContent = `Случайный из ${rubFmt(index.n_series)}`;
+  document.getElementById("mo-random").addEventListener("click", () => {
+    const rows = index.searchRows;
+    const row = rows[Math.floor(Math.random() * rows.length)];
+    selectMoSafe(index, row.seriesId, { pushUrl: true });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Выбор по региону: список регионов панели с числом рядов, затем — муниципалитеты выбранного
+// региона. Ряды без региона собраны в последний пункт. Выбор идёт тем же путём, что из поиска
+// и примеров (selectMoSafe): адрес ?mo= и кнопка «назад» работают так же.
+// ---------------------------------------------------------------------------
+
+const NO_REGION_OPTION = "#no-region";
+
+function addOption(select, value, text) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = text;
+  select.appendChild(option);
+}
+
+function setupRegionPicker(index) {
+  const regionSelect = document.getElementById("mo-region");
+  const moWrap = document.getElementById("mo-in-region-wrap");
+  const moSelect = document.getElementById("mo-in-region");
+  const collator = new Intl.Collator("ru");
+
+  const byRegion = new Map();
+  index.searchRows.forEach((row) => {
+    const key = row.region || NO_REGION_OPTION;
+    if (!byRegion.has(key)) byRegion.set(key, []);
+    byRegion.get(key).push(row);
+  });
+  const regions = [...byRegion.keys()].filter((key) => key !== NO_REGION_OPTION).sort(collator.compare);
+
+  regionSelect.replaceChildren();
+  addOption(regionSelect, "", `Все регионы — ${rubFmt(regions.length)}`);
+  regions.forEach((region) => addOption(regionSelect, region, `${region} — ${rubFmt(byRegion.get(region).length)}`));
+  if (byRegion.has(NO_REGION_OPTION)) {
+    addOption(regionSelect, NO_REGION_OPTION, `Регион не определён — ${rubFmt(byRegion.get(NO_REGION_OPTION).length)}`);
+  }
+
+  regionSelect.addEventListener("change", () => {
+    moSelect.replaceChildren();
+    if (!regionSelect.value) {
+      moWrap.hidden = true;
+      return;
+    }
+    const rows = [...byRegion.get(regionSelect.value)].sort((a, b) => collator.compare(a.seriesId, b.seriesId));
+    addOption(moSelect, "", `Муниципалитет — ${rubFmt(rows.length)}, выберите`);
+    rows.forEach((row) => addOption(moSelect, row.seriesId, row.seriesId));
+    moWrap.hidden = false;
+    moSelect.focus();
+  });
+
+  moSelect.addEventListener("change", () => {
+    if (moSelect.value) selectMoSafe(index, moSelect.value, { pushUrl: true });
+  });
+}
+
+/** Список муниципалитетов региона показывает текущее МО, только если оно выбрано из него:
+ * после выбора из поиска или примеров он возвращается к заголовку, а не держит прежнее имя. */
+function syncRegionPicker(seriesId) {
+  const moSelect = document.getElementById("mo-in-region");
+  if (moSelect.value !== seriesId) moSelect.value = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -1048,7 +1141,7 @@ function setupCombobox(index) {
     if (!pointerFocus) selectFieldText(input);
     if (input.value.trim()) renderOptions(input.value);
   });
-  // Уход с поля клавишей Tab закрывает список: следом идут быстрые кнопки, и открытый
+  // Уход с поля клавишей Tab закрывает список: следом идут примеры, и открытый
   // список закрывал бы их от глаз. Выбор мышью поле не покидает — см. mousedown выше.
   input.addEventListener("blur", () => {
     pointerFocus = null;
@@ -1084,7 +1177,7 @@ function setupCombobox(index) {
 
 async function init() {
   const index = await fetchJson("data/index.json");
-  index.searchRows = buildSearchIndex(index.series, index.quick, index.mean_unit);
+  index.searchRows = buildSearchIndex(index.series, index.featured, index.mean_unit);
   index.seriesById = new Map(index.searchRows.map((row) => [row.seriesId, row]));
 
   document.getElementById("intro-text").textContent = introText(index);
@@ -1093,6 +1186,8 @@ async function init() {
 
   setupCombobox(index);
   setupQuickChips(index);
+  setupRandomPick(index);
+  setupRegionPicker(index);
 
   window.addEventListener("popstate", (event) => {
     const seriesId = (event.state && event.state.mo) || getMoParam() || index.default_mo;

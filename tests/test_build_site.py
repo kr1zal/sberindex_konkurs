@@ -44,7 +44,7 @@ _spec.loader.exec_module(build_site)
 INDEX_JSON_KEYS = {
     "built", "unit", "origin", "panel_months", "forecast_months", "n_series",
     "n_no_region", "n_homonym_names", "n_homonym_series", "n_hash_names", "n_hash_series",
-    "default_mo", "mean_unit", "quick", "forecast_rule", "known_model", "breaks", "folds", "models",
+    "default_mo", "mean_unit", "quick", "featured", "forecast_rule", "known_model", "breaks", "folds", "models",
     "panel_mae", "series",
 }
 AGGREGATE_JSON_KEYS = {
@@ -538,21 +538,25 @@ class BuildSiteTest(unittest.TestCase):
                     self.assertNotRegex(code, r"mean_unit|meanUnit|regionLabel")
 
     def test_quick_buttons_point_at_panel_series_with_short_labels(self) -> None:
-        # Быстрые кнопки стенда: каждая — ряд панели (иначе кнопка открыла бы МО по умолчанию
-        # с сообщением «в данных стенда нет»), подписи короткие и не повторяются.
+        # Примеры страницы прогноза: каждый — ряд панели (иначе кнопка открыла бы МО по умолчанию
+        # с сообщением «в данных стенда нет»), подписи короткие и не повторяются, у каждого —
+        # чем он отличается от соседей (тоже без повторов).
         quick = self.index_json["quick"]
         self.assertGreaterEqual(len(quick), 3)
         columns = set(self.wide.columns)
         for item in quick:
             with self.subTest(series=item["id"]):
-                self.assertEqual(set(item), {"id", "short"})
+                self.assertEqual(set(item), {"id", "short", "kind"})
                 self.assertIn(item["id"], columns)
                 self.assertTrue(item["short"].strip())
+                self.assertTrue(item["kind"].strip())
                 self.assertLess(len(item["short"]), len(item["id"]))
         ids = [item["id"] for item in quick]
         self.assertEqual(len(set(ids)), len(ids), "ряд встречается среди кнопок дважды")
         shorts = {item["id"]: item["short"] for item in quick}
         self.assertEqual(len(set(shorts.values())), len(quick), "две кнопки с одной подписью")
+        kinds = [item["kind"] for item in quick]
+        self.assertEqual(len(set(kinds)), len(kinds), "два примера с одним отличием")
         # Страница без ?mo= открывается на МО по умолчанию — его кнопка должна быть в списке.
         self.assertIn(self.index_json["default_mo"], ids)
         # В наборе есть и ряд с регионом, и ряд без региона, и ряд-омоним с номером «#N».
@@ -560,15 +564,31 @@ class BuildSiteTest(unittest.TestCase):
         self.assertTrue(any(regions[i] for i in ids), "нет ряда с регионом")
         self.assertTrue(any(not regions[i] for i in ids), "нет ряда без региона")
         self.assertTrue(any(re.search(r" #\d+$", i) for i in ids), "нет ряда с номером «#N»")
-        # Общие с примерами главной ряды подписаны там так же.
-        for series_id, short, _ in build_site.TEASER_MO:
+        # Общие с примерами главной ряды подписаны там так же — и подпись, и отличие.
+        kinds_by_id = {item["id"]: item["kind"] for item in quick}
+        for series_id, short, kind in build_site.TEASER_MO:
             if series_id in shorts:
                 self.assertEqual(shorts[series_id], short)
+                self.assertEqual(kinds_by_id[series_id], kind)
 
     def test_build_quick_rejects_series_missing_from_the_panel(self) -> None:
         with self.assertRaises(ValueError):
             build_site.build_quick([build_site.STAND_QUICK_MO[0][0]])
         self.assertEqual(build_site.build_quick(self.wide.columns), self.index_json["quick"])
+
+    def test_featured_series_lead_the_search_and_exist_in_the_panel(self) -> None:
+        # Ряды, которые поиск ставит первыми, — отдельный список, не примеры: примеров четыре
+        # и среди них нет Новосибирска, а запрос «новосибирск» должен открывать город, не район.
+        featured = self.index_json["featured"]
+        self.assertEqual(featured, list(build_site.SEARCH_FEATURED_MO))
+        self.assertEqual(len(set(featured)), len(featured))
+        columns = set(self.wide.columns)
+        for series_id in featured:
+            with self.subTest(series=series_id):
+                self.assertIn(series_id, columns)
+        self.assertIn("городской округ город Новосибирск", featured)
+        with self.assertRaises(ValueError):
+            build_site.build_featured([featured[0]])
 
     def test_aggregate_json_top_level_keys(self) -> None:
         self.assertEqual(set(self.aggregate_json), AGGREGATE_JSON_KEYS)
@@ -1111,6 +1131,9 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual(ids.ids["quick-chips"]["role"], "group")
         self.assertTrue(ids.ids["quick-chips"]["aria-label"])
         self.assertEqual(ids.ids["mo-invalid-note"]["role"], "alert")
+        # Выбор по региону — два select с подписями: у первого — label по for, у второго — aria-label.
+        self.assertIn('for="mo-region"', self.demo_html)
+        self.assertTrue(ids.ids["mo-in-region"]["aria-label"])
         # Часть того же сайта: общая тема и шрифты, шапка с теми же ссылками, что на главной,
         # и переход к интерактивной версии блока агрегата («Проверка фактом»).
         for link in ("../site/site.css", "demo.css", "linechart.js", "demo.js", "../", "../report/report.html",
@@ -1119,6 +1142,38 @@ class BuildSiteTest(unittest.TestCase):
                 self.assertIn(link, links.links)
         for licence in ("unbounded", "onest", "jetbrains-mono"):
             self.assertIn(f"../site/fonts/{licence}-OFL.txt", links.links)
+
+    def test_demo_card_puts_the_picker_beside_the_chart_and_the_region_note_under_it(self) -> None:
+        # Карточка выбранного МО: слева колонка выбора (поиск, примеры, случайный, по региону),
+        # справа — название, строка региона и график. Пояснение «регион не определён» — среди
+        # подписей под графиком, а не над ним: иначе график сдвигался бы на высоту пояснения
+        # при каждой смене МО. Обложка — только заголовок и строка-вступление, поиска на ней нет.
+        html = self.demo_html
+        hero_end = html.index("</section>", html.index('class="stand-hero'))
+        finder = html.index('class="finder"')
+        main = html.index('class="mo-main"')
+        self.assertLess(hero_end, finder)
+        self.assertLess(finder, main)
+        for element_id in ("mo-search", "quick-chips", "mo-random", "mo-region", "mo-in-region", "search-hint"):
+            with self.subTest(id=element_id):
+                position = html.index(f'id="{element_id}"')
+                self.assertLess(finder, position)
+                self.assertLess(position, main)
+        chart = html.index('id="mo-chart"')
+        notes = html.index('class="chart-notes"')
+        note = html.index('id="mo-no-region-note"')
+        self.assertLess(main, html.index('id="mo-meta"'))
+        self.assertLess(html.index('id="mo-meta"'), chart)
+        self.assertLess(chart, notes)
+        self.assertLess(notes, note)
+        self.assertNotIn("stand-search", html)
+        # Строка региона есть у каждого МО: у ряда без региона — со ссылкой «почему?» на пояснение,
+        # и само пояснение начинается с тех же слов.
+        js = (ROOT / "demo" / "demo.js").read_text(encoding="utf-8")
+        self.assertIn('why.href = "#mo-no-region-note";', js)
+        self.assertIn('why.textContent = "почему?";', js)
+        self.assertIn('lead.textContent = "Регион не определён. ";', js)
+        self.assertIn("syncRegionPicker(seriesId);", js)
 
     def test_demo_page_has_no_hand_typed_numbers(self) -> None:
         # Как в шаблоне главной: число на странице приходит из данных (его подставляет скрипт),

@@ -1,83 +1,39 @@
 /* Стенд поверх общей темы ../site/site.css. Шрифты, токены (в том числе цвета рядов графика
-   --chart-*), шапка, поле поиска, чипы, кнопки и подвал — оттуда: у стенда и главной они одни
-   и те же (тема одна, светлая). Здесь — раскладка стенда, график с подсказкой, таблицы и четыре
-   собственных токена: заливка и текст пояснения «регион не определён», заливка и текст
-   лучшей в столбце модели.
+   --chart-*), шапка, поле поиска, кнопки и подвал — оттуда: у стенда и главной они одни
+   и те же (тема одна, светлая). Здесь — раскладка стенда (колонка выбора и график в одной
+   карточке), график с подсказкой, таблицы и два собственных токена: заливка и текст лучшей
+   в столбце модели.
 
    Своих анимаций и переходов у стенда нет; плавные переходы кнопок и чипов из site.css
    отключаются при prefers-reduced-motion. */
 
 :root {
-  --note-bg: #fff4e0;
-  --note-ink: #6b4a12;
   --best-bg: #e8f1fc;
   --best-ink: #174f93;
 }
 
-/* -- обложка: заголовок, поле поиска, быстрые кнопки ---------------------------------- */
+/* -- обложка: заголовок и одна строка; поиск живёт в карточке ниже ------------------------ */
 
 .stand-hero {
-  padding: 30px 0 76px;
+  padding: 20px 0 64px;
 }
 
 .stand-title {
-  margin: 14px 0 0;
-  font-size: clamp(2.25rem, 4.4vw, 3.75rem);
-  line-height: 1.05;
+  margin: 10px 0 0;
+  font-size: clamp(2rem, 3vw, 2.5rem);
+  line-height: 1.08;
   letter-spacing: -0.02em;
 }
 
 .stand-intro {
-  max-width: 720px;
-  margin: 18px 0 0;
+  max-width: 860px;
+  margin: 10px 0 0;
   color: var(--night-ink-3);
-  font-size: 1.125rem;
-  line-height: 1.6;
-}
-
-/* Поиск выше карточки выбранного МО: список подсказок выходит за нижний край обложки.
-   Поле и текст под ним держат читаемую ширину, а кнопки идут в одну строку шире поля. */
-.stand-search {
-  position: relative;
-  z-index: 5;
-  margin-top: 28px;
-}
-
-.stand-search .search, .search-hint, .stand-alert {
-  max-width: 720px;
-}
-
-.quick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.search-hint {
-  margin: 14px 0 0;
-  color: var(--night-dim);
-  font-size: 0.8125rem;
-  line-height: 1.55;
-}
-
-.stand-alert {
-  margin: 14px 0 0;
-  padding: 12px 16px;
-  background: var(--night-surface);
-  border: 1px solid var(--night-rule);
-  border-left: 3px solid var(--amber);
-  border-radius: 12px;
-  color: var(--night-ink);
   font-size: 0.9375rem;
   line-height: 1.5;
 }
 
-.stand-alert[hidden] {
-  display: none;
-}
-
-/* -- карточка выбранного МО: заходит на обложку снизу ------------------------------------ */
+/* -- карточка выбранного МО: заходит на обложку снизу; слева выбор, справа график ----------- */
 
 .mo-wrap {
   position: relative;
@@ -86,48 +42,244 @@
 }
 
 .mo-card {
-  padding: 30px 32px;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 24px 28px;
+  padding: 24px 28px 22px;
   background: var(--surface);
   border: 1px solid var(--rule);
   border-radius: 24px;
 }
 
+/* Список подсказок выходит из поля вниз и ложится поверх примеров: колонке выбора — слой выше графика. */
+.finder {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.finder .search-label {
+  margin-bottom: 8px;
+}
+
+.finder-label {
+  display: block;
+  margin: 20px 0 0;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.quick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Пример — строка во всю ширину колонки: название слева, чем он отличается от соседей — справа. */
+.pick {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.pick:hover {
+  border-color: var(--field-line);
+}
+
+.pick[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+
+.pick-kind {
+  flex: none;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pick[aria-pressed="true"] .pick-kind {
+  color: var(--night-ink-3);
+}
+
+.pick-random {
+  margin-top: 10px;
+  border-style: dashed;
+  border-color: var(--field-line);
+  color: var(--accent);
+}
+
+.pick-random:hover {
+  border-color: var(--ink);
+}
+
+.pick-icon {
+  flex: none;
+  font-size: 1rem;
+}
+
+/* Выбор региона и муниципалитета — системные select в рамке поля, стрелка своя. */
+.select-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+
+.select-wrap[hidden] {
+  display: none;
+}
+
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--ink-soft);
+  border-bottom: 1.5px solid var(--ink-soft);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+
+.finder-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 38px 0 14px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: 0.875rem;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.finder-select:hover {
+  border-color: var(--field-line);
+}
+
+.finder-select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.search-hint {
+  margin: 14px 0 0;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.stand-alert {
+  margin: 14px 0 0;
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--amber);
+  border-radius: 12px;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.stand-alert[hidden] {
+  display: none;
+}
+
+.mo-main {
+  min-width: 0;
+}
+
+/* Название и строка региона слева, легенда справа. Строка региона есть у каждого МО и одной
+   высоты: пояснение, почему регион не приписан, лежит под графиком, иначе график сдвигался бы
+   при каждой смене МО. */
+.mo-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px 24px;
+}
+
+.mo-title {
+  min-width: 0;
+}
+
 .mo-name {
-  margin: 10px 0 0;
-  font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.125rem);
+  margin: 8px 0 0;
+  font-size: clamp(1.375rem, 1rem + 1.2vw, 1.75rem);
   line-height: 1.15;
 }
 
 .mo-meta {
-  margin: 8px 0 0;
+  min-height: 1.5em;
+  margin: 6px 0 0;
   color: var(--ink-soft);
-  font-size: 1rem;
-}
-
-.mo-meta:empty {
-  display: none;
+  font-size: 0.9375rem;
+  line-height: 1.5;
 }
 
 .oktmo {
   white-space: nowrap;
 }
 
+/* Легенда — своей строкой под названием, на всю ширину: ряды слева, единица справа. */
+.mo-head .chart-legend {
+  flex: 1 1 100%;
+  margin-bottom: 0;
+}
+
+.mo-card .chart-container {
+  margin-top: 18px;
+}
+
+/* Пояснение «регион не определён» — среди подписей под графиком, с янтарной чертой слева.
+   Ссылка «почему?» в строке региона ставит на него фокус. */
 .mo-note {
-  margin: 16px 0 0;
-  padding: 12px 16px;
-  background: var(--note-bg);
-  border-radius: 12px;
-  color: var(--note-ink);
-  font-size: 0.875rem;
-  line-height: 1.55;
+  padding-left: 14px;
+  border-left: 2px solid var(--amber);
+  scroll-margin-top: 24px;
 }
 
 .mo-note[hidden] {
   display: none;
 }
 
-.mo-card .chart-legend {
-  margin-top: 26px;
+.mo-note:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 6px;
+}
+
+.mo-note strong {
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .chart-notes {
@@ -138,6 +290,15 @@
 
 .chart-notes .chart-caption:first-child {
   margin-top: 0;
+}
+
+/* Узкое окно: колонка выбора над графиком, легенда под названием слева. */
+@media (max-width: 1023px) {
+  .mo-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+  }
+
 }
 
 /* -- график: контейнер, легенда, подписи -------------------------------------------------- */
@@ -686,18 +847,28 @@ table.data-table tbody tr:last-child th, table.data-table tbody tr:last-child td
     padding: 14px 0 64px;
   }
 
-  .stand-intro {
-    margin-top: 14px;
-    font-size: 1rem;
-  }
-
-  .stand-search {
-    margin-top: 22px;
-  }
-
   .mo-card {
     padding: 22px 18px 18px;
     border-radius: 20px;
+  }
+
+  /* На телефоне примеры — в два столбца, отличие под названием: колонка выбора короче,
+     график ближе к верху страницы. */
+  .quick {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pick {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 12px;
+  }
+
+  .pick-random {
+    flex-direction: row;
+    align-items: center;
   }
 
   /* Регион и код ОКТМО — двумя строками без разделителя: код не рвётся и не оставляет

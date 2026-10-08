@@ -57,8 +57,10 @@
     mean_unit            единица различителя рядов без региона вместе с периодом, после числа: «тыс. ₽ на человека
                          в месяц за 2024 год» (`mean_unit_label`); страницы показывают её как есть, слов о периоде
                          в их скриптах нет
-    quick                [{id, short}, …] — быстрые кнопки под полем поиска: ряд (series_id) и
-                         короткая подпись кнопки, порядок как у STAND_QUICK_MO
+    quick                [{id, short, kind}, …] — примеры под полем поиска: ряд (series_id), короткая
+                         подпись кнопки и чем пример отличается от соседей, порядок как у STAND_QUICK_MO
+    featured             [series_id, …] — ряды, которые поиск ставит первыми среди подошедших под
+                         запрос (известные города), порядок как у SEARCH_FEATURED_MO
     forecast_rule        [{from, to, model, horizon, label}, …] — отрезки месяцев
                          прогноза подряд с одной моделью и горизонтом; label — как
                          в models[].label (или сырой model, если такой модели там нет)
@@ -241,18 +243,25 @@ TEASER_MO = [
     ("Тербунский муниципальный район", "Тербунский район", "сельский район"),
 ]
 
-# Быстрые кнопки под полем поиска на стенде: ряд (series_id панели) и короткая подпись кнопки.
-# Набор подобран так, чтобы с первого нажатия были видны все случаи стенда: города с регионом
-# и ОКТМО, ряд-омоним с номером «#N» (в адресе он идёт закодированным) и ряды без региона,
-# у которых стенд объясняет, почему регион не приписан. Подписи общих с примерами главной
-# рядов совпадают с TEASER_MO. Ряд, которого нет в панели, роняет сборку (`build_quick`).
+# Примеры на странице прогноза — четыре ряда разного масштаба под полем поиска: ряд (series_id
+# панели), короткая подпись кнопки и чем пример отличается от соседей (подпись на той же кнопке).
+# Первые три — те же, что на главной (TEASER_MO), четвёртый — ряд без региона с номером «#N»:
+# на нём страница объясняет, почему регион не приписан. Ряд, которого нет в панели, роняет
+# сборку (`build_quick`).
 STAND_QUICK_MO = [
-    (DEFAULT_MO, "Орёл"),
-    ("городской округ город Казань", "Казань"),
-    ("городской округ город Новосибирск", "Новосибирск"),
-    ("городской округ город Екатеринбург", "Екатеринбург"),
-    ("Михайловский муниципальный район #2", "Михайловский р-н #2"),
-    ("Ардатовский муниципальный район", "Ардатовский р-н"),
+    *TEASER_MO,
+    ("Михайловский муниципальный район #2", "Михайловский #2", "без региона"),
+]
+
+# Ряды, которые поиск страницы прогноза ставит первыми среди подошедших под запрос: известные
+# города. Без этого «новосибирск» открывал бы список Новосибирским районом, а не городом: название
+# района начинается с запроса целиком, у города запрос — третье слово. Ряд, которого нет в панели,
+# роняет сборку (`build_featured`).
+SEARCH_FEATURED_MO = [
+    DEFAULT_MO,
+    "городской округ город Казань",
+    "городской округ город Новосибирск",
+    "городской округ город Екатеринбург",
 ]
 
 # Различитель рядов без региона в подсказках поиска: средние расходы за столько последних месяцев
@@ -1056,16 +1065,26 @@ def _load_breaks(cp_cfg: dict, penalty: float) -> dict[str, list[str]]:
     return {series: sorted(months) for series, months in subset.groupby("series_id")["month"]}
 
 
-def build_quick(series_ids) -> list[dict[str, str]]:
-    """Поле `quick` файла `demo/data/index.json`: быстрые кнопки стенда из `STAND_QUICK_MO`.
-
-    Ряд, которого нет среди `series_ids`, роняет сборку: кнопка на несуществующий ряд
-    открыла бы стенд с МО по умолчанию и сообщением «в данных стенда нет»."""
+def _check_panel_series(series_ids, wanted: list[str], what: str) -> None:
+    """Ряды `wanted`, которых нет среди `series_ids`, роняют сборку: кнопка на несуществующий ряд
+    открыла бы страницу с МО по умолчанию и сообщением «в данных стенда нет»."""
     available = set(series_ids)
-    missing = [series_id for series_id, _ in STAND_QUICK_MO if series_id not in available]
+    missing = [series_id for series_id in wanted if series_id not in available]
     if missing:
-        raise ValueError(f"МО быстрых кнопок стенда нет среди рядов панели: {', '.join(missing)}")
-    return [{"id": series_id, "short": short} for series_id, short in STAND_QUICK_MO]
+        raise ValueError(f"МО {what} нет среди рядов панели: {', '.join(missing)}")
+
+
+def build_quick(series_ids) -> list[dict[str, str]]:
+    """Поле `quick` файла `demo/data/index.json`: примеры страницы прогноза из `STAND_QUICK_MO`."""
+    _check_panel_series(series_ids, [series_id for series_id, _, _ in STAND_QUICK_MO], "примеров страницы прогноза")
+    return [{"id": series_id, "short": short, "kind": kind} for series_id, short, kind in STAND_QUICK_MO]
+
+
+def build_featured(series_ids) -> list[str]:
+    """Поле `featured` файла `demo/data/index.json`: ряды из `SEARCH_FEATURED_MO`, которые поиск
+    страницы прогноза ставит первыми среди подошедших под запрос."""
+    _check_panel_series(series_ids, SEARCH_FEATURED_MO, "первых в поиске страницы прогноза")
+    return list(SEARCH_FEATURED_MO)
 
 
 class DemoBuild(NamedTuple):
@@ -1199,6 +1218,7 @@ def build_demo_data(
         "default_mo": DEFAULT_MO,
         "mean_unit": mean_unit_label(wide),
         "quick": build_quick(wide.columns),
+        "featured": build_featured(wide.columns),
         "forecast_rule": forecast_rule,
         "known_model": forward_cfg["known_aggregate"],
         "breaks": {

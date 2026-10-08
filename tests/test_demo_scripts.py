@@ -27,7 +27,7 @@ QUERIES = [
 
 def run_stand(queries: list[str], limit: int) -> dict:
     """Результаты поиска страницы прогноза на настоящем списке рядов: id найденных строк и их число, а также
-    подпись региона каждой строки. Быстрые кнопки (`index.quick`) передаются поиску: порядок подсказок
+    подпись региона каждой строки. Ряды `index.featured` передаются поиску: порядок подсказок
     зависит и от них."""
     script = """
         const vm = require('vm'), fs = require('fs');
@@ -42,7 +42,7 @@ def run_stand(queries: list[str], limit: int) -> dict:
         const stand = vm.runInNewContext(
           fs.readFileSync(demoPath, 'utf8') + '\\n({searchMunicipalities, buildSearchIndex, regionLabel});', page);
         const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
-        const standRows = stand.buildSearchIndex(index.series, index.quick, index.mean_unit);
+        const standRows = stand.buildSearchIndex(index.series, index.featured, index.mean_unit);
         const out = {};
         input.queries.forEach((query) => {
           const a = stand.searchMunicipalities(query, standRows, input.limit);
@@ -147,7 +147,7 @@ class SearchRankingTest(unittest.TestCase):
             "Казачинско-Ленский муниципальный район"])
 
     def test_quick_cities_go_before_the_other_matches(self) -> None:
-        # Города быстрого выбора, подошедшие под запрос, — первыми, а не по алфавиту внутри яруса.
+        # Известные города (`index.featured`), подошедшие под запрос, — первыми, а не по алфавиту внутри яруса.
         self.assertEqual(self.small["новосибирск"]["stand"][:2], [
             "городской округ город Новосибирск", "Новосибирский муниципальный район"])
         self.assertEqual(self.small["город"]["stand"][:4], [
