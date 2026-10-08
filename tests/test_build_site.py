@@ -2286,6 +2286,20 @@ class BuildSiteTest(unittest.TestCase):
                       text.text("mn-origin"))
         self.assertIn("report/method.svg", self.html)
 
+    def test_method_map_drop_goes_through_a_property_nobody_animates(self) -> None:
+        # Сдвиг опущенных блоков карты (--method-drop) — через top относительного блока. Через transform
+        # нельзя: у блока transform плавный (подъём при наведении), и скрипт, выставив сдвиг, мерил бы блоки
+        # ещё в начале перехода — связи рисовались по старым координатам, а блоки доезжали потом (так и было).
+        css = (ROOT / "site" / "landing.css").read_text(encoding="utf-8")
+        self.assertIn(".method-node-drop {\n  top: var(--method-drop);\n}", css)
+        self.assertNotIn("translateY(var(--method-drop)", css)
+        self.assertNotIn("calc(var(--method-drop)", css)
+        node_rule = css[css.index(".method-node {"):css.index("}", css.index(".method-node {"))]
+        self.assertIn("position: relative;", node_rule)
+        transition = re.search(r"transition: ([^;]+);", node_rule).group(1)
+        self.assertNotIn("top", transition)
+        self.assertNotIn("all", transition)
+
     def test_page_links_to_the_expected_materials(self) -> None:
         collector = _LinkCollector()
         collector.feed(self.html)
