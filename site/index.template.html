@@ -80,7 +80,7 @@
         <p class="stat-number">${h1_gain}%</p>
         <p class="stat-caption">
           <span class="stat-label">точнее эталона на текущий месяц</span>
-          <span class="stat-note">${h1_best} против ${h1_prophet} ₽ на человека в месяц</span>
+          <span class="stat-note">ошибка ${h1_best} против ${h1_prophet}&nbsp;₽ на человека в&nbsp;месяц</span>
         </p>
       </li>
 
@@ -95,8 +95,8 @@
       <li class="stat">
         <p class="stat-number">${agg_own_pct}%</p>
         <p class="stat-caption">
-          <span class="stat-label">ошибка прогноза страны на факте ${forecast_year}</span>
-          <span class="stat-note">у простых правил — ${agg_rules_pct}%</span>
+          <span class="stat-label">средняя ошибка прогноза страны на факте ${forecast_year}</span>
+          <span class="stat-note">горизонты <span class="nowrap">${agg_horizon_range}&nbsp;мес.</span>; у&nbsp;простых правил — <span class="nowrap">${agg_rules_pct}%</span></span>
         </p>
       </li>
     </ul>
@@ -125,7 +125,7 @@
         <button class="step" id="step-3" type="button" aria-pressed="false">
           <span class="step-num">Шаг 03<span class="step-hint" aria-hidden="true">показать →</span></span>
           <span class="step-title">Что остаётся</span>
-          <span class="step-text">Не менее чем у ${spread_share}% значений по всей панели отклонение от общего движения не больше ±${spread_pct}%.</span>
+          <span class="step-text">Ряды, делённые на общее движение: не менее чем у ${spread_share}% значений по всей панели отклонение не больше ±${spread_pct}%.</span>
           <span class="step-short">остаток</span>
         </button>
       </div>
@@ -257,7 +257,7 @@
         <p class="eyebrow">05 · Прогноз по муниципалитету</p>
         <h2 class="section-title" id="city-title">Покажите мой город</h2>
         <p class="stand-lead" id="stand-lead">
-          Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год от рекомендуемой модели и изломы ряда.
+          Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год от рекомендуемой модели (фактом не проверен: муниципальный разрез ${forecast_year} года ещё не опубликован) и изломы ряда.
         </p>
         <div class="chips" id="t-chips" role="group" aria-label="Примеры муниципальных образований"></div>
         <a class="btn btn-primary stand-cta" id="t-go" href="demo/">Открыть прогноз →</a>

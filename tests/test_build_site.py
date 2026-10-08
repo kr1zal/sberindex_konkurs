@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import datetime as dt
 import importlib.util
@@ -159,6 +160,7 @@ class _StatsParser(HTMLParser):
         self._current: dict[str, str] | None = None
         self._capture: str | None = None  # "number" | "caption" | None
         self._span: str | None = None  # "label" | "note" | None
+        self._inner_spans = 0  # вложенные в подпись span (диапазон, который не рвётся) — тот же текст
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         classes = (dict(attrs).get("class") or "").split()
@@ -175,6 +177,8 @@ class _StatsParser(HTMLParser):
             self._capture = "number"
         elif tag == "p" and "stat-caption" in classes:
             self._capture = "caption"
+        elif tag == "span" and self._span:
+            self._inner_spans += 1
         elif tag == "span" and "stat-label" in classes:
             self._span = "label"
         elif tag == "span" and "stat-note" in classes:
@@ -184,7 +188,10 @@ class _StatsParser(HTMLParser):
         if self._current is None:
             return
         if tag == "span":
-            self._span = None
+            if self._inner_spans:
+                self._inner_spans -= 1
+            else:
+                self._span = None
         if tag == "p" and self._capture:
             self._capture = None
         if tag == "li":
@@ -740,8 +747,12 @@ class BuildSiteTest(unittest.TestCase):
 
         stat = self.stats[0]
         self.assertEqual(stat["number"], f"{_fmt(best_gain, 1)}%")
+        # Число и «месяца» — через неразрывный пробел: на 320 px подпись иначе переносится между ними («на 3 / месяца»).
         self.assertEqual(
-            stat["label"], f"точнее эталона конкурса на {horizon_main} {_plural(horizon_main, 'месяц', 'месяца', 'месяцев')}")
+            stat["label"],
+            f"точнее эталона конкурса на {horizon_main}\u00a0{_plural(horizon_main, 'месяц', 'месяца', 'месяцев')}")
+        self.assertRegex(stat["label"], r"\d\u00a0месяц")
+        self.assertNotRegex(stat["label"], r"\d месяц")
 
     def test_windows_held_note_and_lost_windows_match_per_series_csv(self) -> None:
         folds, won, lost = self._windows_won_and_lost()
@@ -760,9 +771,15 @@ class BuildSiteTest(unittest.TestCase):
         self.assertTrue(lost, "в текущем прогоне эталон выигрывает хотя бы одно окно: проверке нужен такой случай")
         joined = ordinals[0] if len(ordinals) == 1 else ", ".join(ordinals[:-1]) + " и " + ordinals[-1]
         short_history = ", с самой короткой историей," if len(lost) == 1 and lost[0] == min(folds) else ""
+        # Эталон точнее лучшей в среднем (MAE окна — выше у неё, это и есть условие `lost`), а не «точнее всех»:
+        # в первом окне наивная и двухэтапная точнее эталона, и фраза без названия читалась бы неверно.
         sentence = (f"{'Во' if ordinals[0].startswith('вт') else 'В'} {joined} "
-                    f"{'окне' if len(lost) == 1 else 'окнах'}{short_history} эталон точнее.")
+                    f"{'окне' if len(lost) == 1 else 'окнах'}{short_history} эталон точнее лучшей в среднем.")
         self.assertIn(sentence, note)
+        # «Лучшая в среднем» — название третьей полосы того же раздела: читатель находит модель, о которой фраза.
+        best_bar = self.landing["horizons"]["models"][2]
+        self.assertEqual(best_bar["role"], "best_mean")
+        self.assertTrue(best_bar["label"].startswith("Лучшая в среднем"))
 
     def test_the_site_says_validation_window_and_never_fold(self) -> None:
         # «Фолд» — слово отчёта; на сайте то же самое называется «окно проверки»: ни в тексте страницы, ни в данных
@@ -791,7 +808,11 @@ class BuildSiteTest(unittest.TestCase):
         stat = self.stats[1]
         self.assertEqual(stat["number"], f"{_fmt(h1_gain, 1)}%")
         self.assertEqual(stat["label"], "точнее эталона на текущий месяц")
-        self.assertEqual(stat["note"], f"{_fmt(h1_best, 0)} против {_fmt(h1_prophet, 0)} ₽ на человека в месяц")
+        # Пара чисел — ошибки (MAE), а не расходы: без слова «ошибка» строку можно было прочесть как траты.
+        # «₽» не отрывается от числа, «в месяц» держится вместе (так же, как единица различителя рядов страницы
+        # прогноза): на 360 px строка иначе переносилась между «1 550» и «₽».
+        self.assertEqual(
+            stat["note"], f"ошибка {_fmt(h1_best, 0)} против {_fmt(h1_prophet, 0)}\u00a0₽ на человека в\u00a0месяц")
 
     # -- число 3: год вперёд (горизонт 12, без оракула) ---------------------
 
@@ -809,9 +830,11 @@ class BuildSiteTest(unittest.TestCase):
         stat = self.stats[2]
         self.assertEqual(stat["number"], f"{_fmt(gain_prophet, 0)}%")
         self.assertEqual(stat["label"], "точнее эталона на год вперёд")
-        # Оговорка — сколько окон проверки за числом, словом: «одно окно проверки» / «два окна проверки».
-        words = {1: "одно", 2: "два", 3: "три"}[n_folds_top]
-        self.assertEqual(stat["note"], f"{words} {_plural(n_folds_top, 'окно', 'окна', 'окон')} проверки")
+        # Оговорка — сколько окон проверки за числом, словом, и это именно оговорка, как в резюме отчёта
+        # («но это один фолд»): «но это одно окно проверки» / «но это два окна проверки».
+        self.assertLess(n_folds_top, 3, "при трёх окнах и больше оговорка другая: проверке нужен случай с одним-двумя")
+        words = {1: "одно", 2: "два"}[n_folds_top]
+        self.assertEqual(stat["note"], f"но это {words} {_plural(n_folds_top, 'окно', 'окна', 'окон')} проверки")
 
     # -- число 4: проверка агрегата по факту 2025 года -----------------------
 
@@ -830,10 +853,17 @@ class BuildSiteTest(unittest.TestCase):
         # же пункту подписи.
         forecast_year = origin.year + 1
 
+        # Горизонты диапазона — те, по которым посчитаны сами числа (уровень «горизонт» их групп), а не из конфига.
+        horizons = sorted(set(own.index) | set(rules.index.get_level_values("horizon")))
+        self.assertEqual(sorted(own.index), horizons)
         stat = self.stats[3]
         self.assertEqual(stat["number"], f"{_range(own)}%")
-        self.assertEqual(stat["label"], f"ошибка прогноза страны на факте {forecast_year}")
-        self.assertEqual(stat["note"], f"у простых правил — {_range(rules)}%")
+        # «Средняя» и горизонты — как в резюме отчёта («в среднем на 3,8–4,5% (горизонты 1–12 мес.)»): без них
+        # диапазон читался бы как помесячная ошибка, а в разделе 03 есть месяцы с ошибкой больше.
+        self.assertEqual(stat["label"], f"средняя ошибка прогноза страны на факте {forecast_year}")
+        self.assertEqual(
+            stat["note"],
+            f"горизонты {horizons[0]}–{horizons[-1]}\u00a0мес.; у\u00a0простых правил — {_range(rules)}%")
         # Диапазон — по горизонтам проверки: у простых правил он шире, чем у первого этапа.
         self.assertGreater(float(rules.max()), float(own.max()))
 
@@ -1222,8 +1252,9 @@ class BuildSiteTest(unittest.TestCase):
         self.assertTrue(50 < share < 100)
         band = math.ceil(round(float(np.percentile(deviation, share)) * 100, 6))
         line = _IdsOf(self.html).text("step-3")
-        self.assertIn(f"Не менее чем у {share}% значений по всей панели", line)
-        self.assertIn(f"отклонение от общего движения не больше ±{band}%", line)
+        # Ряды поделены на общее движение: ось в процентах вокруг ста, и без этих слов ±M% не от чего считать.
+        self.assertIn(f"Ряды, делённые на общее движение: не менее чем у {share}% значений по всей панели", line)
+        self.assertIn(f"отклонение не больше ±{band}%", line)
         # Утверждение верно, и полоса не шире нужного: на один процент уже она бы доли не вмещала.
         self.assertGreaterEqual(float((deviation <= band / 100).mean()), share / 100)
         self.assertLess(float((deviation <= (band - 1) / 100).mean()), share / 100)
@@ -1283,7 +1314,7 @@ class BuildSiteTest(unittest.TestCase):
         self.assertTrue(all("Наукаст" not in note for horizon, note in notes.items() if horizon != 1))
         # Основной горизонт открыт по умолчанию: где эталон выиграл окно, сказано рядом с полосами (число окон —
         # в оговорке полосы чисел, а какое окно — здесь); у других горизонтов этой фразы нет.
-        self.assertIn("эталон точнее.", notes[main])
+        self.assertIn("эталон точнее лучшей в среднем.", notes[main])
         for horizon, note in notes.items():
             if horizon != main:
                 with self.subTest(lost_window_only_at_the_main_horizon=horizon):
@@ -1536,11 +1567,13 @@ class BuildSiteTest(unittest.TestCase):
         self.assertIn(f"{sample_label} из {n_series}, расходы к среднему за {base}.", nodes.text("step-1"))
         # Прогнозирует первый этап — по федеральному ряду; медиана рядов только показывает общее движение.
         self.assertIn("общее движение прогнозирует первый этап модели по федеральному ряду", nodes.text("step-2"))
-        # Блок «Прогноз по муниципалитету» — одна строка: число рядов, год прогноза и рекомендуемая модель.
+        # Блок «Прогноз по муниципалитету» — одна строка: число рядов, год прогноза, рекомендуемая модель и то, что
+        # муниципальный прогноз фактом не проверен (именно здесь, рядом с пунктиром, его проще всего принять
+        # за проверенный).
         self.assertEqual(
             nodes.text("stand-lead"),
             f"Любой из {n_series} муниципалитетов: расходы по месяцам, прогноз на {year} год от рекомендуемой модели "
-            "и изломы ряда.")
+            f"(фактом не проверен: муниципальный разрез {year} года ещё не опубликован) и изломы ряда.")
         self.assertEqual(nodes.text("fact-title"), f"Прогноз от {origin_label} против факта {year} года")
         self.assertEqual(
             nodes.text("fact-lead"),
@@ -2044,15 +2077,45 @@ class WindowsWordingTest(unittest.TestCase):
         self.assertEqual(build_site.on_windows(0, 3), "ни в одном окне проверки")
 
     def test_lost_windows_are_named_by_their_order_and_the_shortest_history_only_when_alone(self) -> None:
-        sentence = build_site.windows_lost_sentence
-        self.assertEqual(sentence([0], 0), "В первом окне, с самой короткой историей, эталон точнее.")
-        self.assertEqual(sentence([1], 0), "Во втором окне эталон точнее.")
-        self.assertEqual(sentence([2], 0), "В третьем окне эталон точнее.")
-        self.assertEqual(sentence([1, 2], 0), "Во втором и третьем окнах эталон точнее.")
+        sentence = lambda lost, shortest: build_site.windows_lost_sentence(lost, shortest, "best_mean")  # noqa: E731
+        self.assertEqual(sentence([0], 0), "В первом окне, с самой короткой историей, эталон точнее лучшей в среднем.")
+        self.assertEqual(sentence([1], 0), "Во втором окне эталон точнее лучшей в среднем.")
+        self.assertEqual(sentence([2], 0), "В третьем окне эталон точнее лучшей в среднем.")
+        self.assertEqual(sentence([1, 2], 0), "Во втором и третьем окнах эталон точнее лучшей в среднем.")
         # Первое окно среди нескольких — без слов о короткой истории: они про одно окно.
-        self.assertEqual(sentence([0, 2], 0), "В первом и третьем окнах эталон точнее.")
-        self.assertEqual(sentence([3], 0), "В 4-м окне эталон точнее.")
+        self.assertEqual(sentence([0, 2], 0), "В первом и третьем окнах эталон точнее лучшей в среднем.")
+        self.assertEqual(sentence([3], 0), "В 4-м окне эталон точнее лучшей в среднем.")
         self.assertEqual(sentence([], 0), "")
+
+    def test_the_compared_model_is_named_in_the_genitive_by_its_role(self) -> None:
+        # Фраза называет, кого эталон обошёл: роль даёт родительный падеж названия, а не слово, вписанное в оборот.
+        sentence = build_site.windows_lost_sentence
+        self.assertEqual(sentence([0], 0, "naive"), "В первом окне, с самой короткой историей, эталон точнее наивной.")
+        self.assertEqual(sentence([1, 2], 0, "two_stage"), "Во втором и третьем окнах эталон точнее двухэтапной.")
+        with self.assertRaises(KeyError):
+            sentence([0], 0, "champion")
+        # У каждой роли с названием есть и родительный падеж: роль, добавленная в ROLE_NAMES, без него не пройдёт.
+        self.assertEqual(set(build_site.ROLE_NAMES_GEN), set(build_site.ROLE_NAMES))
+        # Родительный падеж — того же слова, что название роли (первые буквы первого слова совпадают): оборот не
+        # назовёт другую модель. У лучшей в среднем «по панели» опущено: оборот стоит под полосами с полным названием.
+        for role, name in build_site.ROLE_NAMES.items():
+            with self.subTest(role=role):
+                self.assertEqual(build_site.ROLE_NAMES_GEN[role].split()[0][:4], name.split()[0].lower()[:4])
+        self.assertEqual(build_site.ROLE_NAMES["best_mean"], "Лучшая в среднем по панели")
+        self.assertEqual(build_site.ROLE_NAMES_GEN["best_mean"], "лучшей в среднем")
+
+    def test_year_ahead_note_is_a_caveat_for_one_or_two_windows_and_a_plain_count_for_more(self) -> None:
+        # «Но это одно окно проверки» — оговорка резюме отчёта («но это один фолд»); при трёх окнах и больше «но это
+        # девять окон» читалось бы как довод в пользу числа, поэтому там просто счёт окон, как в разделе 02.
+        note = build_site.year_windows_note
+        self.assertEqual(note(1), "но это одно окно проверки")
+        self.assertEqual(note(2), "но это два окна проверки")
+        self.assertEqual(note(3), "по трём окнам проверки")
+        self.assertEqual(note(9), "по девяти окнам проверки")
+        self.assertEqual(note(12), "по 12 окнам проверки")
+        self.assertEqual(note(21), "по 21 окну проверки")
+        with self.assertRaises(ValueError):
+            note(0)
 
     def test_small_numbers_in_the_site_forms_are_words_and_larger_ones_digits(self) -> None:
         self.assertEqual([build_site.in_words(n, "им_с") for n in (1, 2, 3, 10, 11)], ["одно", "два", "три", "десять", "11"])
@@ -2282,6 +2345,48 @@ class ChangepointCaveatsTest(unittest.TestCase):
                 rows.append({**row.to_dict(), "mode": mode, "ложных на чистых, %":
                              fa if mode == "raw" else row["ложных на чистых, %"], "J Юдена": j})
         return pd.DataFrame(rows)
+
+
+def _functions_without_caller(tree: ast.Module) -> list[str]:
+    """Функции верхнего уровня модуля, на которые не ссылается ни одно имя и ни один атрибут в самом модуле."""
+    defined = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    used = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    used |= {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    return sorted(defined - used)
+
+
+def _unread_record_fields(tree: ast.Module) -> list[str]:
+    """Поля записей `NamedTuple` модуля, которые в самом модуле никто не читает (`запись.поле`)."""
+    read = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    unread = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and any(getattr(base, "id", None) == "NamedTuple" for base in node.bases):
+            unread += [f"{node.name}.{item.target.id}" for item in node.body
+                       if isinstance(item, ast.AnnAssign) and item.target.id not in read]
+    return unread
+
+
+class GeneratorHygieneTest(unittest.TestCase):
+    """Мёртвый код генератора: помощник, чью единственную вызывающую фразу удалили, и поле записи, которое никто не
+    читает, остаются в модуле незамеченными, пока не мешают. Проверка смотрит на сам модуль, а не на страницу."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tree = ast.parse((ROOT / "scripts" / "build_site.py").read_text(encoding="utf-8"))
+
+    def test_every_function_of_the_generator_has_a_caller_in_the_module(self) -> None:
+        self.assertEqual(_functions_without_caller(self.tree), [])
+
+    def test_every_field_of_the_generator_records_is_read_somewhere_in_the_module(self) -> None:
+        self.assertEqual(_unread_record_fields(self.tree), [])
+
+    def test_the_checks_see_what_they_should(self) -> None:
+        # Проверки не слепы: на модуле с помощником без вызова и с полем, которого никто не читает, они их называют.
+        module = ast.parse(
+            "from typing import NamedTuple\n\n\nclass Pair(NamedTuple):\n    used: int\n    spare: int\n\n\n"
+            "def kept(pair):\n    return pair.used\n\n\ndef _orphan():\n    return 2\n\n\nprint(kept(Pair(1, 2)))\n")
+        self.assertEqual(_functions_without_caller(module), ["_orphan"])
+        self.assertEqual(_unread_record_fields(module), ["Pair.spare"])
 
 
 if __name__ == "__main__":

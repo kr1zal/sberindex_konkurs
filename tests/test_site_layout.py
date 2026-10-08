@@ -242,6 +242,35 @@ class FirstScreenTest(unittest.TestCase):
         self.assertRegex(phone, r"\.hero-actions \.btn \{\s*flex:\s*1 1 100%;")
 
 
+class StripNotesTest(unittest.TestCase):
+    """Подписи полосы чисел на узком экране: единица не отрывается от числа, диапазон через тире не рвётся. Сборка
+    не нужна: разметка — в шаблоне, правило — в стилях; текст, который из неё выйдет, проверяет `test_build_site.py`."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.template = _read("site/index.template.html")
+        cls.css = _read("site/landing.css")
+
+    def _note(self, marker: str) -> str:
+        found = re.search(r'<span class="stat-note">([^\n]*' + re.escape(marker) + r'[^\n]*)</span>\n', self.template)
+        self.assertIsNotNone(found, f"в шаблоне нет оговорки полосы с {marker}")
+        return found.group(1)
+
+    def test_units_stay_with_their_numbers(self) -> None:
+        # На 360 px строка «ошибка 839 против 1 550 ₽ …» переносилась между «1 550» и «₽», а «в» оставалось в конце строки.
+        self.assertIn("${h1_prophet}&nbsp;₽ на человека в&nbsp;месяц", self._note("${h1_prophet}"))
+        self.assertIn("${agg_horizon_range}&nbsp;мес.", self._note("${agg_horizon_range}"))
+
+    def test_ranges_do_not_break_at_the_dash(self) -> None:
+        # На 320 px перенос после тире оставлял «7,0–» в конце строки, а остальное число — на следующей.
+        note = self._note("${agg_rules_pct}")
+        self.assertEqual(re.findall(r'<span class="nowrap">(.*?)</span>', note),
+                         ["${agg_horizon_range}&nbsp;мес.", "${agg_rules_pct}%"])
+        rule = re.search(r"\.stat-note \.nowrap \{([^}]*)\}", self.css)
+        self.assertIsNotNone(rule, "в стилях нет правила для диапазона в подписи полосы")
+        self.assertRegex(rule.group(1), r"white-space:\s*nowrap")
+
+
 class HeroMotionTest(unittest.TestCase):
     """Движение обложки: «дыхание» медианы со свечением не бесконечное; текст, кнопки и полоса проявляются быстро."""
 

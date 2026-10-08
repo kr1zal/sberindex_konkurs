@@ -276,6 +276,17 @@ ROLE_NAMES = {
     "two_stage": "Двухэтапная",
 }
 
+# Те же названия в родительном падеже — для оборотов вроде «эталон точнее лучшей в среднем»: склонять названия
+# выше генератору нечем. Ключи те же, что у `ROLE_NAMES` (тест): роль без родительного падежа остаться не может.
+# «По панели» у лучшей в среднем опущено: оборот стоит под полосами, где модель названа полностью.
+ROLE_NAMES_GEN = {
+    "reference": "эталона конкурса",
+    "naive": "наивной",
+    "recommended": "рекомендуемой панельной",
+    "best_mean": "лучшей в среднем",
+    "two_stage": "двухэтапной",
+}
+
 # Кандидаты первого этапа двухэтапной модели (`src/external.py::CANDIDATES`) —
 # копия `_fc_agg_ru` отчёта (report/report.qmd, ~строка 2081): та же модель,
 # то же название на странице и в отчёте.
@@ -338,16 +349,32 @@ def on_windows(k: int, n: int) -> str:
     return f"в {k} {plural(k, 'окне', 'окнах', 'окнах')} проверки из {n}"
 
 
-def windows_lost_sentence(lost: list[int], shortest: int) -> str:
+def year_windows_note(n: int) -> str:
+    """Оговорка к числу «год вперёд» — сколько окон проверки за ним стоит. Одно или два — «но это одно окно
+    проверки», как в резюме отчёта («но это один фолд»): без этого процент выигрыша читался бы как устойчивый.
+    Три и больше — просто счёт окон, «по трём окнам проверки»: «но это девять окон» оговоркой уже не было бы,
+    и отчёт при трёх фолдах и больше её не ставит."""
+    if n < 1:
+        raise ValueError("у модели года вперёд нет ни одного окна проверки в results/horizons_folds.csv")
+    if n < 3:
+        return f"но это {in_words(n, 'им_с')} {plural(n, 'окно', 'окна', 'окон')} проверки"
+    return f"по {in_words(n, 'дат')} {plural(n, 'окну', 'окнам', 'окнам')} проверки"
+
+
+def windows_lost_sentence(lost: list[int], shortest: int, versus: str) -> str:
     """Где эталон точнее лучшей модели, по номерам окон проверки (с нуля): «В первом окне, с самой короткой
-    историей, эталон точнее.», «Во втором и третьем окнах эталон точнее.»; `shortest` — окно с самой короткой
-    историей обучения, его называют, только если оно единственное. Таких окон нет — пустая строка."""
+    историей, эталон точнее лучшей в среднем.», «Во втором и третьем окнах эталон точнее лучшей в среднем.»;
+    `shortest` — окно с самой короткой историей обучения, его называют, только если оно единственное. `versus` —
+    роль модели, с которой сравнивают эталон (ключ `ROLE_NAMES_GEN`): без неё фраза под четырьмя полосами читалась
+    бы как «эталон точнее всех», а наивная и двухэтапная в таком окне бывают точнее него. Таких окон нет —
+    пустая строка."""
     if not lost:
         return ""
     ordinals = [_ORDINAL.get(f, f"{f + 1}-м") for f in lost]
     preposition = "Во" if ordinals[0].startswith("вт") else "В"
     return (f"{preposition} {and_join(ordinals)} {'окне' if len(ordinals) == 1 else 'окнах'}"
-            + (", с самой короткой историей," if lost == [shortest] else "") + " эталон точнее.")
+            + (", с самой короткой историей," if lost == [shortest] else "")
+            + f" эталон точнее {ROLE_NAMES_GEN[versus]}.")
 
 
 def plural(n: int, one: str, few: str, many: str) -> str:
@@ -449,19 +476,21 @@ def compute_placeholders(
       `_rs["gain"]` отчёта).
     - ``windows_held`` — оговорка к главному числу: «держится в 2 окнах проверки из 3»; окно проверки —
       то, что отчёт называет фолдом.
-    - ``windows_lost`` — какие окна эталон выиграл: «В первом окне, с самой короткой историей, эталон
-      точнее.»; пусто, если выигрыш держится во всех окнах. Стоит в пояснении основного горизонта.
+    - ``windows_lost`` — какие окна эталон выиграл и у кого: «В первом окне, с самой короткой историей,
+      эталон точнее лучшей в среднем.»; пусто, если выигрыш держится во всех окнах. Стоит в пояснении
+      основного горизонта.
     - ``h1_best`` / ``h1_prophet`` / ``h1_gain`` — то же для наукаста, горизонт 1;
       «—», если лучшая модель основного протокола не входит в `configs/horizons.yaml`.
     - ``h12_gain_prophet`` — выигрыш лучшей модели года вперёд (горизонт 12, без оракула) к эталону,
       %. Лучшая выбирается минимумом MAE среди моделей, где есть и наивная, и эталон, поэтому выигрыш
       не отрицателен.
-    - ``h12_windows`` — сколько окон проверки у этой модели, словом: «одно окно проверки». Столько окон,
-      сколько допускают 24 точки: без их числа процент выигрыша читался бы как устойчивый (та же
+    - ``h12_windows`` — сколько окон проверки у этой модели, словом: «но это одно окно проверки» (`year_windows_note`).
+      Столько окон, сколько допускают 24 точки: без их числа процент выигрыша читался бы как устойчивый (та же
       оговорка, что в резюме отчёта: «но это один фолд»).
     - ``agg_own_pct`` / ``agg_rules_pct`` — ошибка первого этапа двухэтапной модели
       и простых правил, % (диапазон по горизонтам проверки, схлопывается в одно
       число, если границы совпадают после округления).
+    - ``agg_horizon_range`` — горизонты проверки, «1–12»: без них диапазон ошибок читался бы как помесячный.
     - ``agg_origin_label`` — месяц и год origin словами, «декабря 2024».
     - ``n_series_rub`` — число рядов панели, из формы матрицы `build_matrix`
       (`configs/forecast_forward.yaml::data`).
@@ -492,7 +521,8 @@ def compute_placeholders(
         "report_pdf_size": file_size_label(ROOT / "report" / "report.pdf"),
         "slides_pdf_size": file_size_label(ROOT / "report" / "slides.pdf"),
         "forecast_size": file_size_label(ROOT / "results" / "forecast_2025.csv.gz"),
-        "horizon_main_months": f"{horizon_main} {plural(horizon_main, 'месяц', 'месяца', 'месяцев')}",
+        # Неразрывный пробел: на узком экране подпись иначе переносится между числом и словом.
+        "horizon_main_months": f"{horizon_main}\u00a0{plural(horizon_main, 'месяц', 'месяца', 'месяцев')}",
         "forecast_year": str(forecast_year),
         # Выигрыш без знака, как `_rs["gain"]` отчёта: на странице число стоит перед словом
         # «точнее», и минус изменения MAE с ним бы спорил. top — минимум MAE сводки, где есть
@@ -509,7 +539,8 @@ def compute_placeholders(
     vs_lost = [f for f in r2_folds if fold_mae.loc[f, top] > fold_mae.loc[f, "prophet"]]
     placeholders["windows_held"] = (
         ("" if won_mae else "не ") + "держится " + on_windows(len(won_mae), len(r2_folds)))
-    placeholders["windows_lost"] = windows_lost_sentence(vs_lost, min(r2_folds))
+    # Эталон сравнивается с `top` — лучшей в среднем: в полосах горизонтов это модель роли `best_mean`.
+    placeholders["windows_lost"] = windows_lost_sentence(vs_lost, min(r2_folds), "best_mean")
 
     # Наукаст — горизонт 1 по требованию организаторов (configs/horizons.yaml), не
     # результат прогона: как и в отчёте, число горизонта здесь не выведено из файла.
@@ -533,8 +564,7 @@ def compute_placeholders(
         n_folds_top = int(horizons_folds.loc[
             (horizons_folds["horizon"] == 12) & (horizons_folds["model"] == year_top), "MAE"
         ].notna().sum())
-        placeholders["h12_windows"] = (
-            f"{in_words(n_folds_top, 'им_с')} {plural(n_folds_top, 'окно', 'окна', 'окон')} проверки")
+        placeholders["h12_windows"] = year_windows_note(n_folds_top)
     else:
         placeholders["h12_gain_prophet"] = "—"
         placeholders["h12_windows"] = ""
@@ -542,12 +572,14 @@ def compute_placeholders(
     # Проверка первого этапа по факту 2025 года (report.qmd::_rs["agg"]).
     agg_mape = agg_check.assign(e=agg_check["error_pct"].abs()).groupby(["method", "horizon"])["e"].mean()
     agg_own, agg_rules = agg_mape.loc["two_stage"], agg_mape.drop(index="two_stage")
+    agg_hs = sorted(int(h) for h in agg_check["horizon"].unique())
 
     def _range(lo: float, hi: float) -> str:
         return num(lo, 1) if num(lo, 1) == num(hi, 1) else f"{num(lo, 1)}–{num(hi, 1)}"
 
     placeholders["agg_own_pct"] = _range(agg_own.min(), agg_own.max())
     placeholders["agg_rules_pct"] = _range(agg_rules.min(), agg_rules.max())
+    placeholders["agg_horizon_range"] = f"{agg_hs[0]}–{agg_hs[-1]}"
     placeholders["agg_origin_label"] = f"{MONTH_OF[origin.month - 1]} {origin.year}"
 
     # Панель — форма матрицы, а не результат прогона.
@@ -636,29 +668,9 @@ def _cp_ym(month: str, case: str = "им") -> str:
     return f"{names[int(number) - 1]} {year}"
 
 
-def _cp_span(months: list[str]) -> str:
-    """Месяцы подряд: «октябрь–декабрь 2024», через год — «ноябрь 2023 – январь 2024» (`report.qmd::_cp_span`)."""
-    first, last = months[0], months[-1]
-    if first == last:
-        return _cp_ym(first)
-    if first[:4] == last[:4]:
-        return f"{MONTH_NOM[int(first[5:]) - 1]}–{_cp_ym(last)}"
-    return f"{_cp_ym(first)} – {_cp_ym(last)}"
-
-
 def _cp_cap(text: str) -> str:
     """Первая буква заглавная (`report.qmd::_cp_cap`)."""
     return text[:1].upper() + text[1:]
-
-
-def _cp_mw(value: float) -> str:
-    """«2 месяца», «5 месяцев», «1,5 месяца»: дробное число — в родительном единственного (`report.qmd::_cp_mw`)."""
-    value = float(value)
-    if not np.isfinite(value):
-        return "—"
-    if value.is_integer():
-        return f"{num(value, 0)} {plural(int(value), 'месяц', 'месяца', 'месяцев')}"
-    return f"{num(value, 1)} месяца"
 
 
 def load_cp_tables(cp_cfg: dict, root: Path = ROOT) -> dict[str, pd.DataFrame]:
@@ -871,10 +883,9 @@ def changepoint_note(clauses: list[str]) -> str:
 
 
 class BreaksBuild(NamedTuple):
-    """Раздел «Изломы»: фраза резюме (HTML и текст), оговорки к столбикам одной фразой (HTML) и данные графика."""
+    """Раздел «Изломы»: фраза резюме (HTML), оговорки к столбикам одной фразой (HTML) и данные графика."""
 
     claim_html: str
-    claim_text: str
     caveats_html: str
     data: dict
 
@@ -891,7 +902,6 @@ def build_breaks(tables: dict[str, pd.DataFrame], cp_cfg: dict, penalty: float) 
     caveats = changepoint_note(changepoint_caveats(tables, cp_cfg, penalty))
     return BreaksBuild(
         claim_html=f"<strong>{html.escape(head, quote=False)}</strong> {html.escape(body, quote=False)}",
-        claim_text=f"{head} {body}",
         caveats_html=html.escape(caveats, quote=False),
         data={
             "months": picture.months,
