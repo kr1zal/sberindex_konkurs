@@ -42,7 +42,7 @@ class TickLabelsTest(unittest.TestCase):
     def test_whole_steps_give_whole_percent_labels(self) -> None:
         got = run_lib(
             "const s = lib.niceScale(input[0], input[1], 5);"
-            "return {step: s.step, labels: s.ticks.map((t) => lib.percentTick(t, s.step))};",
+            "return {step: s.step, labels: s.ticks.map((t) => lib.formatTick(t * 100, s.step * 100) + '%')};",
             [0.8, 1.2],
         )
         self.assertEqual(got["labels"], ["80%", "90%", "100%", "110%", "120%"])
@@ -52,7 +52,7 @@ class TickLabelsTest(unittest.TestCase):
         # перестали бы различаться на глаз и расходились бы со шкалой.
         got = run_lib(
             "const s = lib.niceScale(input[0], input[1], 5);"
-            "return {step: s.step, labels: s.ticks.map((t) => lib.percentTick(t, s.step))};",
+            "return {step: s.step, labels: s.ticks.map((t) => lib.formatTick(t * 100, s.step * 100) + '%')};",
             [1, 1.11],
         )
         self.assertAlmostEqual(got["step"], 0.025)

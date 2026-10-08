@@ -14,7 +14,7 @@
   "use strict";
 
   const {
-    formatInt, pluralRu, niceScale, formatTick, percentTick, createTickSets, historyKeep,
+    formatInt, pluralRu, niceScale, formatTick, createTickSets, historyKeep,
     numberTokens, countedText, NO_REGION,
   } = LandingLib;
 
@@ -245,27 +245,42 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 01 · Почему это прогноз одного числа: три шага над одними и теми же рядами
+  // 01 · Почему это прогноз одного числа: три шага над одними и теми же рядами и четвёртый —
+  // разложение ошибки полосами. Шаги проходят сами один раз, когда раздел появляется на экране;
+  // клик по шагу останавливает показ и открывает выбранный.
   // ---------------------------------------------------------------------------
+
+  const STORY_PLAY_FIRST_MS = 900; // пауза до второго шага после появления раздела
+  const STORY_PLAY_STEP_MS = 2300; // пауза между шагами показа
+  const STORY_BARS_STEP = 3; // номер шага с полосами (с нуля)
 
   function initStory(story) {
     const plot = byId("story-plot");
+    const card = plot ? plot.closest(".story-card") : null;
     const linesLayer = byId("story-lines");
     const medianLayer = byId("story-median-layer");
     const medianPath = byId("story-median");
-    const ticksBox = byId("story-ticks");
+    const band = byId("story-band");
+    const bandLabel = byId("story-band-label");
     const caption = byId("story-caption");
     const text = byId("story-text");
+    const barsBox = byId("story-bars");
+    const barsLegend = byId("story-bars-legend");
+    const unitLines = byId("story-unit-lines");
+    const unitBars = byId("story-unit-bars");
     const buttons = Array.from(document.querySelectorAll(".step"));
-    if (!plot || !linesLayer || !medianPath || !ticksBox || !buttons.length) return;
+    if (!plot || !card || !linesLayer || !medianPath || !band || !barsBox || !buttons.length) return;
 
     const count = story.months.length;
     const xs = spacedX(count);
     const paths = story.series.map(() => svgNode("path", {}, linesLayer));
+    const unitLinesDefault = unitLines.textContent;
 
     // Шаг 1 — ряды, шаг 2 — те же ряды бледнеют и видна медиана, шаг 3 — каждый ряд,
-    // делённый на медиану, и ровная линия на единице: на ней все ряды были бы, если бы
-    // двигались только вместе. Шкала у каждого шага своя, по его значениям.
+    // делённый на медиану, ровная линия на единице и полоса ±M% вокруг неё: в ней лежит
+    // не меньше заявленной доли значений. Отметок оси нет — это картина, а не измерение;
+    // шкала у каждого шага своя, по его значениям.
+    const spread = story.spread_pct / 100;
     function buildState(step) {
       const rows = story.series.map((row) => (step === 2 ? row.map((v, i) => v / story.median[i]) : row));
       const flat = story.median.map((v) => (step === 2 ? 1 : v));
@@ -274,11 +289,14 @@
       return {
         ys: rows.map((row) => row.map((v) => yOf(v, scale))),
         median: flat.map((v) => yOf(v, scale)),
-        scale,
+        bandTop: yOf(1 + spread, scale),
+        bandBottom: yOf(1 - spread, scale),
         faded: step === 1,
         medianVisible: step !== 0,
+        bandVisible: step === 2,
       };
     }
+    bandLabel.textContent = `±${story.spread_pct}%`;
 
     const states = [0, 1, 2].map(buildState);
     let shown = states[0];
@@ -288,6 +306,9 @@
     function draw(state) {
       state.ys.forEach((ys, index) => paths[index].setAttribute("d", linePath(ys, xs)));
       medianPath.setAttribute("d", linePath(state.median, xs));
+      band.setAttribute("y", state.bandTop.toFixed(1));
+      band.setAttribute("height", Math.max(0, state.bandBottom - state.bandTop).toFixed(1));
+      bandLabel.style.top = `${(state.bandTop / VIEW * 100).toFixed(2)}%`;
       shown = state;
     }
 
@@ -296,8 +317,25 @@
       return {
         ys: from.ys.map((row, j) => row.map((y, i) => y + (to.ys[j][i] - y) * k)),
         median: from.median.map((y, i) => y + (to.median[i] - y) * k),
+        bandTop: from.bandTop + (to.bandTop - from.bandTop) * k,
+        bandBottom: from.bandBottom + (to.bandBottom - from.bandBottom) * k,
       };
     }
+
+    // Шаг 4: у каждой модели ошибка — разброс между муниципалитетами плюс промах мимо общего
+    // движения; ширина полосы — доля от самой большой ошибки.
+    const decomposition = story.decomposition;
+    const maxTotal = Math.max.apply(null, decomposition.models.map((m) => m.bias + m.spread));
+    decomposition.models.forEach((model) => {
+      const row = node("div", "story-bar-row", null, barsBox);
+      node("span", "story-bar-label", model.label, row);
+      const track = node("span", "story-bar-track", null, row);
+      node("span", "story-bar-spread", null, track).style.width = `${((model.spread / maxTotal) * 100).toFixed(2)}%`;
+      node("span", "story-bar-bias", null, track).style.width = `${((model.bias / maxTotal) * 100).toFixed(2)}%`;
+      node("span", "story-bar-value", `${formatInt(model.bias + model.spread)}${NBSP}₽`, row);
+    });
+    unitBars.textContent =
+      `Средняя ошибка, ₽ на человека в месяц, горизонт ${decomposition.horizon}${NBSP}мес.: из чего она состоит`;
 
     function stepText(step) {
       return buttons[step].querySelector(".step-text").textContent.replace(/\s+/g, " ").trim();
@@ -311,8 +349,7 @@
     }
 
     function select(step, animateMove) {
-      const target = states[step];
-      const from = shown;
+      const bars = step === STORY_BARS_STEP;
       if (running) running.cancel();
       active = step;
       buttons.forEach((button, index) => button.setAttribute("aria-pressed", String(index === step)));
@@ -320,9 +357,18 @@
       caption.textContent = label;
       plot.setAttribute("aria-label", label);
       text.textContent = stepText(step);
+      card.classList.toggle("is-bars", bars);
+      barsBox.setAttribute("aria-hidden", String(!bars));
+      barsLegend.hidden = !bars;
+      unitLines.hidden = bars;
+      unitBars.hidden = !bars;
+      if (bars) return; // линии остаются как были и гаснут под полосами (стили)
+      unitLines.textContent = step === 2 ? "Ряды, делённые на общее движение, %" : unitLinesDefault;
+      const target = states[step];
+      const from = shown;
       linesLayer.classList.toggle("is-faded", target.faded);
       medianLayer.style.opacity = target.medianVisible ? "1" : "0";
-      setTicks(ticksBox, target.scale, (value) => percentTick(value, target.scale.step), animateMove);
+      card.classList.toggle("is-band", target.bandVisible);
       running = animate(animateMove ? 800 : 0, (progress) => {
         draw(mix(from, target, easeOut(progress, 4)));
       }, () => {
@@ -331,7 +377,28 @@
       });
     }
 
+    // Показ шагов один раз, когда раздел виден; любой клик по шагу его останавливает.
+    let timers = [];
+    let played = false;
+    function stopPlay() {
+      timers.forEach(clearTimeout);
+      timers = [];
+    }
+    function play() {
+      if (played) return;
+      played = true;
+      if (reducedMotion()) {
+        select(STORY_BARS_STEP, false);
+        return;
+      }
+      [1, 2, STORY_BARS_STEP].forEach((step, k) => {
+        timers.push(setTimeout(() => select(step, true), STORY_PLAY_FIRST_MS + k * STORY_PLAY_STEP_MS));
+      });
+    }
+
     buttons.forEach((button, index) => button.addEventListener("click", () => {
+      stopPlay();
+      played = true;
       if (index !== active) select(index, true);
     }));
 
@@ -345,6 +412,17 @@
     }
     draw(states[0]);
     select(0, false);
+
+    if ("IntersectionObserver" in window) {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          observer.disconnect();
+          play();
+        });
+      }, { threshold: 0.6 });
+      observer.observe(plot);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -619,15 +697,17 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 05 · Прогноз по муниципалитету: три муниципалитета, мини-график, ссылка на страницу прогноза с выбранным
+  // 05 · Прогноз по муниципалитету: один из рядов крупно — факт, прогноз рекомендуемой модели
+  // и эталона конкурса, точки структурных изменений, числа раздела; три примера переключаются
+  // кнопками, ссылка «Открыть этот муниципалитет» ведёт на страницу прогноза с выбранным рядом.
   // ---------------------------------------------------------------------------
-
-  // Подпись пунктира короткая; полное название линии — в заголовке столбца таблицы на странице прогноза.
-  const KNOWN_LABEL = "доли × известный федеральный индекс";
 
   function standUrl(seriesId) {
     return `demo/?mo=${encodeURIComponent(seriesId)}`;
   }
+
+  // Правая часть графика (доля ширины) отдана подписи на конце линии прогноза: ряд там не рисуется.
+  const TEASER_LABEL_SHARE = 0.13;
 
   function initTeaser(teaser) {
     const plot = byId("t-plot");
@@ -636,27 +716,48 @@
 
     const months = teaser.months;
     const count = months.length;
-    const xs = spacedX(count);
+    const span = VIEW * (1 - TEASER_LABEL_SHARE);
+    const xs = Array.from({ length: count }, (_, i) => (i / (count - 1)) * span);
+    const left = (index) => `${((index / (count - 1)) * (1 - TEASER_LABEL_SHARE) * 100).toFixed(2)}%`;
     const nFact = teaser.items[0].fact.length;
-    const paths = { fact: byId("t-fact"), known: byId("t-known"), fc: byId("t-fc") };
+    const paths = { fact: byId("t-fact"), base: byId("t-base"), fc: byId("t-fc") };
+    const ends = { fact: byId("t-end-fact"), base: byId("t-end-base"), fc: byId("t-end-fc") };
     const breaksBox = byId("t-breaks");
-    const panelEnd = byId("t-panel-end");
     const go = byId("t-go");
+    const rubles = (value) => `${formatInt(value)}${NBSP}₽`;
+    // Числа раздела приходят из данных уже строками в формате отчёта — к ним только знак рубля.
+    const withRub = (text) => `${text}${NBSP}₽`;
+    const factYears = `${months[0].slice(0, 4)}–${months[nFact - 1].slice(0, 4)}`;
+    const lastFactYear = months[nFact - 1].slice(0, 4);
+    const forecastYear = months[nFact].slice(0, 4);
+    const reference = teaser.reference;
     let active = -1;
     let shown = null;
     let running = null;
 
-    panelEnd.style.left = `${(((nFact - 0.5) / (count - 1)) * 100).toFixed(2)}%`;
+    byId("t-panel-end").style.left = left(nFact - 0.5);
+    const years = byId("t-years");
+    months.forEach((month, index) => {
+      if (month.slice(5, 7) !== "01") return;
+      node("span", null, month.slice(0, 4), years).style.left = left(index);
+    });
+    const referenceName = `${reference.name[0].toLowerCase()}${reference.name.slice(1)}`;
+    byId("t-legend-fact").textContent = `факт ${factYears}`;
+    byId("t-legend-fc").textContent = `прогноз ${forecastYear}`;
+    byId("t-legend-base").textContent = `${referenceName} (${reference.note})`;
+    byId("t-stat-fc-label").textContent = `Прогноз на ${forecastYear}, в среднем за месяц`;
+    byId("t-stat-check-label").textContent = `Точнее всех на истории ${lastFactYear}`;
 
-    // Для каждого МО — своя шкала по его значениям, с запасом сверху и снизу.
+    // Для каждого МО — своя «красивая» шкала по его значениям, с отметками оси, как у графика
+    // раздела о проверке фактом; при смене примера отметки меняются вместе с линиями.
     function buildState(item) {
-      const { min, max } = extent([item.fact, item.forecast, item.known]);
-      const pad = (max - min) * 0.1;
-      const scale = { lo: min - pad, hi: max + pad };
+      const { min, max } = extent([item.fact, item.forecast, item.baseline]);
+      const scale = niceScale(min, max, 4);
       const fromLast = (values) => [yOf(item.fact[nFact - 1], scale)].concat(values.map((v) => yOf(v, scale)));
       return {
+        scale,
         fact: item.fact.map((v) => yOf(v, scale)),
-        known: fromLast(item.known),
+        base: fromLast(item.baseline),
         fc: fromLast(item.forecast),
       };
     }
@@ -665,32 +766,19 @@
 
     function draw(state) {
       paths.fact.setAttribute("d", linePath(state.fact, xs.slice(0, nFact)));
-      // Прогноз и пунктир начинаются от последней точки факта: их первый узел — она же.
-      paths.known.setAttribute("d", linePath(state.known, xs.slice(nFact - 1)));
+      // Прогноз и эталон начинаются от последней точки факта: их первый узел — она же.
+      paths.base.setAttribute("d", linePath(state.base, xs.slice(nFact - 1)));
       paths.fc.setAttribute("d", linePath(state.fc, xs.slice(nFact - 1)));
+      // Концы линий — точки с подписью: положение в процентах от высоты графика, y — в единицах viewBox.
+      ends.fact.style.top = `${(state.fact[nFact - 1] / VIEW * 100).toFixed(2)}%`;
+      ends.base.style.top = `${(state.base[state.base.length - 1] / VIEW * 100).toFixed(2)}%`;
+      ends.fc.style.top = `${(state.fc[state.fc.length - 1] / VIEW * 100).toFixed(2)}%`;
       shown = state;
     }
 
     function mix(from, to, k) {
       const blend = (a, b) => a.map((y, i) => y + (b[i] - y) * k);
-      return { fact: blend(from.fact, to.fact), known: blend(from.known, to.known), fc: blend(from.fc, to.fc) };
-    }
-
-    function legend(item) {
-      const box = byId("t-legend");
-      box.textContent = "";
-      const factYears = `${months[0].slice(0, 4)}–${months[nFact - 1].slice(0, 4)}`;
-      const items = [
-        ["key key-fact", `факт ${factYears}`],
-        ["key key-fc", `прогноз ${months[nFact].slice(0, 4)}`],
-        ["key key-r1", KNOWN_LABEL],
-      ];
-      if (item.breaks.length) items.push(["key key-break", "изломы"]);
-      items.forEach((entry) => {
-        const li = node("li", null, null, box);
-        node("span", entry[0], null, li);
-        li.appendChild(document.createTextNode(entry[1]));
-      });
+      return { fact: blend(from.fact, to.fact), base: blend(from.base, to.base), fc: blend(from.fc, to.fc) };
     }
 
     function renderBreaks(item) {
@@ -701,7 +789,7 @@
         const index = months.indexOf(month);
         if (index < 0) return;
         const line = node("div", "vline vline-break", null, breaksBox);
-        line.style.left = `${((index / (count - 1)) * 100).toFixed(2)}%`;
+        line.style.left = left(index);
         // Близкие изломы — подписи в два ряда, чтобы не наезжали друг на друга.
         row = index - previous < 5 ? row + 1 : 0;
         previous = index;
@@ -710,12 +798,26 @@
       });
     }
 
+    function renderStats(item) {
+      const summary = item.summary;
+      byId("t-stat-fc").textContent = withRub(summary.forecast_mean);
+      byId("t-stat-fc-note").textContent =
+        `${summary.growth} к ${lastFactYear} году · ${referenceName}: ${withRub(summary.baseline_mean)}`;
+      byId("t-stat-breaks").textContent = item.breaks.length ? item.breaks.map(monthLabel).join(" · ") : "не найдены";
+      const best = summary.best;
+      const ownBest = best.id !== reference.id;
+      byId("t-stat-best").textContent = ownBest ? best.name : reference.name;
+      byId("t-stat-best-note").textContent = ownBest
+        ? `ошибка ${withRub(best.mae)} против ${withRub(summary.reference_mae)} у ${referenceName.replace(/^эталон/, "эталона")}`
+        : `ошибка ${withRub(best.mae)}: остальные модели здесь ошибались сильнее`;
+    }
+
     function describe(item) {
       const parts = [
         `${item.id}: расходы на человека в месяц, факт ${monthLabel(months[0])} — ${monthLabel(months[nFact - 1])}`,
-        `прогноз ${monthLabel(months[nFact])} — ${monthLabel(months[count - 1])}`,
+        `прогноз ${monthLabel(months[nFact])} — ${monthLabel(months[count - 1])} рекомендуемой модели и эталона конкурса`,
       ];
-      if (item.breaks.length) parts.push(`изломы: ${item.breaks.map(monthLabel).join(", ")}`);
+      if (item.breaks.length) parts.push(`точки структурных изменений: ${item.breaks.map(monthLabel).join(", ")}`);
       return parts.join("; ");
     }
 
@@ -729,8 +831,13 @@
       byId("t-region").textContent = item.region || NO_REGION;
       go.href = standUrl(item.id);
       plot.setAttribute("aria-label", describe(item));
+      byId("t-end-fact-value").textContent = rubles(item.fact[nFact - 1]);
+      byId("t-end-fact-month").textContent = monthLabel(months[nFact - 1]);
+      byId("t-end-fc-value").textContent = rubles(item.forecast[item.forecast.length - 1]);
+      byId("t-end-fc-month").textContent = monthLabel(months[count - 1]);
+      setTicks(byId("t-ticks"), states[index].scale, (value) => formatTick(value, states[index].scale.step), animateMove);
       renderBreaks(item);
-      legend(item);
+      renderStats(item);
       running = animate(animateMove ? 500 : 0, (progress) => {
         draw(mix(from, states[index], easeOut(progress, 3)));
       }, () => {
@@ -739,9 +846,16 @@
       });
     }
 
+    ends.fact.style.left = left(nFact - 1);
+    ends.base.style.left = left(count - 1);
+    ends.fc.style.left = left(count - 1);
+
     teaser.items.forEach((item, index) => {
-      const chip = node("button", "chip", item.short, chips);
+      const chip = node("button", "chip", null, chips);
       chip.type = "button";
+      node("span", "chip-name", item.short, chip);
+      node("span", "visually-hidden", ", ", chip);
+      node("span", "chip-kind", item.kind, chip);
       chip.addEventListener("click", () => { if (index !== active) select(index, true); });
     });
     select(0, false);

@@ -108,6 +108,11 @@ forecast, recommended, uses_published_aggregate`. Строки `two_stage_known`
 `two_stage`, прогноз федерального агрегата на 2025 год, против факта, рядом ориентиры «как в декабре»
 и «как год назад».
 
+`results/forecast_2025_baseline.csv.gz` — тот же прогноз на 2025 год от эталона конкурса, Prophet по
+умолчанию: обучение на всех 24 месяцах каждого ряда, год вперёд, ряд за рядом (`scripts/forecast_baseline.py`,
+раздел `baseline` того же конфига). Таблицу прогноза рекомендуемых моделей он не меняет; на странице
+работы линия эталона стоит рядом с прогнозом рекомендуемой модели у примеров муниципалитетов.
+
 ### Стенд разладок
 
 Шесть детекторов точек структурных изменений (`src/changepoints.py`) сравниваются
@@ -261,6 +266,7 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 | `src/run.py` | `per_series.csv`, `summary.csv` | модели гоняются по одной (`--models`): от минуты до 5 ч 37 мин у `prophet_forced_yearly` (машина уходила в подкачку) |
 | `scripts/horizons.py` | `horizons_*.csv` | 2 ч 41 мин на все модели |
 | `scripts/forecast_forward.py` | `forecast_2025.csv`, `forecast_2025_aggregate_check.csv` | около 3 мин |
+| `scripts/forecast_baseline.py` | `forecast_2025_baseline.csv` | около 3 мин на семи процессах |
 | `scripts/changepoints.py` | `cp_*.csv` — десять файлов | около 7 мин; первая версия стенда — около 2 мин |
 | `scripts/error_decomposition.py` | `error_decomposition.csv` | около 12 мин |
 | `scripts/training_length_sweep.py` | `training_length_sweep.csv` | около 32 мин |
@@ -280,7 +286,7 @@ configs/full.yaml       протокол: данные, разбиение, вы
 configs/baseline.yaml   тот же протокол на выборке из 300 рядов, пишет в results/baseline/
 configs/changepoints.yaml  стенд разладок v2: выборка, врезки, правила зачёта, режимы, штрафы, правило выбора штрафа, события
 configs/changepoints_v1.yaml  первая версия стенда — пишет в results/cp_v1/, источник подраздела отчёта о ней
-configs/forecast_forward.yaml  прогноз от конца панели на 2025 год: origin, горизонты, модель на каждом горизонте
+configs/forecast_forward.yaml  прогноз от конца панели на 2025 год: origin, горизонты, модель на каждом горизонте; раздел baseline — эталон на тех же условиях
 src/data.py             загрузка панели, восстановление сущностей, пропуски
 src/split.py            скользящий origin
 src/metrics.py          MAE, R², sMAPE, MASE; R² сводок пулом и медианой, выигрыш к эталонам
@@ -296,6 +302,7 @@ scripts/build_news_features.py  пересборка новостных приз
 scripts/backfill_r2.py  разовый бэкфилл слагаемых R² пула в результаты, посчитанные до 25.09
 scripts/changepoints.py стенд разладок и потоковый сигнал на панели → десять results/cp_*.csv
 scripts/forecast_forward.py  прогноз на 2025 год и проверка федерального агрегата по факту
+scripts/forecast_baseline.py  прогноз эталона конкурса на 2025 год по каждому ряду → results/forecast_2025_baseline.csv
 scripts/news_panel.py   новостные признаки в модели и корреляция с изломами → results/news_panel.csv, news_breaks_corr.csv
 data/news/              агрегаты новостного корпуса; сырые заголовки в репозиторий не входят
 tests/                  тесты на синтетических кадрах

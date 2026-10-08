@@ -113,32 +113,45 @@
         <button class="step" id="step-1" type="button" aria-pressed="true">
           <span class="step-num">Шаг 01<span class="step-hint" aria-hidden="true">показать →</span></span>
           <span class="step-title">Ряды идут вместе</span>
-          <span class="step-text">${sample_label} из ${n_series_rub}, расходы к среднему за ${story_base}.</span>
+          <span class="step-text">${sample_label} из ${n_series_rub}, расходы к среднему за ${story_base}: растут и падают в те же месяцы, что и вся страна.</span>
           <span class="step-short">ряды</span>
         </button>
         <button class="step" id="step-2" type="button" aria-pressed="false">
           <span class="step-num">Шаг 02<span class="step-hint" aria-hidden="true">показать →</span></span>
-          <span class="step-title">Общее движение</span>
-          <span class="step-text">Медиана по рядам повторяет почти всю динамику; общее движение прогнозирует первый этап модели по федеральному ряду.</span>
+          <span class="step-title">Общее движение одно на всех</span>
+          <span class="step-text">Медиана по рядам повторяет почти всю динамику, и это одно число — федеральный ряд, который прогнозирует первый этап модели.</span>
           <span class="step-short">общее движение</span>
         </button>
         <button class="step" id="step-3" type="button" aria-pressed="false">
           <span class="step-num">Шаг 03<span class="step-hint" aria-hidden="true">показать →</span></span>
-          <span class="step-title">Что остаётся</span>
-          <span class="step-text">Ряды, делённые на общее движение: не менее чем у ${spread_share}% значений по всей панели отклонение не больше ±${spread_pct}%.</span>
+          <span class="step-title">Своего у ряда мало</span>
+          <span class="step-text">Ряды, делённые на общее движение: не менее чем у ${spread_share}% значений по всей панели отклонение не больше ±${spread_pct}%, доля каждого муниципалитета почти постоянна.</span>
           <span class="step-short">остаток</span>
+        </button>
+        <button class="step" id="step-4" type="button" aria-pressed="false">
+          <span class="step-num">Шаг 04<span class="step-hint" aria-hidden="true">показать →</span></span>
+          <span class="step-title">Точность решает одно число</span>
+          <span class="step-text">Разброс между муниципалитетами у всех ${decomp_models} моделей почти равный, ${spread_range}&nbsp;₽, а различает их только промах мимо общего движения — поэтому прогноз одного числа и разнос долями.</span>
+          <span class="step-short">одно число</span>
         </button>
       </div>
 
       <div class="plot-card story-card">
+        <p class="chart-unit" id="story-unit"><span id="story-unit-lines">Расходы к среднему за ${story_base}, %</span><span id="story-unit-bars" hidden></span></p>
         <div class="plot story-plot" id="story-plot" role="img" aria-label="График рядов расходов">
-          <div class="ticks" id="story-ticks"></div>
           <svg class="plot-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+            <g class="story-band-layer" id="story-band-layer"><rect class="story-band" id="story-band" x="0" width="1000"/></g>
             <g class="story-lines" id="story-lines"></g>
             <g class="story-median-layer" id="story-median-layer"><path class="story-median" id="story-median"/></g>
           </svg>
+          <span class="story-band-label" id="story-band-label" aria-hidden="true"></span>
+          <div class="story-bars" id="story-bars" aria-hidden="true"></div>
         </div>
         <div class="plot-axis" id="story-axis" aria-hidden="true"></div>
+        <ul class="legend story-bars-legend" id="story-bars-legend" aria-label="Обозначения полос" hidden>
+          <li><span class="key key-spread"></span>разброс между муниципалитетами: у всех моделей почти равный</li>
+          <li><span class="key key-bias"></span>промах мимо общего движения: различает модели</li>
+        </ul>
         <p class="visually-hidden" id="story-caption" aria-live="polite"></p>
         <p class="story-text" id="story-text"></p>
       </div>
@@ -259,34 +272,67 @@
   </div>
 </section>
 
-<section class="section" id="city" aria-labelledby="city-title">
+<section class="section night section-night" id="city" aria-labelledby="city-title">
   <div class="wrap">
-    <div class="stand night">
-      <div class="stand-copy">
-        <p class="eyebrow">05 · Прогноз по муниципалитету</p>
-        <h2 class="section-title" id="city-title">Покажите мой город</h2>
-        <p class="stand-lead" id="stand-lead">
-          Любой из ${n_series_rub} муниципалитетов: расходы по месяцам, прогноз на ${forecast_year} год от рекомендуемой модели (фактом не проверен: муниципальный разрез ${forecast_year} года ещё не опубликован) и изломы ряда.
-        </p>
-        <div class="chips" id="t-chips" role="group" aria-label="Примеры муниципальных образований"></div>
-        <a class="btn btn-primary stand-cta" id="t-go" href="demo/">Открыть прогноз →</a>
-      </div>
+    <p class="eyebrow">05 · Прогноз по муниципалитету</p>
+    <h2 class="section-title" id="city-title">Один из ${n_series_rub} крупно</h2>
+    <p class="section-lead" id="stand-lead">
+      Примеры разного масштаба: областной центр, миллионник и сельский район. Прогноз на ${forecast_year} год фактом не проверен: муниципальный разрез ${forecast_year} года ещё не опубликован.
+    </p>
 
-      <div class="stand-chart">
+    <div class="city">
+      <div class="plot-card city-card">
+        <div class="chips chips-row" id="t-chips" role="group" aria-label="Примеры муниципальных образований"></div>
         <div class="stand-chart-head">
-          <span class="stand-chart-name" id="t-name"></span>
-          <span class="stand-chart-region" id="t-region"></span>
+          <span class="stand-chart-title"><span class="stand-chart-name" id="t-name"></span><span class="stand-chart-region" id="t-region"></span></span>
+          <span class="chart-unit stand-chart-unit">расходы, ₽ на человека в месяц</span>
         </div>
         <div class="plot stand-plot" id="t-plot" role="img" aria-label="График расходов муниципалитета">
-          <div class="vline vline-panel" id="t-panel-end"></div>
+          <div class="ticks" id="t-ticks"></div>
           <div id="t-breaks"></div>
+          <div class="vline vline-panel" id="t-panel-end"><span>конец панели</span></div>
           <svg class="plot-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
             <path class="stand-line stand-fact" id="t-fact"/>
-            <path class="stand-line stand-known" id="t-known"/>
+            <path class="stand-line stand-base" id="t-base"/>
             <path class="stand-line stand-fc" id="t-fc"/>
           </svg>
+          <div class="stand-end stand-end-base" id="t-end-base" aria-hidden="true"><span class="stand-end-dot"></span></div>
+          <div class="stand-end stand-end-fact" id="t-end-fact" aria-hidden="true"><span class="stand-end-dot"></span><span class="stand-end-label"><b id="t-end-fact-value"></b><i id="t-end-fact-month"></i></span></div>
+          <div class="stand-end stand-end-fc" id="t-end-fc" aria-hidden="true"><span class="stand-end-dot"></span><span class="stand-end-label"><b id="t-end-fc-value"></b><i id="t-end-fc-month"></i></span></div>
         </div>
-        <ul class="legend legend-night" id="t-legend"></ul>
+        <div class="plot-axis plot-axis-years" id="t-years" aria-hidden="true"></div>
+        <ul class="legend" id="t-legend" aria-label="Обозначения линий">
+          <li><span class="key key-fact"></span><span id="t-legend-fact"></span></li>
+          <li><span class="key key-fc"></span><span id="t-legend-fc"></span></li>
+          <li><span class="key key-r1"></span><span id="t-legend-base"></span></li>
+          <li><span class="key key-vbreak"></span>точки структурных изменений</li>
+        </ul>
+      </div>
+
+      <div class="city-side">
+        <div class="readout night city-readout">
+          <dl class="stand-stats" id="t-stats" aria-live="polite">
+            <div>
+              <dt class="mono-label" id="t-stat-fc-label"></dt>
+              <dd class="stand-stat-fc" id="t-stat-fc"></dd>
+              <dd class="stand-stat-note" id="t-stat-fc-note"></dd>
+            </div>
+            <div>
+              <dt class="mono-label">Точки структурных изменений</dt>
+              <dd class="stand-stat-breaks" id="t-stat-breaks"></dd>
+              <dd class="stand-stat-note">изломы ряда, найдены задним числом по всей истории</dd>
+            </div>
+            <div>
+              <dt class="mono-label" id="t-stat-check-label"></dt>
+              <dd class="stand-stat-best" id="t-stat-best"></dd>
+              <dd class="stand-stat-note" id="t-stat-best-note"></dd>
+            </div>
+          </dl>
+          <div class="stand-actions">
+            <a class="btn btn-primary stand-cta" id="t-go" href="demo/">Открыть этот муниципалитет →</a>
+            <a class="stand-any" id="t-any" href="demo/">найти любой из ${n_series_rub} →</a>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -363,11 +363,11 @@ def _contrast(foreground: str | tuple, background: str | tuple, alpha: float = 1
 
 
 def _theme_tokens(css: str) -> dict[str, dict[str, str]]:
-    """Токены трёх областей site.css: светлая тема (:root), тёмная (в prefers-color-scheme) и ночной блок (.night).
+    """Токены двух областей site.css: светлая тема (:root) и ночной блок (.night). Тема одна: автоматической
+    тёмной по prefers-color-scheme нет — ритм светлых разделов и тёмных полос иначе пропадал в тёмной системе.
     Значения, ссылающиеся на другие токены через var(), раскрываются по :root."""
     blocks = {
         "light": re.search(r"\n:root \{(.*?)\n\}", css, re.S).group(1),
-        "dark": re.search(r"@media \(prefers-color-scheme: dark\) \{\s*:root \{(.*?)\n  \}", css, re.S).group(1),
         "night": re.search(r"\n\.night \{(.*?)\n\}", css, re.S).group(1),
     }
     raw = {name: dict(re.findall(r"(--[\w-]+):\s*([^;]+?);", text)) for name, text in blocks.items()}
@@ -395,10 +395,18 @@ class ContrastTest(unittest.TestCase):
         t = self.tokens[scope]
         return {"page": t.get("--bg") or self.tokens["light"]["--bg"], "card": t["--surface"]}
 
+    def test_site_has_one_light_theme_with_night_bands(self) -> None:
+        # Тема одна, светлая: тёмные полосы — обложка, раздел 05 и подвал — классом .night, а не темой системы.
+        self.assertNotIn("prefers-color-scheme", self.site)
+        self.assertNotIn("prefers-color-scheme", _read("demo/demo.css"))
+        self.assertRegex(self.site, r"html \{\s*color-scheme: light;")
+        template = _read("site/index.template.html")
+        self.assertIn('<section class="section night section-night" id="city"', template)
+
     def test_step_buttons_are_visible_among_the_neighbouring_text(self) -> None:
         # Невыбранные шаги с рамкой 1,2:1 выглядели статичными карточками — читатель мог не узнать, что медиана и
-        # остаток за кликом. Рамка — как у поля поиска: 3:1 к фону страницы в обеих темах.
-        for scope in ("light", "dark"):
+        # остаток за кликом. Рамка — как у поля поиска: 3:1 к фону страницы.
+        for scope in ("light",):
             with self.subTest(scope=scope):
                 background = self.surface(scope)["page"]
                 self.assertGreaterEqual(_contrast(self.tokens[scope]["--step-line"], background), 3.0)
@@ -421,30 +429,28 @@ class ContrastTest(unittest.TestCase):
     def test_step_buttons_say_what_they_do(self) -> None:
         template = _read("site/index.template.html")
         hints = re.findall(r'<span class="step-hint" aria-hidden="true">показать →</span>', template)
-        self.assertEqual(len(hints), 3, "подсказка есть у каждого шага: выбранным может быть любой")
+        self.assertEqual(len(hints), 4, "подсказка есть у каждого шага: выбранным может быть любой")
         self.assertRegex(self.landing, r'\.step\[aria-pressed="true"\] \.step-hint \{\s*display: none;')
 
     def test_series_lines_reach_three_to_one_at_their_opacity(self) -> None:
         opacity = float(re.search(r"\.story-lines \{\s*stroke-opacity: ([\d.]+);", self.landing).group(1))
-        for scope in ("light", "dark"):
+        for scope in ("light",):
             with self.subTest(scope=scope):
                 line = self.tokens[scope]["--chart-line"]
                 self.assertGreaterEqual(_contrast(line, self.surface(scope)["card"], opacity), 3.0)
 
     def test_marks_of_the_panel_end_reach_three_to_one(self) -> None:
-        # «Конец панели» на светлой и тёмной карточке и вертикаль блока на ночной подложке.
-        for scope in ("light", "dark", "night"):
+        # «Конец панели» на светлой карточке и вертикаль блока на ночной подложке.
+        for scope in ("light", "night"):
             with self.subTest(scope=scope):
                 self.assertGreaterEqual(_contrast(self.tokens[scope]["--chart-mark"], self.surface(scope)["card"]), 3.0)
         self.assertRegex(self.landing, r"\.vline-panel \{\s*border-left: 1px dashed var\(--chart-mark\);")
 
-    def test_method_figure_is_softened_in_the_dark_theme_and_its_caption_stays_readable(self) -> None:
-        # Белая подложка схемы была самым ярким пятном тёмной страницы; смягчённая — и подпись с ссылкой на ней
-        # читаются (4,5:1 и выше), на светлой теме — тоже.
-        self.assertEqual(self.tokens["dark"]["--surface-card"].lower(), "#e3e6ec")
+    def test_method_figure_caption_stays_readable(self) -> None:
+        # Подпись схемы и ссылка в ней на подложке схемы — 4,5:1 и выше.
         text = re.search(r"\.method-figure figcaption \{[^}]*color:\s*(#[0-9a-fA-F]{6})", self.landing).group(1)
         link = re.search(r"\.method-figure figcaption a \{[^}]*color:\s*(#[0-9a-fA-F]{6})", self.landing).group(1)
-        for scope in ("light", "dark"):
+        for scope in ("light",):
             for name, color in (("подпись", text), ("ссылка", link)):
                 with self.subTest(scope=scope, part=name):
                     self.assertGreaterEqual(_contrast(color, self.tokens[scope]["--surface-card"]), 4.5)
@@ -534,7 +540,7 @@ class TeaserBreakLabelsTest(unittest.TestCase):
     def test_labels_cover_neighbour_lines_and_stay_under_the_series(self) -> None:
         css = _read("site/landing.css")
         label = re.search(r"\.vline-break > span \{([^}]*)\}", css).group(1)
-        self.assertRegex(label, r"background:\s*var\(--night-surface\)")
+        self.assertRegex(label, r"background:\s*var\(--surface\)")
         label_z = int(re.search(r"z-index:\s*(\d+)", label).group(1))
         svg_z = int(re.search(r"\.stand-plot \.plot-svg \{[^}]*z-index:\s*(\d+)", css).group(1))
         self.assertGreater(label_z, 0, "подпись должна лежать над линиями изломов")

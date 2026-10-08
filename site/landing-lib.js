@@ -70,10 +70,6 @@ const LandingLib = (() => {
     return (negative ? "−" : "") + groupDigits(parts[0]) + (parts.length > 1 ? `,${parts[1]}` : "");
   }
 
-  // Отметка оси в процентах от единицы: значение 1,025 при шаге 0,025 — «102,5%».
-  function percentTick(value, step) {
-    return `${formatTick(value * 100, step * 100)}%`;
-  }
 
   // Учёт наборов подписей оси. Набор — все подписи одной шкалы. При смене шкалы новый набор
   // встаёт поверх, а все прежние — и те, что ещё не убраны после прошлой смены, — уходят: живой
@@ -172,7 +168,7 @@ const LandingLib = (() => {
 
   return {
     groupDigits, formatInt, pluralRu,
-    niceScale, stepDecimals, formatTick, percentTick, createTickSets, historyKeep,
+    niceScale, stepDecimals, formatTick, createTickSets, historyKeep,
     numberTokens, countedText,
     NO_REGION,
   };

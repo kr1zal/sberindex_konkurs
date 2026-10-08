@@ -53,9 +53,11 @@ AGGREGATE_JSON_KEYS = {
 }
 LANDING_JSON_KEYS = {"story", "horizons", "fact", "teaser", "breaks"}
 BREAKS_KEYS = {"months", "share", "top", "top_labels"}
-STORY_KEYS = {"months", "base_months", "ids", "series", "median", "n_total", "n_sample"}
+STORY_KEYS = {"months", "base_months", "ids", "series", "median", "n_total", "n_sample", "decomposition",
+              "spread_share", "spread_pct"}
 HORIZONS_KEYS = {"list", "main", "labels", "unit", "models", "notes"}
-TEASER_ITEM_KEYS = {"id", "short", "region", "fact", "forecast", "known", "breaks"}
+TEASER_ITEM_KEYS = {"id", "short", "kind", "region", "fact", "forecast", "breaks", "baseline", "summary"}
+TEASER_SUMMARY_KEYS = {"forecast_mean", "baseline_mean", "growth", "best", "reference_mae"}
 
 _MONTH_OF = ["января", "февраля", "марта", "апреля", "мая", "июня",
              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
@@ -363,13 +365,17 @@ _NUMBER_WORDS = re.compile(
 )
 
 # То, что числом не является: имя сайта, фигура речи про сам вывод работы, один муниципалитет на
-# линию графика, название этапа модели, прилагательное «двухэтапная» и отрицание «ни одной из
-# моделей». Исключения — целыми оборотами, а не основами: «первый год» или «двух месяцев» они
-# не скрывают.
+# линию графика, «Один из … крупно» (один пример, а не счёт), слово «миллионник» о городе, название
+# этапа модели, прилагательное «двухэтапная» и отрицание «ни одной из моделей». Исключения — целыми
+# оборотами, а не основами: «первый год» или «двух месяцев» они не скрывают.
 _NOT_NUMBERS = (
     "Одно число",
+    "одно число",
     "одного числа",
+    "одно на всех",
     "один муниципалитет",
+    "Один из",
+    r"миллионник\w*",
     r"перв\w+ этап\w*",
     r"двухэтапн\w*",
     r"ни одн\w+",
@@ -554,8 +560,8 @@ class BuildSiteTest(unittest.TestCase):
         self.assertTrue(any(regions[i] for i in ids), "нет ряда с регионом")
         self.assertTrue(any(not regions[i] for i in ids), "нет ряда без региона")
         self.assertTrue(any(re.search(r" #\d+$", i) for i in ids), "нет ряда с номером «#N»")
-        # Общие с блоком «Стенд» главной ряды подписаны там так же.
-        for series_id, short in build_site.TEASER_MO:
+        # Общие с примерами главной ряды подписаны там так же.
+        for series_id, short, _ in build_site.TEASER_MO:
             if series_id in shorts:
                 self.assertEqual(shorts[series_id], short)
 
@@ -1154,9 +1160,9 @@ class BuildSiteTest(unittest.TestCase):
             )
 
     def test_demo_chart_uses_only_theme_tokens_of_site_css(self) -> None:
-        # Цвета рядов графика у стенда и главной одни и те же в обеих темах: стенд не держит
-        # своих копий --chart-*, а каждый токен, на который он ссылается, объявлен в site.css
-        # трижды — для светлой темы, для тёмной и для ночных блоков (.night).
+        # Цвета рядов графика у стенда и главной одни и те же: стенд не держит своих копий --chart-*,
+        # а каждый токен, на который он ссылается, объявлен в site.css дважды — для светлой темы
+        # (тема одна) и для ночных блоков (.night).
         demo_css = (ROOT / "demo" / "demo.css").read_text(encoding="utf-8")
         self.assertNotRegex(demo_css, r"--chart-[a-z-]+\s*:", "demo.css объявляет свой токен графика")
         site_css = (ROOT / "site" / "site.css").read_text(encoding="utf-8")
@@ -1165,8 +1171,8 @@ class BuildSiteTest(unittest.TestCase):
         self.assertTrue({"--chart-fact", "--chart-forecast", "--chart-known", "--chart-grid"} <= used)
         for token in sorted(used):
             with self.subTest(token=token):
-                self.assertEqual(len(re.findall(re.escape(token) + r"\s*:", site_css)), 3,
-                                 f"{token} должен быть объявлен для светлой, тёмной темы и .night")
+                self.assertEqual(len(re.findall(re.escape(token) + r"\s*:", site_css)), 2,
+                                 f"{token} должен быть объявлен для светлой темы и .night")
 
     # -- данные главной: <script id="landing-data"> --------------------------------------
 
@@ -1177,7 +1183,7 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual(set(self.landing), LANDING_JSON_KEYS)
         self.assertEqual(set(self.landing["story"]), STORY_KEYS)
         self.assertEqual(set(self.landing["horizons"]), HORIZONS_KEYS)
-        self.assertEqual(set(self.landing["teaser"]), {"months", "items"})
+        self.assertEqual(set(self.landing["teaser"]), {"months", "items", "reference"})
         self.assertEqual(set(self.landing["breaks"]), BREAKS_KEYS)
 
     def test_landing_json_size_is_under_the_module_threshold(self) -> None:
@@ -1200,6 +1206,28 @@ class BuildSiteTest(unittest.TestCase):
     def _story_norm(self) -> pd.DataFrame:
         """Ряды матрицы, делённые на среднее своих первых 12 месяцев — написано здесь заново."""
         return self.wide / self.wide.iloc[:12].mean()
+
+    def test_story_decomposition_recomputed_from_csv(self) -> None:
+        # Четвёртый шаг: у каждой модели промах и разброс — средние по окнам проверки из
+        # results/error_decomposition.csv, целыми рублями, модели по убыванию суммы (MAE); название — из словаря
+        # моделей без пояснения; горизонт — основного протокола.
+        decomposition = read_results(ROOT / "results" / "error_decomposition.csv")
+        means = decomposition.groupby("модель", sort=False)[["смещение", "разброс", "MAE"]].mean()
+        got = self.landing["story"]["decomposition"]
+        self.assertEqual(got["horizon"], int(self.full_cfg["split"]["horizon"]))
+        self.assertEqual(set(m["id"] for m in got["models"]), set(means.index))
+        totals = [m["bias"] + m["spread"] for m in got["models"]]
+        self.assertEqual(totals, sorted(totals, reverse=True))
+        for model in got["models"]:
+            with self.subTest(model=model["id"]):
+                row = means.loc[model["id"]]
+                self.assertEqual(model["bias"], round(float(row["смещение"])))
+                self.assertEqual(model["spread"], round(float(row["разброс"])))
+                # Смещение и разброс складываются в MAE (до округления рубля на каждом слагаемом).
+                self.assertLessEqual(abs(model["bias"] + model["spread"] - float(row["MAE"])), 1.5)
+                label = build_site.MODEL_LABELS[model["id"]]
+                head = label.split(": ")[0] if ": " in label else label.split(" (")[0]
+                self.assertEqual(model["label"], head[:1].upper() + head[1:])
 
     def test_story_median_is_recomputed_over_all_matrix_series(self) -> None:
         story = self.landing["story"]
@@ -1237,7 +1265,8 @@ class BuildSiteTest(unittest.TestCase):
 
     def test_story_sample_is_fixed_by_the_module_seed(self) -> None:
         # Сид — константа модуля: та же выборка при повторной сборке, другой сид — другая.
-        again = build_site.build_story(self.wide)
+        decomposition = read_results(ROOT / "results" / "error_decomposition.csv")
+        again = build_site.build_story(self.wide, decomposition, int(self.full_cfg["split"]["horizon"]))
         self.assertEqual(again["ids"], self.landing["story"]["ids"])
         other = np.random.default_rng(build_site.LANDING_SAMPLE_SEED + 1).choice(
             self.wide.shape[1], size=build_site.LANDING_SAMPLE_SIZE, replace=False
@@ -1253,9 +1282,12 @@ class BuildSiteTest(unittest.TestCase):
         self.assertTrue(50 < share < 100)
         band = math.ceil(round(float(np.percentile(deviation, share)) * 100, 6))
         line = _IdsOf(self.html).text("step-3")
-        # Ряды поделены на общее движение: ось в процентах вокруг ста, и без этих слов ±M% не от чего считать.
+        # Ряды поделены на общее движение: полоса ±M% вокруг линии на графике, и без этих слов её не от чего считать.
         self.assertIn(f"Ряды, делённые на общее движение: не менее чем у {share}% значений по всей панели", line)
         self.assertIn(f"отклонение не больше ±{band}%", line)
+        # Те же числа — в данных главной: по ним скрипт рисует полосу третьего шага.
+        self.assertEqual(self.landing["story"]["spread_share"], share)
+        self.assertEqual(self.landing["story"]["spread_pct"], band)
         # Утверждение верно, и полоса не шире нужного: на один процент уже она бы доли не вмещала.
         self.assertGreaterEqual(float((deviation <= band / 100).mean()), share / 100)
         self.assertLess(float((deviation <= (band - 1) / 100).mean()), share / 100)
@@ -1345,34 +1377,104 @@ class BuildSiteTest(unittest.TestCase):
         self.assertEqual(
             teaser["months"], self.index_json["panel_months"] + self.index_json["forecast_months"]
         )
-        # Три МО блока «Стенд» (TEASER_MO): МО стенда по умолчанию, Казань и ряд-омоним с номером «#2».
+        # Три примера (TEASER_MO): МО страницы прогноза по умолчанию, Казань и сельский район — все с регионом,
+        # у каждого подпись, чем он отличается от соседей.
         self.assertEqual(
             [item["id"] for item in teaser["items"]],
-            [self.index_json["default_mo"], "городской округ город Казань", "Михайловский муниципальный район #2"],
+            [self.index_json["default_mo"], "городской округ город Казань", "Тербунский муниципальный район"],
         )
+        self.assertEqual([item["kind"] for item in teaser["items"]], ["областной центр", "миллионник", "сельский район"])
+        reference = next(m for m in self.index_json["models"] if "reference" in m["role"].split("+"))
+        self.assertEqual(teaser["reference"], {"id": reference["id"], "name": reference["name"], "note": reference["note"]})
         for item in teaser["items"]:
             with self.subTest(series=item["id"]):
                 self.assertEqual(set(item), TEASER_ITEM_KEYS)
                 entry = mo_files[item["id"]]
-                for key in ("fact", "forecast", "known", "breaks"):
+                for key in ("fact", "forecast", "breaks"):
                     self.assertEqual(item[key], entry[key])
                 self.assertEqual(item["region"], regions[item["id"]])
+                self.assertTrue(regions[item["id"]], "пример главной — ряд с регионом")
                 self.assertTrue(item["short"])
-                self.assertNotIn(None, item["fact"] + item["forecast"] + item["known"])
+                self.assertNotIn(None, item["fact"] + item["forecast"] + item["baseline"])
+                self.assertEqual(len(item["baseline"]), len(item["forecast"]))
 
-    def test_teaser_rejects_missing_series_and_gaps(self) -> None:
-        empty = build_site.DemoBuild(files={}, total_bytes=0, entries={}, regions={})
-        with self.assertRaises(ValueError):
-            build_site.build_teaser(empty, self.wide, self.forward_cfg)
+    def test_teaser_baseline_is_the_reference_forward_forecast_rounded(self) -> None:
+        # Линия эталона — прогноз Prophet по умолчанию от конца панели на те же 12 месяцев
+        # (results/forecast_2025_baseline.csv), округлённый до рубля, как остальные значения стенда.
+        base_cfg = self.forward_cfg["baseline"]
+        baseline = read_results(ROOT / "results" / "forecast_2025_baseline.csv", dtype={"error": object})
+        self.assertEqual(base_cfg["model"], "prophet")
+        for item in self.landing["teaser"]["items"]:
+            with self.subTest(series=item["id"]):
+                rows = baseline.loc[
+                    (baseline["series_id"] == item["id"]) & (baseline["model"] == base_cfg["model"])
+                    & (baseline["horizon"] == int(base_cfg["horizon"]))
+                ].set_index("month")["forecast"]
+                expected = [int(round(rows.loc[month])) for month in self.index_json["forecast_months"]]
+                self.assertEqual(item["baseline"], expected)
 
-        entries = {sid: {"fact": [1], "forecast": [1], "known": [1], "breaks": []}
-                   for sid, _ in build_site.TEASER_MO}
-        entries[build_site.TEASER_MO[0][0]]["known"] = [None]
-        gappy = build_site.DemoBuild(
-            files={}, total_bytes=0, entries=entries, regions={sid: None for sid in entries}
-        )
+    def test_teaser_summary_numbers_recomputed_from_demo_files(self) -> None:
+        # Числа раздела — из тех же целых рублей, что на графике и в таблице ошибок стенда: средний месяц
+        # прогноза, его рост к среднему месяцу последнего года панели, средний месяц эталона, лучшая по
+        # средней ошибке на окнах проверки модель таблицы ошибок и та же ошибка эталона.
+        mo_files: dict[str, dict] = {}
+        for path in (self.data_dir / "mo").glob("*.json"):
+            mo_files.update(json.loads(path.read_text(encoding="utf-8")))
+        models = self.index_json["models"]
+        reference = next(m for m in models if "reference" in m["role"].split("+"))
+        for item in self.landing["teaser"]["items"]:
+            with self.subTest(series=item["id"]):
+                summary = item["summary"]
+                self.assertEqual(set(summary), TEASER_SUMMARY_KEYS)
+                entry = mo_files[item["id"]]
+                forecast_mean = float(np.mean(item["forecast"]))
+                fact_mean = float(np.mean(item["fact"][-12:]))
+                self.assertEqual(summary["forecast_mean"], _fmt(forecast_mean, 0))
+                self.assertEqual(summary["baseline_mean"], _fmt(float(np.mean(item["baseline"])), 0))
+                self.assertEqual(summary["growth"], f"{_fmt_signed((forecast_mean / fact_mean - 1) * 100, 1)}%")
+                means = {}
+                for model in models:
+                    finite = [v for v in entry["mae"][model["id"]] if v is not None]
+                    means[model["id"]] = round(float(np.mean(finite))) if finite else None
+                best = min((m for m in models if means[m["id"]] is not None), key=lambda m: means[m["id"]])
+                self.assertEqual(summary["best"], {"id": best["id"], "name": best["name"], "note": best["note"],
+                                                   "mae": _fmt(means[best["id"]], 0)})
+                self.assertEqual(summary["reference_mae"], _fmt(means[reference["id"]], 0))
+
+    def test_teaser_rejects_missing_series_gaps_and_a_baseline_without_the_series(self) -> None:
+        models = self.index_json["models"]
+        base_cfg = self.forward_cfg["baseline"]
+        origin = pd.Period(self.forward_cfg["origin"], "M")
+        months = [str(origin + step) for step in range(1, int(base_cfg["horizon"]) + 1)]
+        ids = [sid for sid, _, _ in build_site.TEASER_MO]
+        baseline = pd.DataFrame({
+            "series_id": np.repeat(ids, len(months)), "model": base_cfg["model"], "horizon": int(base_cfg["horizon"]),
+            "month": months * len(ids), "forecast": 1.0,
+        })
+
+        empty = build_site.DemoBuild(files={}, total_bytes=0, entries={}, regions={}, models=models)
         with self.assertRaises(ValueError):
-            build_site.build_teaser(gappy, self.wide, self.forward_cfg)
+            build_site.build_teaser(empty, self.wide, self.forward_cfg, baseline)
+
+        def entries_of():
+            return {sid: {"fact": [1] * 24, "forecast": [1] * 12, "breaks": [],
+                          "mae": {m["id"]: [1, 1, 1] for m in models}} for sid in ids}
+
+        gappy_entries = entries_of()
+        gappy_entries[ids[0]]["forecast"] = [None] * 12
+        gappy = build_site.DemoBuild(files={}, total_bytes=0, entries=gappy_entries,
+                                     regions={sid: None for sid in ids}, models=models)
+        with self.assertRaises(ValueError):
+            build_site.build_teaser(gappy, self.wide, self.forward_cfg, baseline)
+
+        whole = build_site.DemoBuild(files={}, total_bytes=0, entries=entries_of(),
+                                     regions={sid: None for sid in ids}, models=models)
+        with self.assertRaises(ValueError):
+            build_site.build_teaser(whole, self.wide, self.forward_cfg, baseline[baseline["series_id"] != ids[0]])
+        with self.assertRaises(ValueError):
+            build_site.build_teaser(whole, self.wide, self.forward_cfg, baseline[baseline["month"] != months[-1]])
+        teaser = build_site.build_teaser(whole, self.wide, self.forward_cfg, baseline)
+        self.assertEqual([item["baseline"] for item in teaser["items"]], [[1] * 12] * 3)
 
     # -- шрифты, стили, скрипт: файлы на месте, внешнего нет -------------------------------------
 
@@ -1589,16 +1691,27 @@ class BuildSiteTest(unittest.TestCase):
 
         self.assertEqual(nodes.text("hero-sub"), f"и его разнос по {n_series} муниципалитетам")
         # Шаг 01: выборка, число рядов и период — в одной строке шага; видимой подписи под графиком нет.
-        self.assertIn(f"{sample_label} из {n_series}, расходы к среднему за {base}.", nodes.text("step-1"))
+        self.assertIn(f"{sample_label} из {n_series}, расходы к среднему за {base}: растут и падают", nodes.text("step-1"))
         # Прогнозирует первый этап — по федеральному ряду; медиана рядов только показывает общее движение.
-        self.assertIn("общее движение прогнозирует первый этап модели по федеральному ряду", nodes.text("step-2"))
-        # Блок «Прогноз по муниципалитету» — одна строка: число рядов, год прогноза, рекомендуемая модель и то, что
-        # муниципальный прогноз фактом не проверен (именно здесь, рядом с пунктиром, его проще всего принять
+        self.assertIn("это одно число — федеральный ряд, который прогнозирует первый этап модели.", nodes.text("step-2"))
+        # Шаг 04: число моделей разложения словом и границы разброса по всем сочетаниям модели и окна — из CSV.
+        decomposition = read_results(ROOT / "results" / "error_decomposition.csv")
+        spreads = decomposition["разброс"].astype(float)
+        n_models = decomposition["модель"].nunique()
+        words = {2: "двух", 3: "трёх", 4: "четырёх", 5: "пяти", 6: "шести", 7: "семи", 8: "восьми", 9: "девяти"}
+        self.assertIn(
+            f"Разброс между муниципалитетами у всех {words[n_models]} моделей почти равный, "
+            f"{_fmt(spreads.min(), 0)}–{_fmt(spreads.max(), 0)}\u00a0₽,", nodes.text("step-4"))
+        self.assertIn("поэтому прогноз одного числа и разнос долями.", nodes.text("step-4"))
+        self.assertEqual(nodes.text("story-unit-lines"), f"Расходы к среднему за {base}, %")
+        # Раздел «Один из … крупно» — заголовок с числом рядов и одна строка: три масштаба примеров и то, что
+        # муниципальный прогноз фактом не проверен (именно здесь, рядом с линией прогноза, его проще всего принять
         # за проверенный).
+        self.assertEqual(nodes.text("city-title"), f"Один из {n_series} крупно")
         self.assertEqual(
             nodes.text("stand-lead"),
-            f"Любой из {n_series} муниципалитетов: расходы по месяцам, прогноз на {year} год от рекомендуемой модели "
-            f"(фактом не проверен: муниципальный разрез {year} года ещё не опубликован) и изломы ряда.")
+            f"Примеры разного масштаба: областной центр, миллионник и сельский район. Прогноз на {year} год фактом "
+            f"не проверен: муниципальный разрез {year} года ещё не опубликован.")
         self.assertEqual(nodes.text("fact-title"), f"Прогноз от {origin_label} против факта {year} года")
         self.assertEqual(
             nodes.text("fact-lead"),
@@ -1670,11 +1783,12 @@ class BuildSiteTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_site.horizon_folds(self.horizons_cfg, mixed)
 
-    def test_section_one_is_three_steps_with_a_title_and_one_sentence_each_and_no_caption_under_the_chart(self) -> None:
-        # Заголовок, интерактив и одна строка текста: у каждого шага — название и одно предложение; подписи под
-        # графиком и строки-опоры со ссылкой на разложение ошибки нет. Подпись графика для программ чтения с экрана
-        # — скрытая живая область, которую скрипт заполняет названием и строкой выбранного шага.
-        for step in (1, 2, 3):
+    def test_section_one_is_four_steps_with_a_title_and_one_sentence_each_and_no_caption_under_the_chart(self) -> None:
+        # Заголовок, интерактив и одна строка текста: у каждого из четырёх шагов — название и одно предложение;
+        # подписи под графиком и строки-опоры со ссылкой на разложение ошибки нет (разложение — сам четвёртый шаг).
+        # Подпись графика для программ чтения с экрана — скрытая живая область, которую скрипт заполняет названием
+        # и строкой выбранного шага.
+        for step in (1, 2, 3, 4):
             line = re.search(rf'id="step-{step}".*?<span class="step-text">(.*?)</span>', self.html, re.S).group(1)
             with self.subTest(step=step):
                 self.assertEqual(len(re.findall(r"[.!?](?:\s|$)", line.strip())), 1, line)
@@ -1966,14 +2080,15 @@ class BuildSiteTest(unittest.TestCase):
 
     def test_demo_page_is_named_forecast_by_municipality_on_both_pages(self) -> None:
         # Одно имя: «Прогноз по муниципалитету» — в меню, метке раздела и карточке материалов, в метке и заголовке
-        # страницы. Приглашение «Покажите мой город» остаётся: заголовок блока на главной и H1 страницы; кнопка
-        # обложки зовёт «Найти свой город», кнопка блока — «Открыть прогноз».
+        # страницы. Приглашение «Покажите мой город» — H1 страницы прогноза; на главной кнопка обложки зовёт
+        # «Найти свой город», раздел «Один из … крупно» открывает выбранный пример и зовёт найти любой другой.
         self.assertIn('<a class="nav-link" href="demo/">Прогноз по муниципалитету</a>', self.html)
         self.assertIn('<p class="eyebrow">05 · Прогноз по муниципалитету</p>', self.html)
         self.assertIn('<a class="material-link" href="demo/">Прогноз по муниципалитету</a>', self.html)
-        self.assertEqual(self.html.count(">Открыть прогноз →</a>"), 1, "кнопка блока ведёт на страницу прогноза")
+        self.assertEqual(self.html.count(">Открыть этот муниципалитет →</a>"), 1, "кнопка раздела ведёт на страницу прогноза")
+        self.assertEqual(self.html.count(f">найти любой из {build_site.rub(self.wide.shape[1])} →</a>"), 1)
         self.assertEqual(self.html.count(">Найти свой город →</a>"), 1, "кнопка обложки ведёт на страницу прогноза")
-        self.assertIn('<h2 class="section-title" id="city-title">Покажите мой город</h2>', self.html)
+        self.assertNotIn("Покажите мой город", self.html)
         self.assertIn("<title>Прогноз по муниципалитету — покажите мой город</title>", self.demo_html)
         self.assertIn('<p class="eyebrow">Прогноз по муниципалитету</p>', self.demo_html)
         self.assertIn('<h1 class="stand-title" id="stand-title">Покажите мой город</h1>', self.demo_html)
@@ -2064,7 +2179,7 @@ class BuildSiteTest(unittest.TestCase):
                 self.assertTrue(ids.ids[chart]["aria-label"])
         self.assertIn('class="hero-plot" aria-hidden="true"', self.html)
         # Шаги и переключатели — кнопки с состоянием.
-        self.assertEqual(len(re.findall(r'<button class="step" id="step-\d" type="button" aria-pressed=', self.html)), 3)
+        self.assertEqual(len(re.findall(r'<button class="step" id="step-\d" type="button" aria-pressed=', self.html)), 4)
         self.assertIn('lang="ru"', self.html)
         self.assertIn('<link rel="icon" href="favicon.ico" sizes="32x32">', self.html)
         self.assertIn('<link rel="icon" href="favicon.svg" type="image/svg+xml">', self.html)

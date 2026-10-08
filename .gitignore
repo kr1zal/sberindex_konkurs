@@ -12,17 +12,19 @@ venv/
 results/**/*.csv
 !results/*.csv
 !results/cp_v1/*.csv
-# Пять построчных файлов крупнее 2 МБ как есть всё равно не идут — обычный CSV
+# Шесть построчных файлов крупнее 2 МБ как есть всё равно не идут — обычный CSV
 # снова не в git; у каждого свой снимок <файл>.csv.gz рядом (scripts/export_results.py),
 # под правило *.csv не подпадает и остаётся отслеживаемым без отдельной строки.
 # per_series.csv / horizons_per_series.csv — построчные результаты прогона (44 / 88 МБ),
-# forecast_2025.csv — построчный прогноз на 2025 год (19 МБ), cp_bench.csv и его копия
+# forecast_2025.csv — построчный прогноз на 2025 год (19 МБ), forecast_2025_baseline.csv —
+# построчный прогноз эталона на 2025 год (3,8 МБ), cp_bench.csv и его копия
 # для v1 — построчный стенд разладок (28 / 6,7 МБ): оба коммитятся
 # снимком, чтобы чистый клон собирал раздел об обнаружении разладок целиком, без
 # прогона стенда (scripts/changepoints.py, ~7 минут).
 results/per_series.csv
 results/horizons_per_series.csv
 results/forecast_2025.csv
+results/forecast_2025_baseline.csv
 results/cp_bench.csv
 results/cp_v1/cp_bench.csv
 # Временный файл записи снимка (scripts/export_results.py::export_one) — атомарная

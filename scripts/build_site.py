@@ -129,10 +129,17 @@ recommended-модель самого длинного горизонта — tw
 
     story     месяцы панели, 30 рядов для обложки и раздела «Почему это прогноз одного числа»
               и медиана по всем рядам матрицы:
-              {months, base_months, ids, series, median, n_total, n_sample}.
+              {months, base_months, ids, series, median, n_total, n_sample, spread_share, spread_pct,
+              decomposition}. spread_share / spread_pct — те же числа, что в строке третьего шага
+              (`story_spread_pct`): по ним скрипт рисует полосу ±M% вокруг общего движения.
               series[j] — ряд ids[j], делённый на среднее его первых base_months месяцев;
               median[t] — медиана таких значений по ВСЕМ n_total рядам матрицы в месяце t.
-              Ряды выбраны сидом LANDING_SAMPLE_SEED.
+              Ряды выбраны сидом LANDING_SAMPLE_SEED. decomposition — четвёртый шаг раздела,
+              разложение ошибки (`results/error_decomposition.csv`, scripts/error_decomposition.py):
+              {horizon, models: [{id, label, bias, spread}]} — у каждой модели средние по окнам
+              проверки промах мимо общего движения (bias) и разброс между муниципалитетами (spread),
+              руб., bias + spread = MAE; порядок — по убыванию MAE; label — название из MODEL_LABELS
+              без пояснения (`_label_parts`).
     horizons  {list, main, labels, unit, models, notes}: горизонты из configs/horizons.yaml,
               main — горизонт основного протокола (его показывают первым), четыре модели
               в порядке prophet, naive_last, лучшая основного протокола (summary.csv
@@ -141,9 +148,17 @@ recommended-модель самого длинного горизонта — tw
               notes[i] — одна фраза под полосами на горизонте list[i], с числом окон проверки
               этого горизонта словом (`horizon_folds`).
     fact      то же, что demo/data/aggregate.json (одна и та же структура, не пересчёт).
-    teaser    {months, items}: три МО из TEASER_MO; items[k] — {id, short, region, fact,
-              forecast, known, breaks} теми же значениями, что в demo/data/mo/*.json;
-              months — 24 месяца панели и 12 месяцев прогноза подряд.
+    teaser    {months, items, reference}: три МО из TEASER_MO; items[k] — {id, short, kind, region,
+              fact, forecast, breaks} теми же значениями, что в demo/data/mo/*.json, плюс
+              baseline — прогноз эталона конкурса на те же 12 месяцев
+              (`results/forecast_2025_baseline.csv`, scripts/forecast_baseline.py) и summary —
+              числа раздела готовыми строками: forecast_mean и baseline_mean (средний месяц
+              прогноза, руб.), growth («+13,4%» — средний месяц прогноза к среднему месяцу
+              последнего года панели), best — {id, name, note, mae}: модель с наименьшей
+              средней по окнам проверки ошибкой на этом ряду среди моделей таблицы ошибок
+              стенда (название и пояснение — те же поля, что у таблицы) и reference_mae — та же
+              ошибка эталона; months — 24 месяца панели и 12 месяцев прогноза подряд;
+              reference — {id, name, note} эталона, как в models стенда.
     breaks    {months, share, top, top_labels}: раздел «Изломы». share[t] — доля муниципалитетов
               (%, два знака), у которых по полному ряду, задним числом, найден излом в месяце
               months[t]: `results/cp_offline.csv` на протоколе `v{changepoints.yaml::protocol_version}`
@@ -214,20 +229,22 @@ STORY_BASE_MONTHS = 12
 # округлённый вверх до целого процента: полоса не уже, чем нужно, чтобы доля была честной.
 STORY_SPREAD_SHARE = 90
 
-# Муниципалитеты блока «Стенд»: названия — как в series_id панели, короткая подпись — для
-# чипа. Нужен ряд с регионом (Орёл, Казань) и ряд-омоним с номером «#N» (Михайловский
-# район): на нём видно, что в адрес стенда номер идёт закодированным. Ряд, которого нет
-# в панели, роняет сборку (`build_teaser`).
+# Примеры раздела «Один из … крупно» на главной: название — как в series_id панели, короткая
+# подпись — для кнопки, третье — чем пример отличается от соседей (подпись на той же кнопке).
+# Три масштаба: областной центр, город-миллионник и сельский район, все с регионом — читателю
+# нужен понятный ряд, а не особый случай данных (ряд-омоним с номером «#N» остался среди
+# быстрых кнопок страницы прогноза, STAND_QUICK_MO). Ряд, которого нет в панели, роняет сборку
+# (`build_teaser`).
 TEASER_MO = [
-    (DEFAULT_MO, "Орёл"),
-    ("городской округ город Казань", "Казань"),
-    ("Михайловский муниципальный район #2", "Михайловский р-н #2"),
+    (DEFAULT_MO, "Орёл", "областной центр"),
+    ("городской округ город Казань", "Казань", "миллионник"),
+    ("Тербунский муниципальный район", "Тербунский район", "сельский район"),
 ]
 
 # Быстрые кнопки под полем поиска на стенде: ряд (series_id панели) и короткая подпись кнопки.
 # Набор подобран так, чтобы с первого нажатия были видны все случаи стенда: города с регионом
 # и ОКТМО, ряд-омоним с номером «#N» (в адресе он идёт закодированным) и ряды без региона,
-# у которых стенд объясняет, почему регион не приписан. Подписи общих с блоком «Стенд» главной
+# у которых стенд объясняет, почему регион не приписан. Подписи общих с примерами главной
 # рядов совпадают с TEASER_MO. Ряд, которого нет в панели, роняет сборку (`build_quick`).
 STAND_QUICK_MO = [
     (DEFAULT_MO, "Орёл"),
@@ -242,6 +259,12 @@ STAND_QUICK_MO = [
 # панели (год), тыс. руб. на человека в месяц. Входит в `index.json::series` пятым элементом; единицу
 # вместе с периодом словами пишет `mean_unit_label` — страницы слов о периоде не держат.
 MEAN_MONTHS = 12
+
+# Столбцы `results/error_decomposition.csv` (scripts/error_decomposition.py): модель, промах мимо
+# общего движения («смещение») и разброс между муниципалитетами; смещение + разброс = MAE.
+DECOMP_MODEL = "модель"
+DECOMP_BIAS = "смещение"
+DECOMP_SPREAD = "разброс"
 
 # Наукаст на месячных данных — это горизонт 1 (README, отчёт, configs/horizons.yaml): внутри
 # месяца данных нет, поэтому месяц t прогнозируется по данным до t−1. Год вперёд — горизонт 12,
@@ -457,7 +480,7 @@ def _load_penalty() -> float:
 
 def compute_placeholders(
     *, wide: pd.DataFrame, summary: pd.DataFrame, ok: pd.DataFrame,
-    horizons_summary: pd.DataFrame, horizons_folds: pd.DataFrame,
+    horizons_summary: pd.DataFrame, horizons_folds: pd.DataFrame, decomposition: pd.DataFrame,
     agg_check: pd.DataFrame, full_cfg: dict, forward_cfg: dict, today: dt.date,
 ) -> dict[str, str]:
     """Считает все подстановки `${имя}` шаблона `site/index.template.html`.
@@ -501,6 +524,10 @@ def compute_placeholders(
       шага «Почему это прогноз одного числа». Доля — константа `STORY_SPREAD_SHARE`, ширина полосы —
       её процентиль отклонений, округлённый вверх. Считается на всей матрице, а не на 30
       нарисованных рядах.
+    - ``decomp_models`` / ``spread_range`` — четвёртый шаг того же раздела: у всех «шести» моделей
+      разложения ошибки (`results/error_decomposition.csv`) разброс между муниципалитетами лежит
+      в «695–849» ₽ по всем сочетаниям модели и окна проверки; число моделей — словом в родительном
+      падеже, границы — рублями.
     - ``story_base`` — период, к среднему за который нормированы ряды обложки и первого раздела:
       «2023 год» (первые `STORY_BASE_MONTHS` месяцев панели — календарный год) или
       «первые 12 месяцев панели».
@@ -591,14 +618,14 @@ def compute_placeholders(
         + plural(LANDING_SAMPLE_SIZE, "случайный муниципалитет", "случайных муниципалитета",
                  "случайных муниципалитетов")
     )
-    norm, median = _story_matrix(wide)
-    deviation = norm.div(median, axis=0).sub(1).abs().to_numpy()
-    # Округление вверх: при процентиле 7,03% полоса ±7% вмещала бы чуть меньше заявленной доли.
-    # До ceil — округление до шести знаков, чтобы шум float не добавил лишний процент к целому.
-    spread = float(np.percentile(deviation, STORY_SPREAD_SHARE)) * 100
     placeholders["spread_share"] = str(STORY_SPREAD_SHARE)
-    placeholders["spread_pct"] = str(math.ceil(round(spread, 6)))
+    placeholders["spread_pct"] = str(story_spread_pct(wide))
     placeholders["story_base"] = story_base_label(wide)
+
+    # Четвёртый шаг: разброс между муниципалитетами по всем сочетаниям модели и окна проверки.
+    spreads = decomposition[DECOMP_SPREAD].astype(float)
+    placeholders["decomp_models"] = in_words(int(decomposition[DECOMP_MODEL].nunique()), "род")
+    placeholders["spread_range"] = f"{rub(float(spreads.min()))}–{rub(float(spreads.max()))}"
     return placeholders
 
 
@@ -1035,6 +1062,7 @@ class DemoBuild(NamedTuple):
     total_bytes: int
     entries: dict[str, dict]  # series_id → запись demo/data/mo/<номер>.json
     regions: dict[str, str | None]  # series_id → регион (None — не определён)
+    models: list[dict]  # модели таблицы ошибок стенда (`_build_model_roles`): id, role, label, name, note
 
 
 def build_demo_data(
@@ -1186,7 +1214,7 @@ def build_demo_data(
         )
 
     entries = {series_id: entry for payload in mo_payload.values() for series_id, entry in payload.items()}
-    return DemoBuild(files=files, total_bytes=total, entries=entries, regions=region_of)
+    return DemoBuild(files=files, total_bytes=total, entries=entries, regions=region_of, models=model_roles)
 
 
 def write_demo_data(demo: DemoBuild, data_dir: Path) -> None:
@@ -1302,8 +1330,36 @@ def mean_unit_label(wide: pd.DataFrame) -> str:
     return f"тыс.\u00a0₽ на человека в\u00a0месяц за\u00a0{mean_period_label(wide)}"
 
 
-def build_story(wide: pd.DataFrame) -> dict:
-    """`story` данных главной: 30 рядов выборки и медиана по ВСЕМ рядам матрицы."""
+def story_spread_pct(wide: pd.DataFrame) -> int:
+    """Ширина полосы ±M% третьего шага: отклонение от общего движения (медианы по рядам), в которое
+    укладывается не менее `STORY_SPREAD_SHARE`% значений по всей панели. Округление вверх: при
+    процентиле 7,03% полоса ±7% вмещала бы чуть меньше заявленной доли; до ceil — округление до шести
+    знаков, чтобы шум float не добавил лишний процент к целому. Одно число — в строку шага и в данные
+    главной, по которым скрипт рисует полосу."""
+    norm, median = _story_matrix(wide)
+    deviation = norm.div(median, axis=0).sub(1).abs().to_numpy()
+    return math.ceil(round(float(np.percentile(deviation, STORY_SPREAD_SHARE)) * 100, 6))
+
+
+def build_decomposition(decomposition: pd.DataFrame, horizon: int) -> dict:
+    """`story.decomposition` (формат — докстринг модуля): средние по окнам проверки промах и разброс
+    каждой модели, по убыванию их суммы (MAE). Файл с пропусками в числах роняет сборку."""
+    if decomposition[[DECOMP_BIAS, DECOMP_SPREAD]].isna().any().any():
+        raise ValueError("в results/error_decomposition.csv есть пропуски в смещении или разбросе")
+    means = decomposition.groupby(DECOMP_MODEL, sort=False)[[DECOMP_BIAS, DECOMP_SPREAD]].mean()
+    means = means.assign(total=means[DECOMP_BIAS] + means[DECOMP_SPREAD]).sort_values("total", ascending=False)
+    return {
+        "horizon": int(horizon),
+        "models": [
+            {"id": str(model_id), "label": _label_parts(str(model_id))[0],
+             "bias": _ruble(row[DECOMP_BIAS]), "spread": _ruble(row[DECOMP_SPREAD])}
+            for model_id, row in means.iterrows()
+        ],
+    }
+
+
+def build_story(wide: pd.DataFrame, decomposition: pd.DataFrame, horizon: int) -> dict:
+    """`story` данных главной: 30 рядов выборки, медиана по ВСЕМ рядам матрицы и разложение ошибки."""
     if wide.shape[1] < LANDING_SAMPLE_SIZE:
         raise ValueError(
             f"в матрице {wide.shape[1]} рядов — меньше выборки обложки ({LANDING_SAMPLE_SIZE})"
@@ -1321,6 +1377,9 @@ def build_story(wide: pd.DataFrame) -> dict:
         "median": [round(float(v), 3) for v in median.to_numpy()],
         "n_total": int(wide.shape[1]),
         "n_sample": LANDING_SAMPLE_SIZE,
+        "spread_share": STORY_SPREAD_SHARE,
+        "spread_pct": story_spread_pct(wide),
+        "decomposition": build_decomposition(decomposition, horizon),
     }
 
 
@@ -1449,45 +1508,100 @@ def build_horizons(
     }
 
 
-def build_teaser(demo: DemoBuild, wide: pd.DataFrame, forward_cfg: dict) -> dict:
+def _mean_rubles(values: list) -> int | None:
+    """Среднее целых рублей по окнам проверки — как столбец «среднее» таблицы ошибок стенда
+    (demo.js::modelMeansForMo): по окнам с числом, округление до рубля; без чисел — None."""
+    finite = [v for v in values if v is not None]
+    return _ruble(float(np.mean(finite))) if finite else None
+
+
+def teaser_summary(entry: dict, baseline: list[int], models: list[dict]) -> dict:
+    """Числа раздела для одного ряда готовыми строками (формат — докстринг модуля, `teaser`).
+
+    Рост — средний месяц прогноза к среднему месяцу последнего года панели (последние 12 из
+    `entry["fact"]`): по целым рублям, которые видит читатель на графике. Лучшая модель — наименьшая
+    средняя по окнам ошибка среди моделей таблицы ошибок стенда на этом ряду; при равенстве —
+    первая по порядку таблицы. Эталон — модель с ролью `reference`."""
+    fact_year = entry["fact"][-12:]
+    forecast_mean = float(np.mean(entry["forecast"]))
+    growth = (forecast_mean / float(np.mean(fact_year)) - 1) * 100
+    means = {m["id"]: _mean_rubles(entry["mae"].get(m["id"], [])) for m in models}
+    scored = [m for m in models if means[m["id"]] is not None]
+    if not scored:
+        raise ValueError("ни у одной модели таблицы ошибок нет ошибки на этом ряду")
+    best = min(scored, key=lambda m: means[m["id"]])
+    reference = next(m for m in models if "reference" in m["role"].split("+"))
+    return {
+        "forecast_mean": rub(forecast_mean),
+        "baseline_mean": rub(float(np.mean(baseline))),
+        "growth": f"{num(growth, 1, sign=True)}%",
+        "best": {"id": best["id"], "name": best["name"], "note": best["note"], "mae": rub(means[best["id"]])},
+        "reference_mae": rub(means[reference["id"]]) if means[reference["id"]] is not None else "—",
+    }
+
+
+def build_teaser(demo: DemoBuild, wide: pd.DataFrame, forward_cfg: dict, baseline: pd.DataFrame) -> dict:
     """`teaser` данных главной: три МО из `TEASER_MO` теми же значениями, что в
-    `demo/data/mo/*.json` (берутся из собранных данных стенда, а не считаются заново)."""
-    missing = [series_id for series_id, _ in TEASER_MO if series_id not in demo.entries]
+    `demo/data/mo/*.json` (берутся из собранных данных стенда, а не считаются заново), плюс
+    прогноз эталона на те же месяцы из `baseline` (`results/forecast_2025_baseline.csv`) и числа
+    раздела (`teaser_summary`)."""
+    missing = [series_id for series_id, _, _ in TEASER_MO if series_id not in demo.entries]
     if missing:
-        raise ValueError(f"МО блока «Стенд» нет среди рядов панели: {', '.join(missing)}")
-    # Мини-график блока не умеет рисовать дыры: линия факта, прогноза и пунктира целиком.
-    gaps = [series_id for series_id, _ in TEASER_MO
-            if any(value is None for key in ("fact", "forecast", "known") for value in demo.entries[series_id][key])]
+        raise ValueError(f"МО примеров главной нет среди рядов панели: {', '.join(missing)}")
+    # Мини-график блока не умеет рисовать дыры: линия факта и прогноза целиком.
+    gaps = [series_id for series_id, _, _ in TEASER_MO
+            if any(value is None for key in ("fact", "forecast") for value in demo.entries[series_id][key])]
     if gaps:
-        raise ValueError(f"в данных МО блока «Стенд» есть пропуски: {', '.join(gaps)}")
+        raise ValueError(f"в данных МО примеров главной есть пропуски: {', '.join(gaps)}")
     origin = pd.Period(forward_cfg["origin"], "M")
     forecast_months = [str(origin + step) for step in range(1, max(forward_cfg["recommended"]) + 1)]
+
+    # Эталон на тех же месяцах, что прогноз рекомендуемых моделей: строки ряда по месяцу, ровно
+    # те 12 месяцев и без пропусков — иначе линия эталона рисовалась бы не о том.
+    base_cfg = forward_cfg["baseline"]
+    rows = baseline.loc[(baseline["model"] == base_cfg["model"]) & (baseline["horizon"] == int(base_cfg["horizon"]))]
+    by_series = {series_id: group.set_index("month")["forecast"] for series_id, group in rows.groupby("series_id")}
+
+    def baseline_of(series_id: str) -> list[int]:
+        if series_id not in by_series:
+            raise ValueError(f"в прогнозе эталона нет ряда {series_id!r} (scripts/forecast_baseline.py)")
+        values = by_series[series_id].reindex(forecast_months)
+        if values.isna().any():
+            raise ValueError(f"в прогнозе эталона для {series_id!r} не все месяцы {forecast_months[0]}…{forecast_months[-1]}")
+        return [_ruble(v) for v in values.to_numpy()]
+
+    reference = next(m for m in demo.models if "reference" in m["role"].split("+"))
+    items = []
+    for series_id, short, kind in TEASER_MO:
+        entry = demo.entries[series_id]
+        base = baseline_of(series_id)
+        items.append({
+            "id": series_id, "short": short, "kind": kind, "region": demo.regions[series_id],
+            **{key: entry[key] for key in ("fact", "forecast", "breaks")},
+            "baseline": base,
+            "summary": teaser_summary(entry, base, demo.models),
+        })
     return {
         "months": [pd.Timestamp(m).strftime("%Y-%m") for m in wide.index] + forecast_months,
-        "items": [
-            {
-                "id": series_id, "short": short, "region": demo.regions[series_id],
-                **{key: demo.entries[series_id][key] for key in ("fact", "forecast", "known", "breaks")},
-            }
-            for series_id, short in TEASER_MO
-        ],
+        "items": items,
+        "reference": {"id": reference["id"], "name": reference["name"], "note": reference["note"]},
     }
 
 
 def build_landing_data(
     *, wide: pd.DataFrame, summary: pd.DataFrame, full_cfg: dict, forward_cfg: dict,
     horizons_cfg: dict, horizons_summary: pd.DataFrame, aggregate: dict, demo: DemoBuild,
-    placeholders: dict[str, str], breaks: BreaksBuild,
+    placeholders: dict[str, str], breaks: BreaksBuild, baseline: pd.DataFrame, decomposition: pd.DataFrame,
 ) -> dict:
     """Все данные главной одним словарём: `story`, `horizons`, `fact`, `teaser`, `breaks`."""
     return {
-        "story": build_story(wide),
+        "story": build_story(wide, decomposition, int(full_cfg["split"]["horizon"])),
         "horizons": build_horizons(
             horizons_cfg=horizons_cfg, horizons_summary=horizons_summary, summary=summary,
             full_cfg=full_cfg, placeholders=placeholders,
         ),
         "fact": aggregate,
-        "teaser": build_teaser(demo, wide, forward_cfg),
+        "teaser": build_teaser(demo, wide, forward_cfg, baseline),
         "breaks": breaks.data,
     }
 
@@ -1554,12 +1668,14 @@ def main(argv: list[str] | None = None) -> int:
     horizons_folds = read_results(ROOT / "results" / "horizons_folds.csv")
     agg_check = read_results(ROOT / "results" / "forecast_2025_aggregate_check.csv")
     forecast = read_results(ROOT / "results" / "forecast_2025.csv")
+    baseline = read_results(ROOT / "results" / "forecast_2025_baseline.csv", dtype={"error": object})
+    decomposition = read_results(ROOT / "results" / "error_decomposition.csv")
 
     _check_series_match(forecast, wide)
 
     placeholders = compute_placeholders(
         wide=wide, summary=summary, ok=ok, horizons_summary=horizons_summary,
-        horizons_folds=horizons_folds, agg_check=agg_check,
+        horizons_folds=horizons_folds, decomposition=decomposition, agg_check=agg_check,
         full_cfg=full_cfg, forward_cfg=forward_cfg, today=today,
     )
 
@@ -1581,7 +1697,7 @@ def main(argv: list[str] | None = None) -> int:
     landing = build_landing_data(
         wide=wide, summary=summary, full_cfg=full_cfg, forward_cfg=forward_cfg,
         horizons_cfg=horizons_cfg, horizons_summary=horizons_summary, aggregate=aggregate,
-        demo=demo, placeholders=placeholders, breaks=breaks,
+        demo=demo, placeholders=placeholders, breaks=breaks, baseline=baseline, decomposition=decomposition,
     )
     placeholders["landing_json"] = landing_json(landing)
 

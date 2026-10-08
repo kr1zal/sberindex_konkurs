@@ -383,8 +383,9 @@
   padding-top: 90px;
 }
 
+/* Первый раздел целиком на экране 1366×768 вместе с шапкой: отступ сверху идёт от высоты окна. */
 .section-first {
-  padding-top: 110px;
+  padding-top: clamp(64px, 10vh, 110px);
 }
 
 /* Одна строка под заголовком раздела: на широком окне — в одну строку, на узком переносится. */
@@ -575,22 +576,26 @@
 
 /* -- 01 · главный вывод ------------------------------------------------------------- */
 
+/* Колонка шагов и карточка графика одной высоты, карточки шагов — одинаковые: высоту задаёт
+   самый длинный шаг, остальные тянутся до него. */
 .story {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 40px;
-  align-items: start;
-  margin-top: 40px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 24px;
+  align-items: stretch;
+  margin-top: 28px;
 }
 
 .steps {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
   gap: 10px;
 }
 
+/* Четыре шага и карточка графика — на одном экране 1366×768 вместе с шапкой и заголовком:
+   карточка шага плотная, текст в три строки мелким кеглем. */
 .step {
-  padding: 18px 20px;
+  padding: 10px 14px 11px;
   background: transparent;
   border: 1.5px solid var(--step-line);
   border-radius: 16px;
@@ -618,7 +623,7 @@
 
 .step-num {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -642,21 +647,34 @@
 }
 
 .step-title {
-  margin-top: 6px;
+  margin-top: 3px;
   color: var(--ink);
   font-family: var(--font-display);
-  font-size: 1.125rem;
+  font-size: 1rem;
   font-weight: 500;
 }
 
 .step-text {
-  margin-top: 8px;
-  font-size: 0.9375rem;
-  line-height: 1.55;
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 
 .step > .step-short {
   display: none;
+}
+
+/* Отметок оси у картины нет — левое поле карточки обычное, не под подписи шкалы. */
+.story-card {
+  display: flex;
+  flex-direction: column;
+  padding-left: 28px;
+}
+
+.story-plot {
+  flex: 1;
+  height: auto;
+  min-height: 260px;
 }
 
 /* Линии рядов несут смысл (узкий разброс в шаге «что остаётся»): при такой прозрачности они не меньше 3:1 к фону. */
@@ -688,6 +706,125 @@
   vector-effect: non-scaling-stroke;
 }
 
+/* Полоса ±M% вокруг общего движения на третьем шаге: в ней лежит не меньше заявленной доли значений. */
+.story-band-layer {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.story-card.is-band .story-band-layer {
+  opacity: 1;
+}
+
+.story-band {
+  fill: var(--chart-median);
+  fill-opacity: 0.14;
+}
+
+.story-band-label {
+  position: absolute;
+  right: 0;
+  z-index: 3;
+  padding: 0 4px;
+  background: var(--surface);
+  color: var(--chart-median);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 18px;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 0.6s ease, top 0.8s ease;
+}
+
+.story-card.is-band .story-band-label {
+  opacity: 1;
+}
+
+/* Шаг с полосами разложения: линии и ось гаснут, полосы проявляются на том же месте. */
+.story-plot .plot-svg, .story-card .plot-axis {
+  transition: opacity 0.6s ease;
+}
+
+.story-card.is-bars .plot-svg, .story-card.is-bars .plot-axis, .story-card.is-bars .story-band-label {
+  opacity: 0;
+}
+
+.story-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+}
+
+.story-card.is-bars .story-bars {
+  opacity: 1;
+}
+
+.story-bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 230px) minmax(0, 1fr) 72px;
+  gap: 12px;
+  align-items: center;
+}
+
+.story-bar-label {
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  text-align: right;
+}
+
+.story-bar-track {
+  display: flex;
+  height: 20px;
+  overflow: hidden;
+  background: var(--bar-track);
+  border-radius: 6px;
+}
+
+.story-bar-spread {
+  background: var(--bar-rest);
+}
+
+.story-bar-bias {
+  background: var(--chart-median);
+}
+
+.story-bar-value {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.story-bars-legend {
+  margin: 12px 0 0;
+}
+
+/* Легенда — flex, и без этого правила атрибут hidden её не прячет: на шагах с линиями её нет. */
+.story-bars-legend[hidden] {
+  display: none;
+}
+
+.key-spread, .key-bias {
+  width: 14px;
+  height: 10px;
+  border: 0;
+  border-radius: 3px;
+}
+
+.key-spread {
+  background: var(--bar-rest);
+}
+
+.key-bias {
+  background: var(--chart-median);
+}
+
 /* Текст шага под графиком нужен только там, где шаги сжаты до вкладок. */
 .story-text {
   display: none;
@@ -703,12 +840,13 @@
   }
 
   .steps {
-    flex-direction: row;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-rows: auto;
     gap: 6px;
   }
 
   .step {
-    flex: 1 1 0;
     min-height: 44px;
     padding: 10px 6px;
     border-radius: 12px;
@@ -728,8 +866,33 @@
     font-weight: 500;
   }
 
+  .story-plot {
+    min-height: 240px;
+  }
+
   .story-text {
     display: block;
+  }
+}
+
+@media (max-width: 639px) {
+  .story-bars {
+    gap: 8px;
+  }
+
+  /* Название модели — строкой над полосой: в ширину экрана три колонки не помещаются. */
+  .story-bar-row {
+    grid-template-columns: minmax(0, 1fr) 64px;
+    gap: 2px 10px;
+  }
+
+  .story-bar-label {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .story-bar-track {
+    height: 14px;
   }
 }
 
@@ -1395,53 +1558,60 @@
 
 /* -- 05 · стенд ---------------------------------------------------------------------- */
 
-.stand {
+/* Раздел — тёмная полоса во всю ширину, как обложка и подвал: ритм страницы светлое — тёмное.
+   Внутри, как в разделе 03, карточка графика и карточка чисел — соседи, без общей рамки. */
+.section-night {
+  margin-top: 90px;
+  padding-bottom: 90px;
+}
+
+.city {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: stretch;
+  margin-top: 30px;
+}
+
+.city-card {
+  display: flex;
+  flex-direction: column;
+  padding: 26px 26px 20px 74px;
+}
+
+.city-card .tick > span {
+  left: -64px;
+  width: 54px;
+}
+
+/* Примеры — кнопки над графиком: название и чем пример отличается от соседей. Кнопки
+   добавляет скрипт без пробелов между ними, расстояние даёт только gap. */
+.chips-row {
   display: flex;
   flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 0 0 18px;
+}
+
+.chips-row .chip {
+  display: inline-flex;
   align-items: center;
-  gap: 40px;
-  padding: 44px 44px 36px;
-  border: 1px solid var(--night-rule);
-  border-radius: 28px;
-}
-
-.stand-copy {
-  flex: 1 1 340px;
-  min-width: 0;
-}
-
-.stand .section-title {
-  font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.5rem);
-}
-
-.stand-lead {
-  margin: 16px 0 0;
-  color: var(--night-ink-3);
-  font-size: 1.0625rem;
-  line-height: 1.6;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 22px;
+  white-space: nowrap;
 }
 
-.stand-cta {
-  min-height: 52px;
-  margin-top: 26px;
-  padding: 0 22px;
-  font-size: 1rem;
+.chip-kind {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.stand-chart {
-  flex: 1.4 1 460px;
-  min-width: 0;
-  padding: 22px 22px 18px;
-  background: var(--night-surface);
-  border: 1px solid var(--night-rule);
-  border-radius: 20px;
+.chip[aria-pressed="true"] .chip-kind {
+  color: var(--bg);
+  opacity: 0.75;
 }
 
 .stand-chart-head {
@@ -1449,7 +1619,14 @@
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 4px 12px;
+  gap: 4px 16px;
+}
+
+.stand-chart-title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
 }
 
 .stand-chart-name {
@@ -1458,33 +1635,47 @@
 }
 
 .stand-chart-region {
-  color: var(--night-soft);
+  color: var(--ink-soft);
   font-size: 0.8125rem;
 }
 
+.stand-chart-unit {
+  margin: 0;
+}
+
 .stand-plot {
-  height: 230px;
-  margin-top: 18px;
+  height: 300px;
+  margin-top: 16px;
 }
 
 .vline-panel {
   border-left: 1px dashed var(--chart-mark);
 }
 
-.vline-break {
-  border-left: 1px dashed rgba(255, 181, 71, 0.7);
+.vline-panel > span {
+  position: absolute;
+  bottom: 2px;
+  left: 4px;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  white-space: nowrap;
 }
 
-/* Подпись — на подложке цвета карточки и над линиями соседних изломов: изломы бывают
-   в нескольких месяцах друг от друга, и без подложки линия следующего перечёркивала бы
+.vline-break {
+  border-left: 1px dashed var(--chart-break);
+}
+
+/* Подпись — на подложке цвета карточки и над линиями соседних точек изменений: они бывают
+   в нескольких месяцах друг от друга, и без подложки линия следующей перечёркивала бы
    конец подписи. Линия ряда лежит выше подписи (см. .stand-plot .plot-svg). */
 .vline-break > span {
   position: absolute;
   left: 2px;
   z-index: 1;
   padding: 0 2px;
-  background: var(--night-surface);
-  color: var(--amber);
+  background: var(--surface);
+  color: var(--chart-break-ink);
   font-family: var(--font-mono);
   font-size: 0.6875rem;
   white-space: nowrap;
@@ -1501,10 +1692,10 @@
 
 .stand-fact {
   stroke: var(--chart-fact);
-  stroke-width: 2;
+  stroke-width: 2.2;
 }
 
-.stand-known {
+.stand-base {
   stroke: var(--chart-known);
   stroke-width: 1.8;
   stroke-dasharray: 6 5;
@@ -1512,32 +1703,248 @@
 
 .stand-fc {
   stroke: var(--chart-forecast);
-  stroke-width: 2.8;
+  stroke-width: 3;
+  stroke-linecap: round;
 }
 
-.legend-night {
+/* Концы линий: точка и подпись с числом и месяцем. Подпись факта — выше и левее точки (справа
+   от неё начинаются прогноз и эталон), подпись прогноза — справа, в полосе графика, которую
+   скрипт оставляет под неё свободной. Положение по высоте едет вместе с линией. */
+.stand-end {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  transition: top 0.5s ease;
+}
+
+.stand-end-dot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.stand-end-fact .stand-end-dot {
+  background: var(--chart-fact);
+}
+
+.stand-end-base .stand-end-dot {
+  background: var(--chart-known);
+}
+
+.stand-end-fc .stand-end-dot {
+  width: 11px;
+  height: 11px;
+  background: var(--chart-forecast);
+}
+
+.stand-end-label {
+  position: absolute;
+  display: grid;
+  padding: 1px 4px;
+  background: var(--surface);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.stand-end-label b {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.stand-end-label i {
+  color: var(--ink-soft);
+  font-size: 0.6875rem;
+  font-style: normal;
+}
+
+.stand-end-fact .stand-end-label {
+  right: 8px;
+  bottom: 8px;
+  text-align: right;
+}
+
+.stand-end-fc .stand-end-label {
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+}
+
+.stand-end-fc .stand-end-label b {
+  color: var(--chart-forecast);
+}
+
+/* Точки структурных изменений в легенде — штриховая вертикаль, как на графике. */
+.key-vbreak {
+  width: 0;
+  height: 14px;
+  border-top: 0;
+  border-left: 2px dashed var(--chart-break);
+}
+
+.city-card .legend {
   margin: 14px 0 0;
-  color: var(--night-soft);
+}
+
+.city-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Ночная карточка: три числа выбранного примера и переход на страницу прогноза. */
+.city-readout {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.stand-stats {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+}
+
+.stand-stats > div {
+  min-width: 0;
+}
+
+.stand-stats > div + div {
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+
+.stand-stats dt {
+  font-size: 0.6875rem;
+}
+
+.stand-stats dd {
+  margin: 0;
+}
+
+.stand-stat-fc {
+  margin-top: 8px;
+  color: var(--chart-forecast);
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stand-stat-breaks, .stand-stat-best {
+  margin-top: 8px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.stand-stat-breaks {
+  color: var(--amber);
+}
+
+.stand-stat-best {
+  color: var(--ink);
+}
+
+.stand-stat-note {
+  margin-top: 6px;
+  color: var(--ink-soft);
   font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+/* Высота плиток не зависит от примера: значению и строке под ним отведено по две строки — у одного
+   примера три точки изменений и длинное название модели переносятся, у другого нет, и без запаса
+   карточка и всё, что ниже, дёргались бы при переключении. На телефоне карточка во всю ширину,
+   всё в одну строку, запас не нужен. */
+@media (min-width: 640px) {
+  .stand-stat-breaks, .stand-stat-best {
+    min-height: 2.7em;
+  }
+
+  .stand-stat-note {
+    min-height: 2.8em;
+  }
+}
+
+.stand-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+
+/* Кнопка во всю ширину узкой карточки: текст переносится, а не обрезается. */
+.stand-cta {
+  justify-content: center;
+  min-height: 52px;
+  padding: 10px 16px;
+  font-size: 1rem;
+  line-height: 1.3;
+  text-align: center;
+  white-space: normal;
+}
+
+.stand-any {
+  color: var(--night-ink-2);
+  font-size: 0.9375rem;
+  text-align: center;
+}
+
+@media (max-width: 959px) {
+  .city {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 639px) {
-  .stand {
-    gap: 24px;
-    padding: 24px 20px;
-    border-radius: 22px;
+  .city-card {
+    padding: 18px 16px 12px 52px;
   }
 
-  .stand-cta {
-    display: flex;
-  }
-
-  .stand-chart {
-    padding: 16px 16px 14px;
+  .city-card .tick > span {
+    left: -48px;
+    width: 40px;
   }
 
   .stand-plot {
-    height: 190px;
+    height: 220px;
+  }
+
+  /* На низком графике двухстрочная подпись конца факта упиралась бы в подписи точек изменений
+     у верхнего края: остаётся число, месяц виден по оси. */
+  .stand-end-fact .stand-end-label i {
+    display: none;
+  }
+
+  .city-readout {
+    padding: 20px;
+  }
+
+  /* Кнопки-примеры на телефоне — столбиком во всю ширину: три таблетки в ряд не помещаются
+     и ломались посреди названия. */
+  .chips-row {
+    flex-direction: column;
+  }
+
+  .chips-row .chip {
+    justify-content: space-between;
+    width: 100%;
+    border-radius: 14px;
+    text-align: left;
   }
 }
 

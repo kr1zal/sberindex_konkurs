@@ -49,3 +49,14 @@ output:
   dir: results
   forecast: forecast_2025.csv
   aggregate_check: forecast_2025_aggregate_check.csv
+
+# Эталон конкурса на тех же условиях: Prophet по умолчанию (как в основном
+# протоколе) учится на всех 24 месяцах каждого ряда и прогнозирует год вперёд —
+# один ряд за раз, без панели и без внешних данных. Отдельный прогон
+# (scripts/forecast_baseline.py) и отдельный файл: таблицу прогноза
+# рекомендуемых моделей он не меняет. Показывается рядом с прогнозом
+# рекомендуемой модели на странице работы.
+baseline:
+  model: prophet
+  horizon: 12
+  output: forecast_2025_baseline.csv

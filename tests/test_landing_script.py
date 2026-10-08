@@ -56,12 +56,15 @@ class LandingScriptWiringTest(unittest.TestCase):
         self.assertEqual(len(re.findall(r'^\s*\["', launch, re.M)), 8)
 
     def test_axis_labels_follow_the_scale_step(self) -> None:
-        # Подписи оси раздела 01 и графика проверки фактом считает помощник по шагу шкалы:
-        # «98% / 100% / 103%» при шаге 2,5% — результат целых подписей.
+        # Подписи оси графиков проверки фактом и примера муниципалитета считает помощник по шагу шкалы:
+        # «98 / 100 / 103» при шаге 2,5 — результат целых подписей. У картины раздела 01 оси нет: вместо шкалы —
+        # полоса ±M% вокруг общего движения, ширина из данных.
         source = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
-        self.assertIn("percentTick(value, target.scale.step)", source)
         self.assertIn("formatTick(value, scale.step)", source)
         self.assertNotIn("Math.round(value * 100)", source)
+        self.assertNotIn("story-ticks", source)
+        self.assertIn("const spread = story.spread_pct / 100;", source)
+        self.assertIn("bandLabel.textContent = `±${story.spread_pct}%`;", source)
 
 
 if __name__ == "__main__":
