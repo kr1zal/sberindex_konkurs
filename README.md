@@ -236,17 +236,21 @@ QUARTO_PYTHON=$PWD/../.venv/bin/python quarto render slides.qmd   # около 2
 (ниже). По нижним границам `requirements.txt` pip ставит pandas 3.0, а результаты посчитаны на 2.3.3
 (`requirements.lock.txt`); на текст отчёта и слайдов это не влияет.
 
-PDF — печатью из headless Chrome; без `--virtual-time-budget` слайды печатаются раньше, чем
-reveal.js их разложит, и выходит одна пустая страница. Бывает, что и с ним: фоновые задачи Chrome
-(обновление) съедают виртуальное время — тогда надёжнее напечатать из самого браузера: открыть
-`slides.html?print-pdf`, «Печать» → «Сохранить как PDF», поля — нет, фон — да. Отчёт печатается
-в A4 (правило `@page` в `report/styles.css`).
+PDF — печатью из headless Chrome; без `--virtual-time-budget` и
+`--run-all-compositor-stages-before-draw` слайды печатаются раньше, чем reveal.js их разложит,
+и выходит одна пустая страница. Если и с ними выходит пустая страница, надёжнее напечатать из самого
+браузера: открыть `slides.html?print-pdf`, «Печать» → «Сохранить как PDF», поля — нет, фон — да.
+Отчёт печатается в A4 (правило `@page` в `report/styles.css`). Оформление слайдов — тема
+`report/slides-theme.scss` (шрифты, цвета и макеты карточек, те же, что у сайта) и `report/slides-fonts.css`
+(шрифты из `site/fonts`, встраиваются в `slides.html`).
 
 ```bash
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-"$CHROME" --headless=new --disable-gpu --virtual-time-budget=15000 --no-pdf-header-footer \
+"$CHROME" --headless=new --disable-gpu --run-all-compositor-stages-before-draw \
+  --virtual-time-budget=30000 --no-pdf-header-footer \
   --print-to-pdf=slides.pdf "file://$PWD/slides.html?print-pdf"
-"$CHROME" --headless=new --disable-gpu --virtual-time-budget=15000 --no-pdf-header-footer \
+"$CHROME" --headless=new --disable-gpu --run-all-compositor-stages-before-draw \
+  --virtual-time-budget=30000 --no-pdf-header-footer \
   --print-to-pdf=report.pdf "file://$PWD/report.html"
 ```
 

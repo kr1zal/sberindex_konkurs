@@ -1,0 +1,423 @@
+/*-- scss:defaults --*/
+
+// Тема слайдов — те же шрифты и цвета, что у сайта (site/site.css): Unbounded в заголовках,
+// Onest в тексте, JetBrains Mono в числах и подписях; светлый фон, синий акцент, янтарь
+// для предупреждений. Файлы шрифтов — из site/fonts, встраиваются в slides.html.
+
+$font-family-sans-serif: "Onest", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+$font-family-monospace: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+$presentation-font-size-root: 28px;
+$presentation-line-height: 1.42;
+$presentation-heading-font: "Unbounded", "Onest", system-ui, sans-serif;
+$presentation-heading-font-weight: 600;
+$presentation-heading-letter-spacing: -0.02em;
+$presentation-heading-line-height: 1.1;
+$presentation-heading-text-transform: none;
+$presentation-h1-font-size: 2em;
+$presentation-h2-font-size: 1.42em;
+$presentation-h3-font-size: 1.1em;
+$presentation-block-margin: 14px;
+$body-bg: #f5f6f8;
+$body-color: #0b0f1a;
+$link-color: #1f6bc4;
+$link-color-hover: #174f93;
+$presentation-heading-color: #0b0f1a;
+$code-color: #174f93;
+$code-bg: #eef0f4;
+$selection-bg: #cfe0f7;
+
+/*-- scss:rules --*/
+
+// Шрифты подключает slides-fonts.css (YAML `css:`): пути в нём считаются от папки report,
+// а тема компилируется в папку reveal, и относительный путь к site/fonts оттуда не сходится.
+
+// -- титульный слайд: тёмный, как обложка сайта (фон задаёт title-slide-attributes) ----------
+.reveal #title-slide {
+  text-align: left;
+  padding-left: 6%;
+  padding-right: 6%;
+
+  .title {
+    margin: 0 0 0.4em;
+    color: #ffffff;
+    font-size: 1.9em;
+    letter-spacing: -0.02em;
+  }
+
+  .quarto-title-authors,
+  .quarto-title-author,
+  .quarto-title-author-name,
+  .author {
+    margin: 0.9em 0 0;
+    padding: 0;
+    color: #c9d2e6;
+    font-size: 0.8em;
+    text-align: left;
+    display: block;
+  }
+
+  .subtitle {
+    margin: 0;
+    color: #ffb547;
+    font-family: $font-family-monospace;
+    font-size: 0.6em;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+}
+
+// -- заголовки и текст --------------------------------------------------------------------------
+.reveal .slides section {
+  text-align: left;
+}
+
+.reveal h2 {
+  margin: 0 0 0.55em;
+}
+
+.reveal p {
+  margin: 0 0 0.5em;
+}
+
+.reveal strong {
+  font-weight: 600;
+}
+
+.reveal ul,
+.reveal ol {
+  margin: 0.2em 0 0.5em 1em;
+}
+
+.reveal li {
+  margin-bottom: 0.25em;
+}
+
+.reveal code {
+  padding: 0.05em 0.35em;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+// -- таблицы: тонкие линейки и моноширинные числа, как на сайте ------------------------------------
+.reveal table {
+  margin: 0.3em 0 0.6em;
+  border-collapse: collapse;
+  font-size: 0.78em;
+}
+
+.reveal table th {
+  padding: 0.35em 0.65em 0.4em;
+  border-bottom: 1.5px solid #0b0f1a;
+  color: #535c6b;
+  font-family: $font-family-monospace;
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  vertical-align: bottom;
+}
+
+.reveal table td {
+  padding: 0.34em 0.65em;
+  border-bottom: 1px solid #e2e6ec;
+  font-variant-numeric: tabular-nums;
+}
+
+.reveal table tr:last-child td {
+  border-bottom: 0;
+}
+
+// -- врезки: карточки с цветной чертой слева вместо рамок с иконками. В reveal у врезки своя
+// разметка: .callout > .callout-body > (.callout-title + .callout-content).
+.reveal .callout {
+  margin: 0.6em 0;
+  padding: 0;
+  border: 1px solid #e2e6ec;
+  border-left: 3px solid #1f6bc4;
+  border-radius: 12px;
+  background: #ffffff;
+  font-size: 0.95em !important;
+}
+
+.reveal .callout.callout-warning {
+  border-left-color: #ffb547;
+}
+
+.reveal .callout.callout-important {
+  border-left-color: #eb6834;
+}
+
+.reveal .callout .callout-icon-container,
+.reveal .callout .callout-icon {
+  display: none !important;
+}
+
+.reveal .callout .callout-body {
+  padding: 0.6em 1em 0.65em;
+}
+
+.reveal .callout .callout-title,
+.reveal .callout.callout-titled .callout-title,
+.reveal .callout-note .callout-title,
+.reveal .callout-warning .callout-title,
+.reveal .callout-important .callout-title {
+  margin: 0 0 0.25em;
+  padding: 0;
+  background: transparent !important;
+  color: #0b0f1a;
+  font-size: 1em !important;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.reveal .callout .callout-title p {
+  margin: 0;
+}
+
+.reveal .callout .callout-content {
+  font-size: 1em !important;
+  line-height: 1.45;
+}
+
+.reveal .callout .callout-content p {
+  margin: 0;
+}
+
+.reveal .callout .callout-content p + p {
+  margin-top: 0.35em;
+}
+
+// -- графики: белая карточка под рисунком, как карточки графиков на сайте ----------------------------
+// Подложка под рисунком — того же оттенка, что фон осей в src/charts.py (SURFACE), иначе
+// внутри белой карточки проступал бы второй, чуть серый прямоугольник графика.
+.reveal .cell-output-display img,
+.reveal figure img,
+.reveal .quarto-figure img {
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid #e2e6ec;
+  border-radius: 14px;
+  background: #fcfcfb;
+  max-width: 100%;
+  height: auto;
+}
+
+.reveal .cell-output-display {
+  margin-bottom: 0.4em;
+}
+
+// -- макеты слайдов: утверждение, карточки с числами, сетка «график + выводы» ------------------
+// Размеры в px, а не em: на слайдах {.smaller} базовый кегль меньше, а карточки должны читаться
+// одинаково везде.
+.reveal .statement {
+  margin: 0 0 10px;
+  max-width: 1060px;
+  color: #0b0f1a;
+  font-family: $presentation-heading-font;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.18;
+}
+
+.reveal .lead {
+  margin: 0 0 20px;
+  max-width: 980px;
+  color: #535c6b;
+  font-size: 19px;
+  line-height: 1.45;
+}
+
+.reveal .lead strong {
+  color: #0b0f1a;
+}
+
+.reveal .cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0 0;
+}
+
+.reveal .cards.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.reveal .cards.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.reveal .cards.stack { grid-template-columns: minmax(0, 1fr); }
+
+.reveal .card {
+  box-sizing: border-box;
+  padding: 18px 20px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e6ec;
+  border-radius: 16px;
+  color: #0b0f1a;
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.reveal .cards.dense .card,
+.reveal .card.dense {
+  padding: 14px 16px 12px;
+  font-size: 15px;
+}
+
+.reveal .card p {
+  margin: 0 0 8px;
+}
+
+.reveal .card p:last-child {
+  margin-bottom: 0;
+}
+
+.reveal .card .label {
+  margin: 0 0 10px;
+  color: #535c6b;
+  font-family: $font-family-monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.reveal .card .num {
+  margin: 0 0 10px;
+  color: #0b0f1a;
+  font-family: $presentation-heading-font;
+  font-size: 36px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.reveal .card .num.small {
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+// Узкие плитки в боковой колонке: число мельче и в одну строку.
+.reveal .split .cards.two .card .num {
+  font-size: 28px;
+  white-space: nowrap;
+}
+
+.reveal .card.accent {
+  border-color: #2a78d6;
+  box-shadow: 0 0 0 3px rgba(42, 120, 214, 0.12);
+}
+
+.reveal .card.accent .num { color: #2a78d6; }
+.reveal .card.accent .label { color: #1f6bc4; }
+
+.reveal .card.dark {
+  background: #0b1020;
+  border-color: #0b1020;
+  color: #eef2fa;
+}
+
+.reveal .card.dark .label { color: #ffb547; }
+.reveal .card.dark .num { color: #ffffff; }
+.reveal .card.dark p { color: #eef2fa; }
+.reveal .card.dark code { background: rgba(255, 255, 255, 0.12); color: #ffd58a; }
+
+.reveal .card.amber { border-left: 3px solid #ffb547; }
+.reveal .card.orange { border-left: 3px solid #eb6834; }
+.reveal .card.wide { grid-column: 1 / -1; }
+
+.reveal .split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
+  align-items: start;
+  margin: 12px 0 0;
+}
+
+.reveal .split.wide-side { grid-template-columns: minmax(0, 1fr) 400px; }
+.reveal .split.narrow-side { grid-template-columns: minmax(0, 1fr) 300px; }
+
+.reveal .side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reveal .split .cell,
+.reveal .split .cell-output-display,
+.reveal .split figure {
+  margin: 0;
+}
+
+.reveal .split .cards { margin-top: 0; }
+
+.reveal .table-card {
+  box-sizing: border-box;
+  margin: 14px 0 0;
+  padding: 2px 14px;
+  background: #ffffff;
+  border: 1px solid #e2e6ec;
+  border-radius: 16px;
+}
+
+.reveal .table-card table {
+  width: 100%;
+  margin: 0;
+}
+
+.reveal .table-card .cell,
+.reveal .table-card .cell-output-display { margin: 0; }
+
+.reveal .note,
+.reveal .note p {
+  margin: 12px 0 0;
+  color: #535c6b;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.reveal .note p + p { margin-top: 6px; }
+
+// Тёмный финальный слайд: фон задаётся атрибутом слайда, здесь — цвета текста и карточек.
+.reveal section.dark h2,
+.reveal section.dark .statement { color: #ffffff; }
+.reveal section.dark .lead { color: #b5c0d6; }
+.reveal section.dark .card {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #eef2fa;
+}
+.reveal section.dark .card .label { color: #ffb547; }
+.reveal section.dark .card .num { color: #ffffff; }
+.reveal section.dark .card strong { color: #ffffff; }
+
+// -- номер слайда и подвал ------------------------------------------------------------------------
+.reveal .slide-number {
+  top: auto !important;
+  right: 24px !important;
+  bottom: 16px !important;
+  background: transparent;
+  color: #8a95a8;
+  font-family: $font-family-monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.reveal .footer {
+  bottom: 14px;
+  color: #8a95a8;
+  font-family: $font-family-monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.reveal .footer p {
+  margin: 0;
+}
+
+.reveal .slide-logo {
+  max-height: 26px !important;
+  bottom: 14px !important;
+  left: 24px !important;
+}
