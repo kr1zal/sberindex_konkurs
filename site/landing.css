@@ -896,122 +896,540 @@
   }
 }
 
-/* -- 02 · горизонты ------------------------------------------------------------------ */
+/* -- 02 · горизонты: четыре модели на всех горизонтах одним графиком, панель выбранного ------ */
 
-.bars-card {
+.hz {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: stretch;
   margin-top: 34px;
-  padding: 30px 32px;
+}
+
+/* Карточка режет всё, что выходит за её края: подписи линий справа не наезжают на панель. */
+.hz-card {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 22px;
+  overflow: hidden;
+}
+
+.hz-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px 16px;
+}
+
+.hz-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+}
+
+.hz-hint-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chart-mark);
+  transition: background-color 0.3s;
+}
+
+.hz-hint.is-auto .hz-hint-dot {
+  background: var(--chart-forecast);
+}
+
+/* Справа от графика — место под подписи линий; ось без шкалы месяцев: горизонты стоят столбцами. */
+.hz-plot {
+  height: 300px;
+  margin: 14px 190px 0 0;
+}
+
+.hz-band {
+  position: absolute;
+  top: -12px;
+  bottom: -76px;
+  width: 20%;
+  transform: translateX(-50%);
+  background: var(--chart-forecast);
+  opacity: 0.07;
+  border-radius: 14px;
+  transition: left 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hz-gain-band {
+  fill: var(--chart-forecast);
+  fill-opacity: 0.12;
+  stroke: none;
+}
+
+.hz-line, .hz-line-gap {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.hz-line-reference {
+  stroke: var(--chart-fact);
+  stroke-width: 2;
+}
+
+.hz-line-naive {
+  stroke: var(--bar-rest);
+  stroke-width: 1.6;
+  stroke-dasharray: 5 5;
+}
+
+.hz-line-best_mean {
+  stroke: var(--chart-forecast);
+  stroke-width: 3.2;
+}
+
+.hz-line-two_stage {
+  stroke: var(--chart-third);
+  stroke-width: 2.2;
+}
+
+/* Модель, которой на дальнем горизонте нет: пунктир до края, подпись справа говорит почему. */
+.hz-line-gap {
+  stroke: var(--chart-mark);
+  stroke-width: 1.4;
+  stroke-dasharray: 2 5;
+}
+
+.hz-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hz-dot {
+  position: absolute;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+}
+
+.hz-dot-reference { background: var(--chart-fact); }
+.hz-dot-naive { background: var(--bar-rest); }
+.hz-dot-two_stage { background: var(--chart-third); }
+
+.hz-dot-best_mean {
+  width: 11px;
+  height: 11px;
+  background: var(--chart-forecast);
+}
+
+/* Выигрыш у эталона — островок посреди ленты между линиями; у выбранного горизонта темнее. */
+.hz-pill {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 3px 9px;
+  background: var(--chart-forecast);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--surface);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.3s;
+}
+
+.hz-pill.is-on {
+  background: var(--accent-hover);
+}
+
+.hz-labels {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 176px;
+  margin-left: 14px;
+  pointer-events: none;
+}
+
+/* Подпись — название линии, при нужде в две строки; пояснения моделей — в панели справа. */
+.hz-label {
+  position: absolute;
+  left: 0;
+  max-width: 100%;
+  transform: translateY(-50%);
+  line-height: 1.2;
+}
+
+.hz-label-name {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.hz-label-sub {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 0.6875rem;
+}
+
+.hz-label-reference .hz-label-name { color: var(--chart-fact); }
+.hz-label-naive .hz-label-name { color: var(--ink-soft); }
+.hz-label-best_mean .hz-label-name { color: var(--chart-forecast); }
+.hz-label-two_stage .hz-label-name { color: var(--chart-third); }
+
+/* Столбцы горизонтов — кнопки во всю высоту графика: нажатие в любом месте столбца выбирает горизонт
+   (для мыши; с клавиатуры — переключатели под осью). */
+.hz-cols {
+  position: absolute;
+  top: -12px;
+  right: 0;
+  bottom: -76px;
+  left: 0;
+  z-index: 1;
+}
+
+.hz-col {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.hz-col:hover {
+  background: var(--chart-forecast);
+  opacity: 0.05;
+}
+
+/* Переключатели горизонтов стоят под своими столбцами; в выбранном бежит полоска до следующего. */
+.hz-axis {
+  position: relative;
+  z-index: 2;
+  height: 62px;
+  margin: 12px 190px 0 0;
+}
+
+.hz-tick-chip {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.hz-chip {
+  position: relative;
+  overflow: hidden;
+  min-width: 92px;
+  min-height: 36px;
+  padding: 6px 16px 7px;
+  border: 1px solid var(--field-line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s, transform 0.15s;
+}
+
+.hz-chip:hover {
+  border-color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.hz-chip[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+
+.hz-chip-prog {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 3px;
+  background: var(--chart-forecast);
+}
+
+.hz-chip.is-timing .hz-chip-prog {
+  animation: hz-prog var(--hz-step) linear forwards;
+}
+
+@keyframes hz-prog {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+.hz-windows {
+  margin-top: 5px;
+  color: var(--chart-mark);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 2px;
+}
+
+.hz-tick-chip.is-on .hz-windows {
+  color: var(--chart-forecast);
+}
+
+.hz-legend {
+  margin: auto 0 0;
+  padding-top: 14px;
+  font-size: 0.8125rem;
+}
+
+.hz-key-reference {
+  border-color: var(--chart-fact);
+  border-top-width: 2px;
+}
+
+.hz-key-naive {
+  border-color: var(--bar-rest);
+  border-top-style: dashed;
+  border-top-width: 2px;
+}
+
+.hz-key-best_mean {
+  border-color: var(--chart-forecast);
+}
+
+.hz-key-two_stage {
+  border-color: var(--chart-third);
+  border-top-width: 2px;
+}
+
+.hz-key-band {
+  width: 14px;
+  height: 12px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--chart-forecast);
+  opacity: 0.2;
+}
+
+.hz-key-dots {
+  width: auto;
+  height: auto;
+  border: 0;
+  color: var(--chart-mark);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 2px;
+}
+
+/* Панель выбранного горизонта: выигрыш у эталона крупно, четыре значения столбиком, оговорка. */
+.hz-side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 22px 22px 18px;
   background: var(--surface);
   border: 1px solid var(--rule);
   border-radius: 20px;
 }
 
-.bars {
-  margin: 0;
+.hz-side-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.hz-nav {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.hz-nav-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--field-line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.hz-nav-btn:hover {
+  background: var(--bg);
+  border-color: var(--ink);
+}
+
+.hz-gain {
+  margin: 12px 0 0;
+  color: var(--chart-forecast);
+  font-family: var(--font-display);
+  font-size: 2.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.hz-gain-sub {
+  margin: 8px 0 0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.hz-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 18px 0 0;
   padding: 0;
   list-style: none;
 }
 
-.bar-row {
+.hz-row {
   display: grid;
-  grid-template-columns: minmax(0, 280px) minmax(0, 1fr) 120px;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 76px;
+  gap: 10px;
   align-items: center;
-  padding: 12px 0;
+  color: var(--ink-soft);
 }
 
-.bar-label {
+.hz-row.is-best {
+  color: var(--ink);
+}
+
+.hz-row.is-empty {
+  color: var(--chart-mark);
+}
+
+.hz-row-name {
   display: block;
-  font-size: 1rem;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hz-row.is-best .hz-row-name {
   font-weight: 500;
 }
 
-.bar-sub {
+.hz-row-sub {
   display: block;
-  margin-top: 3px;
-  color: var(--ink-soft);
-  font-size: 0.8125rem;
-}
-
-.bar-track {
-  height: 16px;
+  margin-top: 1px;
   overflow: hidden;
-  background: var(--bar-track);
-  border-radius: 8px;
+  color: var(--ink-soft);
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.bar-fill {
+.hz-row.is-empty .hz-row-sub {
+  color: var(--chart-mark);
+}
+
+.hz-row-track {
+  height: 6px;
+  margin-top: 4px;
+  overflow: hidden;
+  background: var(--rule);
+  border-radius: 3px;
+}
+
+.hz-row-fill {
   width: 0;
   height: 100%;
   background: var(--bar-rest);
-  border-radius: 8px;
-  transition: width 0.7s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.3s;
+  border-radius: 3px;
+  transition: width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.bar-row.is-best .bar-fill {
-  background: var(--bar-best);
+.hz-row.is-best .hz-row-fill {
+  background: var(--chart-forecast);
 }
 
-.bar-value {
+.hz-row-value {
   font-family: var(--font-mono);
-  font-size: 1rem;
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
-.bar-row.is-best .bar-value {
-  font-weight: 500;
+.hz-note {
+  margin: auto 0 0;
+  padding-top: 14px;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  line-height: 1.5;
 }
 
-.bar-row.is-empty .bar-value {
-  color: var(--ink-soft);
-}
-
-.bars-note {
-  margin: 16px 0 0;
-  padding-top: 16px;
-  border-top: 1px solid var(--rule-soft);
-  color: var(--ink-soft);
-  font-size: 0.875rem;
+@media (max-width: 1023px) {
+  .hz {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 639px) {
-  .section-bar > .segmented {
-    display: flex;
-    width: 100%;
-  }
-
-  .section-bar > .segmented button {
-    flex: 1 1 0;
-    padding: 0 4px;
-    font-size: 0.875rem;
-  }
-
-  .bars-card {
+  .hz {
+    gap: 14px;
     margin-top: 22px;
-    padding: 12px 16px 18px;
-    border-radius: 18px;
   }
 
-  .bar-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px 12px;
-    padding: 10px 0;
+  .hz-plot {
+    height: 240px;
+    margin-right: 0;
   }
 
-  .bar-name {
-    grid-column: 1;
-    grid-row: 1;
+  .hz-labels {
+    display: none;
   }
 
-  .bar-value {
-    grid-column: 2;
-    grid-row: 1;
+  .hz-band, .hz-cols {
+    bottom: -12px;
   }
 
-  .bar-track {
-    grid-column: 1 / -1;
-    grid-row: 2;
+  .hz-axis {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    height: auto;
+    margin-right: 0;
+  }
+
+  .hz-tick-chip {
+    position: static;
+    flex: 1 1 0;
+    min-width: 0;
+    transform: none;
+  }
+
+  .hz-chip {
+    width: 100%;
+    min-width: 0;
+    padding: 6px 4px 7px;
+    font-size: 0.8125rem;
+  }
+
+  .hz-side {
+    padding: 18px 16px 16px;
   }
 }
 
@@ -2290,12 +2708,17 @@
     stroke-dashoffset: 0;
   }
 
-  .step, .bar-fill, .dot, .vline-cursor, .tick-set, .story-lines, .story-median-layer,
-  .fact-r1, .fact-r2, .scrub-tick, #fact-act-reveal {
+  .step, .dot, .vline-cursor, .tick-set, .story-lines, .story-median-layer,
+  .fact-r1, .fact-r2, .scrub-tick, #fact-act-reveal,
+  .hz-band, .hz-row-fill, .hz-chip, .hz-pill, .hz-hint-dot, .hz-col, .hz-nav-btn {
     transition: none;
   }
 
-  .step:hover {
+  .step:hover, .hz-chip:hover {
     transform: none;
+  }
+
+  .hz-chip.is-timing .hz-chip-prog {
+    animation: none;
   }
 }

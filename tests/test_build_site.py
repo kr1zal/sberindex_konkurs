@@ -55,7 +55,7 @@ LANDING_JSON_KEYS = {"story", "horizons", "fact", "teaser", "breaks"}
 BREAKS_KEYS = {"months", "share", "top", "top_labels"}
 STORY_KEYS = {"months", "base_months", "ids", "series", "median", "n_total", "n_sample", "decomposition",
               "spread_share", "spread_pct"}
-HORIZONS_KEYS = {"list", "main", "labels", "unit", "models", "notes"}
+HORIZONS_KEYS = {"list", "main", "labels", "unit", "windows", "models", "notes"}
 TEASER_ITEM_KEYS = {"id", "short", "kind", "region", "fact", "forecast", "breaks", "baseline", "summary"}
 TEASER_SUMMARY_KEYS = {"forecast_mean", "baseline_mean", "growth", "best", "reference_mae"}
 
@@ -1381,6 +1381,16 @@ class BuildSiteTest(unittest.TestCase):
         else:
             self.assertEqual(model["mae"][index], int(round(float(year[best]))))
 
+    def test_horizons_windows_count_the_validation_windows_of_each_horizon(self) -> None:
+        # Точки под переключателем горизонта — число окон проверки числом, из тех же двух источников,
+        # что и слово в оговорке: конфига и результатов.
+        horizons = self.landing["horizons"]
+        config_folds = {int(item["horizon"]): int(item["n_folds"]) for item in self.horizons_cfg["horizons"]}
+        result_folds = self.horizons_folds.groupby("horizon")["fold"].nunique()
+        self.assertEqual(horizons["windows"], [config_folds[h] for h in horizons["list"]])
+        self.assertEqual(horizons["windows"], [int(result_folds[h]) for h in horizons["list"]])
+        self.assertTrue(all(w >= 1 for w in horizons["windows"]))
+
     def test_horizons_notes_are_one_phrase_with_the_number_of_validation_windows(self) -> None:
         horizons = self.landing["horizons"]
         notes = dict(zip(horizons["list"], horizons["notes"]))
@@ -2230,7 +2240,7 @@ class BuildSiteTest(unittest.TestCase):
             with self.subTest(live=live):
                 self.assertEqual(ids.ids[live]["aria-live"], "polite")
         # Графики с данными — картинки с названием; декоративный график обложки скрыт.
-        for chart in ("story-plot", "fact-plot", "breaks-plot", "t-plot"):
+        for chart in ("story-plot", "hz-plot", "fact-plot", "breaks-plot", "t-plot"):
             with self.subTest(chart=chart):
                 self.assertEqual(ids.ids[chart]["role"], "img")
                 self.assertTrue(ids.ids[chart]["aria-label"])
@@ -2285,6 +2295,32 @@ class BuildSiteTest(unittest.TestCase):
                       f"{_plural(n_folds, 'окно', 'окна', 'окон')} по {self.full_cfg['split']['horizon']}\u00a0",
                       text.text("mn-origin"))
         self.assertIn("report/method.svg", self.html)
+
+    def test_horizons_section_has_switchable_horizons_with_autoplay_that_stops_on_a_click(self) -> None:
+        # Раздел «Горизонты»: все горизонты на одном графике, переключатели под осью — группа кнопок,
+        # стрелки в панели справа — кнопки с названием; строка оговорки — живая область. Горизонты листаются
+        # сами, когда раздел виден (IntersectionObserver), клик останавливает, при «уменьшить движение»
+        # показа нет и раздел стоит на основном горизонте.
+        ids = _IdCollector()
+        ids.feed(self.html)
+        self.assertEqual(ids.ids["hz-axis"]["role"], "group")
+        self.assertTrue(ids.ids["hz-axis"]["aria-label"])
+        for button in ("hz-prev", "hz-next"):
+            with self.subTest(button=button):
+                self.assertEqual(ids.ids[button]["tag"], "button")
+                self.assertTrue(ids.ids[button]["aria-label"])
+        for element_id in ("hz-sel", "hz-gain", "hz-gain-sub", "hz-rows", "hz-legend", "hz-hint-text", "hz-unit"):
+            self.assertIn(element_id, ids.ids)
+        self.assertNotIn("h-seg", ids.ids)
+        self.assertNotIn("h-bars", ids.ids)
+        js = (ROOT / "site" / "landing.js").read_text(encoding="utf-8")
+        block = js[js.index("function initHorizons("):js.index("function initFact(")]
+        for fragment in ("IntersectionObserver", "reducedMotion()", "HZ_MAX_STEPS", "stopPlay()", "is-timing",
+                         'byId("hz-prev")', 'byId("hz-next")'):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, block)
+        # Выигрыш у эталона считается по данным: доля MAE лучшей из наших моделей от MAE эталона.
+        self.assertIn("Math.round((1 - ", block)
 
     def test_method_map_drop_goes_through_a_property_nobody_animates(self) -> None:
         # Сдвиг опущенных блоков карты (--method-drop) — через top относительного блока. Через transform

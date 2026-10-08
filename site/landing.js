@@ -426,53 +426,313 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 02 · Горизонты: полосы MAE четырёх моделей
+  // 02 · Горизонты: четыре модели на всех горизонтах одним графиком, между эталоном и лучшей из
+  // наших — лента выигрыша с процентом на каждом горизонте; выбранный горизонт — панель справа.
+  // Горизонты листаются сами, когда раздел виден; клик по переключателю, столбцу графика или
+  // стрелке останавливает показ.
   // ---------------------------------------------------------------------------
 
+  const HZ_PLAY_FIRST_MS = 900; // пауза до первого шага показа после появления раздела
+  const HZ_PLAY_STEP_MS = 3400; // пауза между горизонтами при показе
+  const HZ_MAX_STEPS = 8; // сколько горизонтов показ листает сам, потом останавливается на основном
+  const HZ_LABEL_GAP = 11; // подписи справа от линий не ближе этого друг к другу, % высоты графика
+  const HZ_GRID_STEP = 1000; // шаг линий сетки, ₽
+  const HZ_NOT_OURS = ["reference", "naive"]; // роли не наших моделей: выигрыш считается против эталона
+
   function initHorizons(horizons) {
-    const segmented = byId("h-seg");
-    const list = byId("h-bars");
+    const plot = byId("hz-plot");
+    const axis = byId("hz-axis");
+    const cols = byId("hz-cols");
+    const rowsBox = byId("hz-rows");
     const note = byId("h-note");
-    if (!segmented || !list || !note) return;
+    const hint = byId("hz-hint");
+    if (!plot || !axis || !cols || !rowsBox || !note || !hint) return;
+    const models = horizons.models;
+    const count = horizons.list.length;
+    const mainIndex = Math.max(0, horizons.list.indexOf(horizons.main));
+    const rolesOf = (model) => model.role.split("+");
+    const primaryRole = (model) => rolesOf(model)[0];
+    const reference = models.find((model) => rolesOf(model).includes("reference"));
+    const ours = models.filter((model) => !rolesOf(model).some((role) => HZ_NOT_OURS.includes(role)));
+    if (!reference || !ours.length) return;
+    const present = (model) => model.mae.filter((value) => value !== null);
+    const yMax = Math.ceil(Math.max(...models.flatMap(present)) / HZ_GRID_STEP) * HZ_GRID_STEP;
+    const xOf = (index) => (index + 0.5) / count * VIEW;
+    const yOf = (value) => (1 - value / yMax) * VIEW;
+    const pctX = (index) => `${(xOf(index) / VIEW * 100).toFixed(2)}%`;
+    const pctYValue = (value) => (1 - value / yMax) * 100;
+    const pctY = (value) => `${pctYValue(value).toFixed(2)}%`;
+    const lower = (text) => text.charAt(0).toLowerCase() + text.slice(1);
+    const lastIndex = (model) => {
+      let last = -1;
+      model.mae.forEach((value, index) => { if (value !== null) last = index; });
+      return last;
+    };
 
-    const rows = horizons.models.map((model) => {
-      const item = node("li", "bar-row", null, list);
-      const name = node("div", "bar-name", null, item);
-      node("span", "bar-label", model.label, name);
-      node("span", "bar-sub", model.note, name);
-      const track = node("div", "bar-track", null, item);
-      track.setAttribute("aria-hidden", "true");
-      const fill = node("div", "bar-fill", null, track);
-      const value = node("span", "bar-value", null, item);
-      return { item, fill, value };
-    });
-
-    const buttons = horizons.labels.map((label, index) => {
-      const button = node("button", null, label, segmented);
-      button.type = "button";
-      button.addEventListener("click", () => select(index));
-      return button;
-    });
-
-    function select(index) {
-      const values = horizons.models.map((model) => model.mae[index]);
-      const present = values.filter((v) => v !== null);
-      const max = Math.max.apply(null, present);
-      const min = Math.min.apply(null, present);
-      rows.forEach((row, k) => {
-        const value = values[k];
-        const best = value !== null && value === min;
-        row.item.classList.toggle("is-best", best);
-        row.item.classList.toggle("is-empty", value === null);
-        row.fill.style.width = value === null ? "0%" : `${((value / max) * 100).toFixed(1)}%`;
-        row.value.textContent = value === null ? "не обучить" : `${formatInt(value)}${NBSP}₽`;
-        if (best) node("span", "visually-hidden", " — лучшая", row.value);
+    // Лучшая из наших моделей на горизонте и её выигрыш у эталона: на сколько процентов меньше ошибка.
+    function bestOurs(index) {
+      let best = null;
+      ours.forEach((model) => {
+        const value = model.mae[index];
+        if (value !== null && (best === null || value < best.value)) best = { model, value };
       });
-      note.textContent = horizons.notes[index];
-      buttons.forEach((button, k) => button.setAttribute("aria-pressed", String(k === index)));
+      return best;
+    }
+    function gainPct(index) {
+      const best = bestOurs(index);
+      return best ? Math.round((1 - best.value / reference.mae[index]) * 100) : null;
     }
 
-    select(Math.max(0, horizons.list.indexOf(horizons.main)));
+    byId("hz-unit").textContent = `Средняя ошибка, ${horizons.unit}`;
+
+    const ticks = byId("hz-ticks");
+    for (let value = 0; value <= yMax; value += HZ_GRID_STEP) {
+      const tick = node("div", "tick", null, ticks);
+      tick.style.top = pctY(value);
+      node("span", null, value ? formatInt(value) : "0", tick);
+    }
+
+    // Лента между эталоном и лучшей из наших, потом линии: наши поверх остальных, лучшая — сверху.
+    let band = "";
+    for (let index = 0; index < count; index++) {
+      band += `${index ? "L" : "M"}${xOf(index).toFixed(1)},${yOf(reference.mae[index]).toFixed(1)}`;
+    }
+    for (let index = count - 1; index >= 0; index--) {
+      const best = bestOurs(index);
+      band += `L${xOf(index).toFixed(1)},${yOf(best ? best.value : reference.mae[index]).toFixed(1)}`;
+    }
+    byId("hz-gain-band").setAttribute("d", `${band}Z`);
+    const lines = byId("hz-lines");
+    const drawOrder = models.slice().sort((a, b) => Number(ours.includes(a)) - Number(ours.includes(b))
+      || Number(primaryRole(a) === "best_mean") - Number(primaryRole(b) === "best_mean"));
+    drawOrder.forEach((model) => {
+      let d = "";
+      let first = true;
+      model.mae.forEach((value, index) => {
+        if (value === null) return;
+        d += `${first ? "M" : "L"}${xOf(index).toFixed(1)},${yOf(value).toFixed(1)}`;
+        first = false;
+      });
+      svgNode("path", { class: `hz-line hz-line-${primaryRole(model)}`, d }, lines);
+      const last = lastIndex(model);
+      if (last >= 0 && last < count - 1) {
+        const y = yOf(model.mae[last]).toFixed(1);
+        svgNode("path", { class: "hz-line-gap", d: `M${xOf(last).toFixed(1)},${y} L${VIEW},${y}` }, lines);
+      }
+    });
+
+    const marks = byId("hz-marks");
+    drawOrder.forEach((model) => model.mae.forEach((value, index) => {
+      if (value === null) return;
+      const dot = node("div", `hz-dot hz-dot-${primaryRole(model)}`, null, marks);
+      dot.style.left = pctX(index);
+      dot.style.top = pctY(value);
+    }));
+    const pills = horizons.list.map((_, index) => {
+      const best = bestOurs(index);
+      const pill = node("div", "hz-pill", best ? `−${gainPct(index)}${NBSP}%` : "", marks);
+      pill.style.left = pctX(index);
+      pill.style.top = pctY((reference.mae[index] + (best ? best.value : reference.mae[index])) / 2);
+      pill.hidden = !best;
+      return pill;
+    });
+
+    // Подписи линий справа — у последней точки каждой; тесные раздвигаются сверху вниз.
+    const labelsBox = byId("hz-labels");
+    const labelItems = models.map((model) => {
+      const last = lastIndex(model);
+      return {
+        model,
+        top: pctYValue(model.mae[last]),
+        sub: last < count - 1 ? `на ${lower(horizons.labels[count - 1])} не обучить` : "",
+      };
+    }).sort((a, b) => a.top - b.top);
+    labelItems.forEach((item, k) => {
+      if (k) item.top = Math.max(item.top, labelItems[k - 1].top + HZ_LABEL_GAP);
+    });
+    labelItems.forEach((item) => {
+      const label = node("div", `hz-label hz-label-${primaryRole(item.model)}`, null, labelsBox);
+      label.style.top = `${item.top.toFixed(2)}%`;
+      node("span", "hz-label-name", item.model.label, label);
+      if (item.sub) node("span", "hz-label-sub", item.sub, label);
+    });
+
+    // Столбцы — кнопки для мыши во всю высоту графика; переключатели под осью — для всех.
+    const colButtons = horizons.list.map((_, index) => {
+      const button = node("button", "hz-col", null, cols);
+      button.type = "button";
+      button.tabIndex = -1;
+      button.style.left = `${(index / count * 100).toFixed(2)}%`;
+      button.style.width = `${(100 / count).toFixed(2)}%`;
+      button.addEventListener("click", () => pick(index));
+      return button;
+    });
+    axis.style.setProperty("--hz-step", `${HZ_PLAY_STEP_MS}ms`);
+    const chips = horizons.list.map((_, index) => {
+      const windows = horizons.windows[index];
+      const wrap = node("div", "hz-tick-chip", null, axis);
+      wrap.style.left = pctX(index);
+      const chip = node("button", "hz-chip", horizons.labels[index], wrap);
+      chip.type = "button";
+      chip.setAttribute("aria-label",
+        `${horizons.labels[index]}: ${formatInt(windows)} ${pluralRu(windows, "окно", "окна", "окон")} проверки`);
+      node("span", "hz-chip-prog", null, chip).setAttribute("aria-hidden", "true");
+      node("div", "hz-windows", "●".repeat(windows), wrap).setAttribute("aria-hidden", "true");
+      chip.addEventListener("click", () => pick(index));
+      return { wrap, chip };
+    });
+
+    const legend = byId("hz-legend");
+    models.forEach((model) => {
+      const item = node("li", null, null, legend);
+      node("span", `key hz-key-${primaryRole(model)}`, null, item);
+      item.append(lower(model.label));
+    });
+    const bandItem = node("li", null, null, legend);
+    node("span", "key hz-key-band", null, bandItem);
+    bandItem.append("выигрыш наших моделей у эталона");
+    const dotsItem = node("li", null, null, legend);
+    node("span", "key hz-key-dots", "●●●", dotsItem);
+    dotsItem.append("окна проверки на горизонте");
+
+    const rows = models.map(() => {
+      const item = node("li", "hz-row", null, rowsBox);
+      const name = node("div", null, null, item);
+      const text = node("span", "hz-row-name", null, name);
+      const sub = node("span", "hz-row-sub", null, name);
+      const fill = node("div", "hz-row-fill", null, node("div", "hz-row-track", null, name));
+      const value = node("span", "hz-row-value", null, item);
+      return { item, text, sub, fill, value };
+    });
+
+    let active = -1;
+    let playing = false;
+    let played = false;
+    let timers = [];
+
+    function setHint(auto) {
+      hint.classList.toggle("is-auto", auto);
+      byId("hz-hint-text").textContent = auto
+        ? "горизонты листаются сами — нажмите на любой, чтобы остановить"
+        : "нажимайте горизонты — или стрелки справа";
+    }
+
+    function select(index) {
+      active = index;
+      const best = bestOurs(index);
+      byId("hz-sel").textContent = horizons.labels[index];
+      byId("hz-gain").textContent = best ? `−${gainPct(index)}${NBSP}%` : "—";
+      byId("hz-gain-sub").textContent = best ? `точнее эталона конкурса — ${lower(best.model.label)}` : "";
+      const values = models.map((model) => model.mae[index]);
+      const known = values.filter((value) => value !== null);
+      const max = Math.max(...known);
+      const min = Math.min(...known);
+      const order = models.map((model, k) => ({ model, k, value: values[k] }))
+        .sort((a, b) => (a.value === null ? Infinity : a.value) - (b.value === null ? Infinity : b.value));
+      order.forEach(({ model, k, value }, position) => {
+        const row = rows[k];
+        row.item.style.order = String(position);
+        row.item.classList.toggle("is-best", value !== null && value === min);
+        row.item.classList.toggle("is-empty", value === null);
+        row.text.textContent = model.label;
+        row.sub.textContent = model.note;
+        row.fill.style.width = value === null ? "0%" : `${((value / max) * 100).toFixed(1)}%`;
+        row.value.textContent = value === null ? "не обучить" : `${formatInt(value)}${NBSP}₽`;
+      });
+      note.textContent = horizons.notes[index];
+      byId("hz-band").style.left = pctX(index);
+      pills.forEach((pill, k) => pill.classList.toggle("is-on", k === index));
+      colButtons.forEach((button, k) => button.setAttribute("aria-pressed", String(k === index)));
+      chips.forEach(({ wrap, chip }, k) => {
+        chip.setAttribute("aria-pressed", String(k === index));
+        wrap.classList.toggle("is-on", k === index);
+        chip.classList.toggle("is-timing", playing && k === index);
+      });
+      setHint(playing || !played);
+    }
+
+    // Показ один раз, когда раздел виден: от первого горизонта по кругу, не больше HZ_MAX_STEPS шагов,
+    // потом — основной горизонт. Любой выбор рукой останавливает показ.
+    function stopPlay() {
+      timers.forEach(clearTimeout);
+      timers = [];
+      playing = false;
+      played = true;
+    }
+    function pick(index) {
+      stopPlay();
+      select((index + count) % count);
+    }
+    function play() {
+      if (played) return;
+      played = true;
+      if (reducedMotion()) {
+        select(active);
+        return;
+      }
+      playing = true;
+      let next = 0;
+      let steps = 0;
+      const step = () => {
+        select(next);
+        steps += 1;
+        next = (next + 1) % count;
+        const last = steps >= HZ_MAX_STEPS;
+        timers.push(setTimeout(() => {
+          if (!last) { step(); return; }
+          playing = false;
+          select(mainIndex);
+        }, HZ_PLAY_STEP_MS));
+      };
+      timers.push(setTimeout(step, HZ_PLAY_FIRST_MS));
+    }
+
+    // Строка «точнее эталона…» и оговорка у горизонтов разной длины: их высота — по самому длинному
+    // тексту из всех горизонтов, иначе панель прыгала бы при переключении. Пересчёт при смене ширины.
+    // Пробник сохраняет отступы элемента: высота задаётся вместе с ними (box-sizing: border-box).
+    const side = plot.closest(".hz").querySelector(".hz-side");
+    const gainSub = byId("hz-gain-sub");
+    const subTexts = horizons.list.map((_, index) => {
+      const best = bestOurs(index);
+      return best ? `точнее эталона конкурса — ${lower(best.model.label)}` : "";
+    });
+    function reserveHeights() {
+      [[gainSub, subTexts], [note, horizons.notes]].forEach(([element, texts]) => {
+        const probe = node(element.tagName.toLowerCase(), element.className, null, side);
+        probe.style.position = "absolute";
+        probe.style.visibility = "hidden";
+        probe.style.width = `${element.clientWidth}px`;
+        probe.style.margin = "0";
+        probe.style.minHeight = "0";
+        let tallest = 0;
+        texts.forEach((text) => {
+          probe.textContent = text;
+          tallest = Math.max(tallest, probe.offsetHeight);
+        });
+        probe.remove();
+        element.style.minHeight = `${tallest}px`;
+      });
+    }
+
+    byId("hz-prev").addEventListener("click", () => pick(active - 1));
+    byId("hz-next").addEventListener("click", () => pick(active + 1));
+    select(mainIndex);
+    reserveHeights();
+    if ("ResizeObserver" in window) new ResizeObserver(reserveHeights).observe(side);
+
+    if ("IntersectionObserver" in window && !reducedMotion()) {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          observer.disconnect();
+          play();
+        });
+      }, { threshold: 0.5 });
+      observer.observe(plot);
+    } else {
+      played = true;
+      setHint(false);
+    }
   }
 
   // ---------------------------------------------------------------------------

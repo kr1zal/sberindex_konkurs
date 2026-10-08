@@ -142,13 +142,14 @@ recommended-модель самого длинного горизонта — tw
               проверки промах мимо общего движения (bias) и разброс между муниципалитетами (spread),
               руб., bias + spread = MAE; порядок — по убыванию MAE; label — название из MODEL_LABELS
               без пояснения (`_label_parts`).
-    horizons  {list, main, labels, unit, models, notes}: горизонты из configs/horizons.yaml,
-              main — горизонт основного протокола (его показывают первым), четыре модели
+    horizons  {list, main, labels, unit, windows, models, notes}: горизонты из configs/horizons.yaml,
+              main — горизонт основного протокола (на нём раздел останавливается), четыре модели
               в порядке prophet, naive_last, лучшая основного протокола (summary.csv
               MAE.idxmin()), two_stage — [{id, role, label, note, mae}], mae[i] — MAE
               на горизонте list[i], руб., по horizons_summary.csv (нет — null);
-              notes[i] — одна фраза под полосами на горизонте list[i], с числом окон проверки
-              этого горизонта словом (`horizon_folds`).
+              windows[i] — число окон проверки на горизонте list[i] (`horizon_folds`; точки под
+              переключателем горизонта); notes[i] — одна фраза о горизонте list[i], с тем же числом
+              окон словом.
     fact      то же, что demo/data/aggregate.json (одна и та же структура, не пересчёт).
     teaser    {months, items, reference}: три МО из TEASER_MO; items[k] — {id, short, kind, region,
               fact, forecast, breaks} теми же значениями, что в demo/data/mo/*.json, плюс
@@ -1532,6 +1533,7 @@ def build_horizons(
         notes.append(" ".join(sentences))
 
     return {
+        "windows": [folds[h] for h in horizons],
         "list": horizons,
         "main": horizon_main,
         "labels": [horizon_label(h) for h in horizons],

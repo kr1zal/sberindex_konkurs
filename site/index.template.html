@@ -161,17 +161,43 @@
 
 <section class="section" id="horizons" aria-labelledby="horizons-title">
   <div class="wrap">
-    <div class="section-bar">
-      <div>
-        <p class="eyebrow">02 · Горизонты</p>
-        <h2 class="section-title" id="horizons-title">Какая модель точнее — зависит от горизонта</h2>
-      </div>
-      <div class="segmented" id="h-seg" role="group" aria-label="Горизонт прогноза"></div>
-    </div>
+    <p class="eyebrow">02 · Горизонты</p>
+    <h2 class="section-title" id="horizons-title">Какая модель точнее — зависит от горизонта</h2>
 
-    <div class="bars-card">
-      <ol class="bars" id="h-bars" aria-label="Средняя абсолютная ошибка моделей на выбранном горизонте, рублей на человека в месяц"></ol>
-      <p class="bars-note" id="h-note" aria-live="polite"></p>
+    <div class="hz">
+      <div class="plot-card hz-card">
+        <div class="hz-top">
+          <p class="chart-unit" id="hz-unit"></p>
+          <p class="hz-hint" id="hz-hint"><span class="hz-hint-dot" aria-hidden="true"></span><span id="hz-hint-text"></span></p>
+        </div>
+        <div class="plot hz-plot" id="hz-plot" role="img" aria-label="Средняя ошибка моделей на каждом горизонте прогноза и выигрыш у эталона конкурса">
+          <div class="hz-band" id="hz-band"></div>
+          <div class="ticks" id="hz-ticks"></div>
+          <svg class="plot-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" focusable="false">
+            <path class="hz-gain-band" id="hz-gain-band"/>
+            <g id="hz-lines"></g>
+          </svg>
+          <div class="hz-marks" id="hz-marks"></div>
+          <div class="hz-labels" id="hz-labels"></div>
+          <div class="hz-cols" id="hz-cols" aria-hidden="true"></div>
+        </div>
+        <div class="hz-axis" id="hz-axis" role="group" aria-label="Горизонт прогноза"></div>
+        <ul class="legend hz-legend" id="hz-legend" aria-label="Обозначения графика"></ul>
+      </div>
+
+      <div class="hz-side">
+        <div class="hz-side-head">
+          <p class="mono-label">Горизонт · <span id="hz-sel"></span></p>
+          <span class="hz-nav">
+            <button type="button" class="hz-nav-btn" id="hz-prev" aria-label="Предыдущий горизонт">‹</button>
+            <button type="button" class="hz-nav-btn" id="hz-next" aria-label="Следующий горизонт">›</button>
+          </span>
+        </div>
+        <p class="hz-gain" id="hz-gain"></p>
+        <p class="hz-gain-sub" id="hz-gain-sub"></p>
+        <ol class="hz-rows" id="hz-rows" aria-label="Средняя ошибка моделей на выбранном горизонте, рублей на человека в месяц"></ol>
+        <p class="hz-note" id="h-note" aria-live="polite"></p>
+      </div>
     </div>
   </div>
 </section>
