@@ -378,6 +378,189 @@ $selection-bg: #cfe0f7;
 
 .reveal .note p + p { margin-top: 6px; }
 
+// Просторные слайды (класс .roomy у заголовка): содержимого на половину слайда — карточки, числа
+// и таблицы крупнее, чтобы слайд был заполнен, а не пустовал снизу.
+.reveal section.roomy .statement { font-size: 34px; }
+.reveal section.roomy .lead { font-size: 21px; margin-bottom: 26px; }
+.reveal section.roomy .cards { gap: 20px; margin-top: 22px; }
+.reveal section.roomy .card {
+  min-height: 250px;
+  padding: 24px 26px 22px;
+  font-size: 19px;
+  line-height: 1.5;
+}
+.reveal section.roomy .cards.two .card { min-height: 230px; }
+.reveal section.roomy .cards.four .card { min-height: 220px; }
+.reveal section.roomy .card .label { font-size: 12.5px; margin-bottom: 12px; }
+.reveal section.roomy .card .num { font-size: 46px; margin-bottom: 12px; }
+.reveal section.roomy .cards.four .card .num { font-size: 40px; }
+.reveal section.roomy .card .num.small { font-size: 28px; }
+.reveal section.roomy .cards.four .card .num.small { font-size: 26px; }
+.reveal section.roomy .cards.dense .card,
+.reveal section.roomy .card.dense { min-height: 0; padding: 18px 20px 16px; font-size: 17px; }
+.reveal section.roomy .cards.dense .card.tall { min-height: 300px; }
+.reveal section.roomy .cards.two.dense .card { min-height: 0; }
+.reveal section.roomy .cards.snug .card { min-height: 0; }
+.reveal section.roomy .cards.snug { margin-top: 18px; }
+.reveal section.roomy .cards.airy .card { min-height: 270px; font-size: 20px; }
+.reveal section.roomy .side .card,
+.reveal section.roomy .split .card { min-height: 0; }
+.reveal section.roomy table { font-size: 1.02em; }
+.reveal section.roomy table th { font-size: 0.68em; padding: 0.5em 0.7em 0.55em; }
+.reveal section.roomy table td { padding: 0.5em 0.7em; }
+.reveal section.roomy .table-card { padding: 4px 16px; }
+.reveal section.roomy .note, .reveal section.roomy .note p { font-size: 17px; }
+
+// Нижняя строка слайда: вывод или ссылки. Прижата к низу через top в координатах слайда,
+// а не bottom: при печати высота секции другая, а верх секции совпадает с верхом слайда.
+.reveal .takeaway {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 690px;
+  margin: 0;
+  max-width: 1200px;
+  color: #0b0f1a;
+  font-family: $presentation-heading-font;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.reveal .takeaway.mono {
+  top: 700px;
+  color: #535c6b;
+  font-family: $font-family-monospace;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+// Белая панель под полосами: как карточка, но во всю ширину.
+.reveal .panel {
+  box-sizing: border-box;
+  margin: 16px 0 0;
+  padding: 14px 24px 14px;
+  background: #ffffff;
+  border: 1px solid #e2e6ec;
+  border-radius: 16px;
+}
+
+.reveal .panel .panel-title {
+  margin: 0 0 10px;
+  color: #535c6b;
+  font-family: $font-family-monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+// Горизонтальные полосы: подпись · полоса из сегментов · число справа.
+.reveal .bars {
+  display: grid;
+  grid-template-columns: 370px minmax(0, 1fr) 170px;
+  column-gap: 16px;
+  row-gap: 6px;
+  align-items: center;
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.reveal .bars .bar-label { color: #0b0f1a; }
+.reveal .bars .bar { display: flex; height: 20px; border-radius: 6px; overflow: hidden; }
+.reveal .bars .seg { height: 100%; }
+.reveal .bars .seg.bias { background: #2a78d6; }
+.reveal .bars .seg.spread { background: #c9d0db; }
+.reveal .bars .seg.ref { background: #8a95a8; border-radius: 6px; }
+.reveal .bars .seg.ours { background: #2a78d6; border-radius: 6px; }
+.reveal .bars .seg.best { background: #0b1020; border-radius: 6px; }
+
+.reveal .bars .bar-val {
+  color: #0b0f1a;
+  font-family: $font-family-monospace;
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.reveal .bars .bar-val span { color: #535c6b; }
+
+.reveal .bars-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin: 12px 0 0;
+  color: #535c6b;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.reveal .bars-legend span::before,
+.reveal .months-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 7px;
+  border-radius: 3px;
+  background: #c9d0db;
+  vertical-align: -1px;
+}
+
+.reveal .bars-legend span.bias::before { background: #2a78d6; }
+
+// Полоса месяцев панели: роль месяца в первом фолде показана цветом клетки.
+.reveal .months {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0 0 10px;
+}
+
+.reveal .months .m {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 54px;
+  border: 1px solid #e2e6ec;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #535c6b;
+  font-family: $font-family-monospace;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.reveal .months .m small { color: #8a95a8; font-size: 9.5px; letter-spacing: 0.04em; }
+.reveal .months .m.hist { background: #eef0f4; border-color: #eef0f4; }
+.reveal .months .m.train { background: #dbe8fa; border-color: #c3d6f3; color: #174f93; font-weight: 600; }
+.reveal .months .m.train small { color: #4a7fc0; }
+.reveal .months .m.test { background: #ffb547; border-color: #ffb547; color: #0b0f1a; font-weight: 600; }
+.reveal .months .m.test small { color: #6b4a10; }
+.reveal .months .m.off { background: transparent; border-style: dashed; color: #b0b8c6; }
+.reveal .months .m.off small { color: #c4cad4; }
+
+.reveal .months-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin: 0 0 22px;
+  color: #535c6b;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.reveal .months-legend span.hist::before { background: #eef0f4; border: 1px solid #e2e6ec; }
+.reveal .months-legend span.train::before { background: #dbe8fa; border: 1px solid #c3d6f3; }
+.reveal .months-legend span.test::before { background: #ffb547; }
+.reveal .months-legend span.off::before { background: transparent; border: 1px dashed #b0b8c6; }
+
 // Тёмный финальный слайд: фон задаётся атрибутом слайда, здесь — цвета текста и карточек.
 .reveal section.dark h2,
 .reveal section.dark .statement { color: #ffffff; }
@@ -390,6 +573,8 @@ $selection-bg: #cfe0f7;
 .reveal section.dark .card .label { color: #ffb547; }
 .reveal section.dark .card .num { color: #ffffff; }
 .reveal section.dark .card strong { color: #ffffff; }
+.reveal section.dark .takeaway { color: #ffffff; }
+.reveal section.dark .takeaway.mono { color: #b5c0d6; }
 
 // -- номер слайда и подвал ------------------------------------------------------------------------
 .reveal .slide-number {

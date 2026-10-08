@@ -95,9 +95,25 @@ def _cards_html(items, cls=""):
 
 def _cards(items, cls=""):
     return Markdown(_cards_html(items, cls))
+
+def _bars(rows, title=None, legend=None):
+    """Полосы на белой панели: (подпись, [(класс сегмента, доля ширины 0..1), ...], текст справа)."""
+    html = ['<div class="panel">']
+    if title:
+        html.append(f'<p class="panel-title">{_inl(title)}</p>')
+    html.append('<div class="bars">')
+    for label, segs, val in rows:
+        html.append(f'<div class="bar-label">{_inl(label)}</div><div class="bar">'
+                    + "".join(f'<div class="seg {c}" style="width: {w * 100:.1f}%;"></div>' for c, w in segs)
+                    + f'</div><div class="bar-val">{_inl(val)}</div>')
+    html.append("</div>")
+    if legend:
+        html.append('<div class="bars-legend">' + "".join(f'<span class="{c}">{t}</span>' for c, t in legend) + "</div>")
+    html.append("</div>")
+    return Markdown("\n".join(html))
 ```
 
-## Задача
+## Задача {.roomy}
 
 <p class="statement">Прогнозировать потребление в муниципальных образованиях и заранее выявлять точки структурных изменений.</p>
 <p class="lead">Данные — потребительские безналичные расходы СберИндекса по муниципальным образованиям, помесячно.</p>
@@ -115,8 +131,8 @@ def _cards(items, cls=""):
 </div>
 <div class="card">
 <p class="label">Период</p>
-<p class="num small">январь 2023 — декабрь 2024</p>
-<p>панель начинается с января 2023</p>
+<p class="num small">2023–2024</p>
+<p>с января 2023 по декабрь 2024; раньше панели нет</p>
 </div>
 <div class="card">
 <p class="label">Категорий трат</p>
@@ -127,7 +143,7 @@ def _cards(items, cls=""):
 
 <p class="statement" style="margin-top: 30px; font-size: 26px;">Двадцать четыре точки на ряд определяют в этой работе всё.</p>
 
-## Главный вывод {.smaller}
+## Главный вывод {.smaller .roomy}
 
 <p class="statement">Задача только выглядит как прогноз двух тысяч муниципалитетов</p>
 <p class="lead">На деле это прогноз <strong>одного числа</strong> и разнос его по территориям.</p>
@@ -144,10 +160,26 @@ _cards([
           f"остальное не сдвинула ни одна из {_GEN[_dec_n] if _dec_n <= 10 else _dec_n} моделей разложения.",
           "Промах мимо общего движения",
           f"{_num(_dec['MAE'].min(), 0)}–{_num(_dec['MAE'].max(), 0)} ₽", "accent"),
-    _card("Двухэтапная модель прогнозирует **один** федеральный ряд и разносит его долями, не глядя "
-          "на динамику отдельных рядов. На фолде с самой короткой историей она лучшая из всех.",
+    _card("Двухэтапная модель прогнозирует **один** федеральный ряд и разносит его долями. "
+          "На фолде с самой короткой историей она лучшая из всех.",
           "Конструкция", "Один ряд, потом доли", "dark"),
-])
+], "snug")
+```
+
+```{python}
+# Полосы — то же разложение, усреднённое по фолдам: MAE = смещение (промах мимо общего
+# движения) + разброс между муниципалитетами. Серая часть у всех почти одна, синяя гуляет.
+_dec_show = {"naive_last": "наивная", "two_stage": "двухэтапная",
+             "global_gbm": "базовая панельная", "global_gbm_stack_factor": "общий фактор + категории"}
+_dm = (_dec[_dec["модель"].isin(_dec_show)].groupby("модель")[["смещение", "разброс", "MAE"]].mean()
+       .reindex(list(_dec_show)))
+_dm_scale = _dm["MAE"].max()
+_bars([(_label,
+        [("bias", _dm.loc[_m, "смещение"] / _dm_scale), ("spread", _dm.loc[_m, "разброс"] / _dm_scale)],
+        f"**{_num(_dm.loc[_m, 'смещение'], 0)}** + {_num(_dm.loc[_m, 'разброс'], 0)}")
+       for _m, _label in _dec_show.items()],
+      "Средняя ошибка по трём фолдам, ₽: промах мимо общего движения + разброс",
+      [("bias", "промах мимо общего движения"), ("spread", "разброс между муниципалитетами")])
 ```
 
 ## Первая находка: ловушка годовой сезонности {.smaller}
@@ -193,7 +225,7 @@ _ax.set_ylim(_ylo - 0.12 * (_yhi - _ylo), _yhi)
 _xlo, _xhi = _ax.get_xlim()
 _ax.set_xlim(_xlo, _xhi + 0.07 * (_xhi - _xlo))
 import matplotlib.pyplot as plt
-_fig.set_size_inches(11, 2.7)  # во всю ширину слайда; выше нельзя: под графиком две строки и врезка
+_fig.set_size_inches(12.6, 3.3)  # во всю ширину слайда; под графиком две карточки в ряд
 _fig.tight_layout()
 plt.show()
 ```
@@ -269,7 +301,7 @@ _cards([
 ```
 :::
 
-## Метрики рядом: MAE, MASE, R² {.smaller}
+## Метрики рядом: MAE, MASE, R² {.smaller .roomy}
 
 ::: {.table-card}
 ```{python}
@@ -301,7 +333,6 @@ Markdown(_tab.to_markdown(disable_numparse=True, colalign=("left",) + ("right",)
 ```
 :::
 
-::: {.note}
 ```{python}
 # Строка под таблицей — по фактическим средним: вырожденным среднее называется, только
 # если оно ниже нуля у всех, а «наивная лучшая» — только если это так.
@@ -316,11 +347,16 @@ elif (_mean < 0).all():
              f"оно вырождено — {_span}, ниже нуля у всех.")
 else:
     _line = f"Среднее R² по парам ряд × фолд — {_span}; в таблицы идут пул и медиана."
-Markdown(_line)
+_m_best = _sm.index[0]
+_cards([
+    _card(f"{_ru[_m_best]}: {_num(_sm.loc[_m_best, 'MAE'], 0)} против {_num(_sm.loc['prophet', 'MAE'], 0)} ₽ "
+          f"у эталона; MASE {_num(_sm.loc[_m_best, 'MASE'], 2)}, R² по пулу {_num(_sm.loc[_m_best, 'R² пул'], 3)}.",
+          "Лучшая к эталону по MAE", f"{_num(_sm.loc[_m_best, 'к Prophet, %'], 1, sign=True)} %", "accent"),
+    _card(_line, "Почему в таблице нет среднего R²"),
+], "two")
 ```
-:::
 
-## Что дало выигрыш
+## Что дало выигрыш {.roomy}
 
 <p class="statement">Не более хитрая модель одного ряда, а информация со стороны</p>
 <p class="lead">Глобальная модель обучается на всей панели сразу и предсказывает <strong>отношение к последнему значению</strong>, а не уровень.</p>
@@ -333,13 +369,51 @@ _cards([
           "Панель без переноса", f"{_num(_sum.loc['global_gbm', 'к Prophet, %'], 1, sign=True)} %", "accent"),
     _card("Остальное — два внешних источника: общий фактор из длинной истории и категории трат "
           "как обучающие ряды.", "Откуда остальное", cls="dark"),
-])
+], "snug")
 ```
 
-## Перенос с длинных рядов: чего не хватает панели
+```{python}
+# Лестница выигрыша — из summary.csv: эталон, панель без переноса и две вложенные конструкции.
+# Плюс в подписи — сущностью: «+ » в начале строки pandoc разбирает как пункт списка.
+_lad = [("prophet", "эталон конкурса, Prophet", "ref"),
+        ("global_gbm", "панельная модель без переноса", "ours"),
+        ("global_gbm_factor", "&#43; общий фактор из длинной истории", "ours"),
+        ("global_gbm_stack_factor", "&#43; категории трат как обучающие ряды", "best")]
+_lad_scale = max(_sum.loc[m, "MAE"] for m, _, _ in _lad)
+_bars([(_label, [(_cls, _sum.loc[_m, "MAE"] / _lad_scale)],
+        f"**{_num(_sum.loc[_m, 'MAE'], 0)}** <span>· "
+        + ("эталон" if _m == "prophet" else f"{_num(_sum.loc[_m, 'к Prophet, %'], 1, sign=True)} %")
+        + "</span>")
+       for _m, _label, _cls in _lad],
+      f"MAE на полной панели, горизонт {_full_cfg['split']['horizon']} мес., ₽, и выигрыш к эталону")
+```
+
+## Перенос с длинных рядов: чего не хватает панели {.roomy}
 
 <p class="statement">Апреля, мая и июня в обучении нет ни разу</p>
 <p class="lead">Первый фолд (в таблицах — фолд 0): обучение кончается мартом 2024, прогнозируем апрель-июнь. Признакам нужно шесть точек истории, поэтому целевые месяцы в обучении — только июль-декабрь и январь-март.</p>
+
+```{python}
+# Полоса месяцев первого фолда — из тех же величин, что конвейер: месяцы панели (wide),
+# train_end фолда 0 (rolling_origin), горизонт из конфига и глубина лагов признаков
+# (src/models/global_model.py::LAGS), а не нарисована руками.
+from src.models.global_model import LAGS as _LAGS
+_MON = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+_f0 = _full_folds[0]
+_hz0 = int(_full_cfg["split"]["horizon"])
+_midx = wide.index.to_timestamp() if hasattr(wide.index, "to_timestamp") else pd.to_datetime(wide.index)
+_mcells, _mcount = [], {"hist": 0, "train": 0, "test": 0, "off": 0}
+for _i, _ts in enumerate(_midx):
+    _cls = ("hist" if _i < max(_LAGS) else "train" if _i < _f0.train_end
+            else "test" if _i < _f0.train_end + _hz0 else "off")
+    _mcount[_cls] += 1
+    _mcells.append(f'<div class="m {_cls}">{_MON[_ts.month - 1]}<small>{_ts.year}</small></div>')
+Markdown('<div class="months">' + "".join(_mcells) + '</div>\n<div class="months-legend">'
+         f'<span class="hist">история для признаков: {_mcount["hist"]} мес.</span>'
+         f'<span class="train">целевые месяцы обучения: {_mcount["train"]}</span>'
+         f'<span class="test">тест фолда {_f0.index}: {_mcount["test"]}</span>'
+         f'<span class="off">следующие фолды: {_mcount["off"]}</span></div>')
+```
 
 <div class="cards">
 <div class="card">
@@ -358,7 +432,9 @@ _cards([
 </div>
 </div>
 
-## Переносится не всё и не как угодно
+<p class="takeaway">Чего нет в обучении, панель не выучит: форму месяца даёт длинный ряд.</p>
+
+## Переносится не всё и не как угодно {.roomy}
 
 :::: {.split}
 ::: {.table-card}
@@ -393,19 +469,16 @@ for _m in _tr.index:
 Markdown("\n".join(["| конструкция | MAE, ₽ | Δ к базовой |", "|---|---|---|"] + _tr_rows))
 ```
 :::
-<div class="side">
-<div class="card dark">
-<p class="label">Итог</p>
-<p class="num small">Те же данные. Пять конструкций. Работают две.</p>
-</div>
-<div class="card">
-<p class="label">Как читать</p>
-<p>Δ — к базовой панельной модели без внешних источников: минус помогает, плюс мешает.</p>
-</div>
-</div>
+```{python}
+_cards([
+    _card("Те же данные. Пять конструкций. Работают две.", "Итог", cls="dark"),
+    _card(_tr_map[_tr.index[0]], "Лучшая конструкция", _tr_delta(_tr.iloc[0]), "accent"),
+    _card("Δ — к базовой панельной модели без внешних источников: минус помогает, плюс мешает.", "Как читать"),
+], "stack")
+```
 ::::
 
-## Среднее скрывает перемену мест {.smaller}
+## Среднее скрывает перемену мест {.smaller .roomy}
 
 ::: {.table-card}
 ```{python}
@@ -421,6 +494,15 @@ Markdown(_avg_tab.to_markdown(disable_numparse=True, colalign=("left",) + ("righ
 ```
 :::
 
+```{python}
+# Плитки — лидер каждого фолда из той же таблицы, остальные две модели рядом для масштаба.
+_cards([
+    _card("**" + _avg_best[c] + "**; " + ", ".join(f"{m} {_num(v, 0)}" for m, v in _avg[c].items() if m != _avg_best[c]),
+          f"{_FOLD_MO[c][:-1]} · лидер", f"{_num(_avg[c].min(), 0)} ₽")
+    for c in _avg.columns
+], "dense")
+```
+
 <div class="cards two">
 <div class="card accent">
 <p class="label">Первый фолд</p>
@@ -432,7 +514,7 @@ Markdown(_avg_tab.to_markdown(disable_numparse=True, colalign=("left",) + ("righ
 </div>
 </div>
 
-## Двухэтапная модель как конструкция {.smaller}
+## Двухэтапная модель как конструкция {.smaller .roomy}
 
 ::: {.table-card}
 ```{python}
@@ -465,10 +547,13 @@ _cards([
     _card("Сглаживание вычищает именно ту сезонность, которую разнос делит между муниципалитетами, "
           "и доля перестаёт быть устойчивой. Внутренний бэктест выбирает на нём `random_walk`.",
           "Почему не сглаженный агрегат"),
-], "two")
+    _card(f"Фолд 0: сырой агрегат точнее наивной ({_num(_pf.loc['naive_last', 0], 0)}) и базовой "
+          f"панельной ({_num(_pf.loc['global_gbm', 0], 0)}). Когда истории мало, выигрывает "
+          f"конструкция, а не обучение.", "Самое короткое обучение", f"{_num(_pf.loc['two_stage', 0], 0)} ₽", "dark"),
+])
 ```
 
-## Пять горизонтов: от наукаста до года {.smaller}
+## Пять горизонтов: от наукаста до года {.smaller .roomy}
 
 ::: {.table-card}
 ```{python}
@@ -638,10 +723,10 @@ Markdown(
 ```
 :::
 
-## Короче история — ценнее перенос {.smaller}
+## Короче история — ценнее перенос {.smaller .roomy}
 
-:::: {.split}
-::: {.table-card}
+<p class="lead">Выигрыш переноса (общий фактор + категории) к базовой модели при той же длине обучения: минус помогает, плюс мешает.</p>
+
 ```{python}
 # Выигрыш и корреляция — из results/training_length_sweep.csv, столбец «стек + фактор»:
 # тот же источник и тот же расчёт, что в отчёте (там — таблица `_rho` по всем источникам).
@@ -651,21 +736,17 @@ _sw_months = [12, 15, 18, 21]
 _sw_sel = _sw[_sw["обучение, мес"].isin(_sw_months)].set_index("обучение, мес")
 _sw_gain = _sw_sel[_sw_col] - _sw_sel["базовая"]
 _sw_rho = (_sw[_sw_col] - _sw["базовая"]).corr(_sw["обучение, мес"], method="spearman")
-_sw_bold = {_sw_gain.idxmin(), _sw_gain.idxmax()}
-_sw_tab = pd.DataFrame(
-    [[f"**{_num(_sw_gain[m], 0, sign=True)}**" if m in _sw_bold else _num(_sw_gain[m], 0, sign=True)
-      for m in _sw_months],
-     [_num(_sw_sel.loc[m, "базовая"], 0) for m in _sw_months]],
-    index=["общий фактор + категории", "базовая модель, MAE, ₽"],
-    columns=[f"{m} мес" for m in _sw_months],
-)
-Markdown(
-    "Выигрыш переноса к базовой модели, ₽ (минус = помогает):\n\n"
-    + _sw_tab.to_markdown(disable_numparse=True, colalign=("left",) + ("right",) * 4)
-    + f"\n\nРанговая корреляция выигрыша с длиной обучения — **{_num(_sw_rho, 2)}**."
-)
+_cards([
+    _card(f"базовая модель: MAE {_num(_sw_sel.loc[m, 'базовая'], 0)}\u00a0₽",
+          f"обучение {m} мес", f"{_num(_sw_gain[m], 0, sign=True)} ₽",
+          "accent" if m == _sw_gain.idxmin() else "orange" if _sw_gain[m] > 0 else "")
+    for m in _sw_months
+], "four")
 ```
-:::
+
+```{python}
+Markdown(f'<p class="note">Ранговая корреляция выигрыша с длиной обучения — <strong>{_num(_sw_rho, 2)}</strong>.</p>')
+```
 
 ```{python}
 # «N дополнительных месяцев» и кратность — тем же расчётом, что «закон переноса» в резюме
@@ -683,11 +764,10 @@ _cards([
     _card("Прогнозировать предстоит с 24 месяцами обучения — за правым краем развёртки. Для практики "
           "берём не лучшую по среднему модель, а лучшую на самом длинном обучении.",
           "Что это значит для практики", cls="amber"),
-], "stack")
+], "two")
 ```
-::::
 
-## Почему регрессоры проваливаются
+## Почему регрессоры проваливаются {.roomy}
 
 <p class="statement">Федеральный ряд в месяце <em>t</em> одинаков для всех 2028 муниципалитетов</p>
 <p class="lead">Значений в обучении фолда ровно столько, сколько там моментов. Это метка месяца, а не регрессор.</p>
@@ -709,7 +789,20 @@ _cards([
 </div>
 </div>
 
-## Обнаружение разладок: решает преобразование {.smaller}
+```{python}
+# Один и тот же длинный ряд в двух ролях — из summary.csv, против базовой панельной модели.
+_rg_base = _sum.loc["global_gbm", "MAE"]
+_cards([
+    _card(f"{_num(_sum.loc['global_gbm_ext', 'MAE'] - _rg_base, 0, sign=True)} ₽ к базовой панельной "
+          f"модели ({_num(_rg_base, 0)}): дерево получает метку месяца и в тесте отдаёт константу.",
+          "Тот же ряд как внешний регрессор", f"{_num(_sum.loc['global_gbm_ext', 'MAE'], 0)} ₽", "orange"),
+    _card(f"{_num(_sum.loc['global_gbm_factor', 'MAE'] - _rg_base, 0, sign=True)} ₽ к базовой: ряд задаёт "
+          f"общий множитель прогноза, а не столбец признаков.",
+          "Тот же ряд как общий фактор", f"{_num(_sum.loc['global_gbm_factor', 'MAE'], 0)} ₽", "accent"),
+], "two dense")
+```
+
+## Обнаружение разладок: решает преобразование {.smaller .roomy}
 
 ::: {.table-card}
 ```{python}
@@ -1013,7 +1106,7 @@ _cards([
 :::
 ::::
 
-## Чего мы не утверждаем
+## Чего мы не утверждаем {.roomy}
 
 ```{python}
 # Пара изломов по полному ряду — из results/cp_offline_series.csv; число событий — из конфига.
@@ -1037,10 +1130,10 @@ _cards([
     _card("Методология муниципального уровня не опубликована. Мы прогнозируем **опубликованный ряд**, "
           "а интерпретируем только относительные величины.", "Показатель — оценка среднедушевых расходов",
           cls="dark"),
-], "two")
+], "two airy")
 ```
 
-## Что не сработало: модели {.smaller}
+## Что не сработало: модели {.smaller .roomy}
 
 ```{python}
 # Дообучение — по сводке и пофолдово; повтор с тем же сидом — по снимку первого
@@ -1111,19 +1204,18 @@ _b_says = ("Больше параметров хуже" if _b_mean_worse and not
 _ft_b += (f" {_b_says}: дообученный base даёт {_num(_sum.loc['chronos_ft_base', 'MAE'], 0)} "
           f"против {_num(_ftm, 0)} у small.")
 _cards([
-    _card(_ft_a, "Фундаментальные модели без дообучения"),
-    _card(_ft_b, "Дообучение Chronos"),
+    _card(_ft_a, "Фундаментальные модели без дообучения", cls="tall"),
+    _card(_ft_b, "Дообучение Chronos", cls="tall"),
     _card("Смесь с весом по тесту давала +9,6%. При честном подборе веса — **−40%**. "
-          "Оптимальный вес нестабилен между фолдами.", "Ансамбль, пилот на 300 рядах"),
+          "Оптимальный вес нестабилен между фолдами.", "Ансамбль, пилот на 300 рядах", cls="tall"),
     _card("Все эти результаты измерены и приведены как есть. На 24 точках почти любой метод "
           "покажет улучшение, если подбирать параметры по тем же данным, на которых меряешь.",
           "Как читать", cls="dark wide"),
 ], "dense")
 ```
 
-## Что не сработало: новости и длинные ряды {.smaller}
+## Что не сработало: новости и длинные ряды {.smaller .roomy}
 
-::: {.cards .dense}
 ```{python}
 # Корпус и счёт проверок — из файлов; две первые конструкции — из scripts/news_panel.py:
 # признаки в модели на наукасте (самая мощная проверка) и корреляция с изломами внутри месяца.
@@ -1133,6 +1225,19 @@ _npn = pd.read_csv("../results/news_panel.csv").set_index(["horizon", "subset"])
 _nbn = pd.read_csv("../results/news_breaks_corr.csv")
 _nbn = _nbn[_nbn["design"] == "within_month"]
 _c1n, _a1n = _npn.loc[(1, "covered")], _npn.loc[(1, "all")]
+_n_checks = 2 * len(_ev) + len(_nbn) + len(_nt)
+_n_passed = int((_nbn["p"] < _nbn["alpha"]).sum() + _ev["прошёл"].sum() + _nt["прошёл"].sum())
+_cards([
+    _card("собраны по региональным изданиям", "Заголовков в корпусе",
+          f"{_num(_news_monthly['n_articles'].sum() / 1000, 0)} тыс."),
+    _card("с собственными новостными рядами", "Регионов", f"{_news_monthly['region_name'].nunique()}"),
+    _card("событийный анализ, корреляции с изломами и национальный уровень", "Проверок всего", f"{_n_checks}"),
+    _card("пороги объявлены до расчёта", "Прошли порог", f"{_n_passed}", "accent"),
+], "four dense")
+```
+
+::: {.cards .dense}
+```{python}
 Markdown(_card(
     f"{_num(_news_monthly['n_articles'].sum() / 1000, 0)} тыс. "
     f"заголовков, {_news_monthly['region_name'].nunique()} регионов. Признаки в модели на наукасте: ошибка "
@@ -1177,7 +1282,7 @@ Markdown(_card(
 </div>
 :::
 
-## Выводы {.smaller}
+## Выводы {.smaller .roomy}
 
 ```{python}
 # Состав и порядок — как в «Кратком резюме» отчёта: главный вывод, сильные результаты,
@@ -1263,7 +1368,7 @@ _ccl.append(
 _cards([_card(line) for line in _ccl], "two dense")
 ```
 
-## Что из этого следует {.dark background-color="#0b1020"}
+## Что из этого следует {.roomy .dark background-color="#0b1020"}
 
 <p class="statement" style="font-size: 36px; max-width: 1100px;">Для задач такого рода длина ряда важнее выбора метода</p>
 <p class="lead">Три дополнительных месяца истории меняют качество прогноза сильнее, чем переход от наивной модели к градиентному бустингу.</p>
@@ -1271,6 +1376,8 @@ _cards([_card(line) for line in _ccl], "two dense")
 ```{python}
 # MAE базовой панельной модели по фолдам — из файла: здесь стояло «около 1 040» прежних прогонов.
 _gbf = _pf.loc["global_gbm"]
+# Число рядов прогноза — из самого файла прогноза, как на слайде «Прогноз на 2025 год».
+_fc_n = pd.read_csv("../results/forecast_2025.csv", usecols=["series_id"])["series_id"].nunique()
 _cards([
     _card("Ни одна модель не выигрывает у наивной на всех трёх фолдах. По фолдам интервалы "
           "накрывают ноль у всех конструкций. Приводим обе оценки и не выбираем удобную.",
@@ -1280,5 +1387,9 @@ _cards([
           f"в среднем {_num(_gbf.drop(index=0).mean(), 0)}, на фолде с {_full_folds[0].train_end} точками — "
           f"{_num(_gbf[0], 0)}.", "Главный практический вывод",
           f"{_num(_gbf[0] / _gbf.drop(index=0).mean(), 1)} раза"),
-], "two")
+    _card(f"Прогноз на 2025 год по {_num(_fc_n, 0)} рядам лежит в репозитории. Муниципальный разрез "
+          f"2025 года проверит его целиком: фактом пока сверен один первый этап.", "Что проверит факт", cls="amber"),
+], "airy")
 ```
+
+<p class="takeaway mono">Сайт работы: kr1zal.github.io/sberindex_konkurs · код, данные и отчёт: github.com/kr1zal/sberindex_konkurs</p>
