@@ -2537,11 +2537,23 @@
   text-align: right;
 }
 
-/* На узком экране колонки идут одна под другой в порядке чтения, связей и их подписей нет. */
+/* Подписи между этапами, строка связей блока и короткий лид — только для узкого экрана (ниже). */
+.method-step,
+.method-node-rel,
+.method-narrow {
+  display: none;
+}
+
+/* На узком экране связи линиями не рисуются: колонки идут этапами одна под другой вдоль одной вертикальной
+   линии с номерами, между этапами стрелка и подпись, что переходит дальше, а связи каждого блока дописывает
+   скрипт строкой «← откуда · → куда» короткими именами. Блок сжат до названия и связей: описание ждёт
+   в отчёте по ссылке. Линия собрана из отрезков у блоков, подписей и заголовков, чтобы кончаться на номере
+   последнего этапа. */
 @media (max-width: 959px) {
   .method-map {
     grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
+    gap: 6px;
+    padding-left: 32px;
   }
 
   .method-head[data-col], .method-node[data-col] {
@@ -2549,24 +2561,150 @@
     grid-row: auto;
   }
 
-  /* Заголовок колонки — перед её блоками, а не все три подряд: порядок задаёт order. */
+  /* Заголовок колонки — перед её блоками, подпись — после них: порядок задаёт order. */
   .method-head[data-col="1"] { order: 10; }
   .method-node[data-col="1"] { order: 11; }
+  .method-step[data-after="1"] { order: 15; }
   .method-head[data-col="2"] { order: 20; }
   .method-node[data-col="2"] { order: 21; }
+  .method-step[data-after="2"] { order: 25; }
   .method-head[data-col="3"] { order: 30; }
   .method-node[data-col="3"] { order: 31; }
 
   .method-head {
-    margin-top: 14px;
+    position: relative;
+    margin: 0;
+    padding-top: 4px;
   }
 
-  .method-head[data-col="1"] {
-    margin-top: 0;
+  /* Номер этапа — кружок на линии. */
+  .method-head::before {
+    content: attr(data-col);
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    left: -32px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--bg);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 500;
+    line-height: 22px;
+    text-align: center;
   }
 
-  .method-links, .method-link-label {
+  /* Отрезки линии: от номера первых двух этапов вниз, у блоков первых двух этапов и у подписей — сквозь
+     зазоры сетки и поля подписи. У последнего этапа отрезков нет: линия кончается на его номере. */
+  .method-head[data-col="1"]::after,
+  .method-head[data-col="2"]::after,
+  .method-node[data-col="1"]::before,
+  .method-node[data-col="2"]::before,
+  .method-step::after {
+    content: "";
+    position: absolute;
+    left: -22px;
+    width: 2px;
+    background: var(--rule);
+  }
+
+  .method-head[data-col="1"]::after,
+  .method-head[data-col="2"]::after {
+    top: 11px;
+    bottom: -6px;
+  }
+
+  .method-node[data-col="1"]::before,
+  .method-node[data-col="2"]::before {
+    top: -6px;
+    bottom: -6px;
+  }
+
+  .method-step {
+    display: block;
+    position: relative;
+    margin: 8px 0 14px;
+    color: var(--ink-soft);
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+
+  .method-step::after {
+    top: -14px;
+    bottom: -20px;
+  }
+
+  /* Стрелка на линии перед подписью. */
+  .method-step::before {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    top: 2px;
+    left: -27px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--chart-mark);
+  }
+
+  .method-node {
+    gap: 3px;
+    padding: 9px 34px 8px 12px;
+    border-radius: 12px;
+  }
+
+  /* Знак перехода — справа; у скрытой подписи ссылки он тоже есть, поэтому для читалок этот пустой. */
+  .method-node::after {
+    content: "↗" / "";
+    position: absolute;
+    top: 9px;
+    right: 12px;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+  }
+
+  .method-node-title {
+    font-size: 0.8125rem;
+  }
+
+  .method-node-text,
+  .method-links,
+  .method-link-label,
+  .method-wide {
     display: none;
+  }
+
+  /* Подпись «в отчёте: …» с пометкой о новой вкладке остаётся читалкам, с экрана уходит. */
+  .method-node-link {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .method-narrow {
+    display: inline;
+  }
+
+  .method-node-rel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1px 10px;
+    color: var(--ink-soft);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    line-height: 1.4;
+  }
+
+  .method-node-rel b {
+    color: var(--chart-forecast);
+    font-weight: 400;
   }
 }
 

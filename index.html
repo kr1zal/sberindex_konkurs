@@ -369,7 +369,7 @@
     <p class="eyebrow">06 · Метод</p>
     <h2 class="section-title" id="method-title">Как устроено решение</h2>
     <p class="section-lead" id="method-lead">
-      Данные идут в обе модели и в детекторы, проверка у всех общая. Наведите на блок: подсветятся его связи, каждый блок ведёт в свой раздел отчёта.
+      Данные идут в обе модели и в детекторы, проверка у всех общая. <span class="method-wide">Наведите на блок: подсветятся его связи, каждый блок ведёт в свой раздел отчёта.</span><span class="method-narrow">Каждый блок ведёт в свой раздел отчёта.</span>
     </p>
 
     <div class="method-map" id="method-map">
@@ -385,6 +385,10 @@
       <p class="mono-label method-head" data-col="1">Данные и источники</p>
       <p class="mono-label method-head" data-col="2">Модели</p>
       <p class="mono-label method-head" data-col="3">Проверка</p>
+      <!-- Подписи между этапами — только на узком экране, где колонки идут одна под другой; на широком
+           скрыты стилями и в сетку не попадают. -->
+      <p class="method-step" data-after="1">В модели и детекторы; эталоны сразу на проверку.</p>
+      <p class="method-step" data-after="2">Всё сходится на скользящем origin; детекторы дают сигнал по панели.</p>
 
       <a class="method-node" id="mn-panel" data-col="1" data-row="2" href="report/report.html#данные" target="_blank" rel="noopener">
         <span class="method-node-title">Панель СберИндекса</span>
@@ -515,7 +519,7 @@
     </p>
     <div class="site-footer-meta">
       <p class="author">Автор — <a href="https://avinogradov.pro" target="_blank" rel="noopener">Александр Виноградов<span class="ext" aria-hidden="true">&nbsp;↗</span><span class="visually-hidden"> (откроется в новой вкладке)</span></a></p>
-      <p class="built">собрано 8 октября 2026</p>
+      <p class="built">собрано 10 октября 2026</p>
     </div>
   </div>
 </footer>

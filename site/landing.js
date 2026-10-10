@@ -1135,6 +1135,12 @@
     ["baselines", "origin", ""], ["gbm", "origin", ""], ["two", "origin", ""], ["origin", "metrics", ""],
     ["panel", "cp", ""], ["bench", "cp", ""], ["cp", "signal", ""],
   ];
+  // Короткие имена блоков для строки связей на узком экране; у блока без имени берётся его заголовок.
+  const METHOD_SHORT = {
+    panel: "панель", federal: "длинные ряды", categories: "категории трат", baselines: "эталоны",
+    bench: "стенд с врезками", agg: "прогноз фед. ряда", gbm: "бустинг", two: "двухэтапная",
+    cp: "детекторы", origin: "скользящий origin", metrics: "метрики", signal: "сигнал по панели",
+  };
   const METHOD_LOOP = 52; // вынос связи внутри одной колонки вправо от блоков, px: в пределах промежутка колонок
   const METHOD_ELBOW = 64; // связь через колонку: до этого расстояния от цели идёт прямо по своей строке, дальше — изгиб
   const METHOD_LOOP_LABEL_T = 0.35; // где на петле стоит островок-подпись: ещё до следующего блока, в свободном месте
@@ -1150,7 +1156,7 @@
     const nodes = Array.from(map.querySelectorAll(".method-node"));
     const nodeOf = (id) => byId(`mn-${id}`);
     const edges = METHOD_EDGES.filter(([from, to]) => nodeOf(from) && nodeOf(to)).map(([from, to, label]) => ({
-      from, to,
+      from, to, label,
       path: svgNode("path", {
         class: "method-link", "marker-start": "url(#method-dot)", "marker-end": "url(#method-arrow)",
       }, svg),
@@ -1160,6 +1166,24 @@
       const u = 1 - t;
       return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
     };
+
+    // Строка связей блока для узкого экрана (на широком скрыта стилями): «← откуда · → куда» по тому же
+    // списку рёбер, что рисует линии, короткими именами; подпись ребра — в скобках.
+    const shortName = (id) => METHOD_SHORT[id] || nodeOf(id).querySelector(".method-node-title").textContent;
+    const relText = (list) => list.map(([other, label]) => shortName(other) + (label ? ` (${label})` : "")).join(" · ");
+    nodes.forEach((element) => {
+      const id = element.id.slice(3);
+      const inbound = edges.filter((edge) => edge.to === id).map((edge) => [edge.from, edge.label]);
+      const outbound = edges.filter((edge) => edge.from === id).map((edge) => [edge.to, edge.label]);
+      if (!inbound.length && !outbound.length) return;
+      const rel = node("span", "method-node-rel", null, element);
+      [["←", inbound], ["→", outbound]].forEach(([arrow, list]) => {
+        if (!list.length) return;
+        const part = node("span", "", null, rel);
+        node("b", "", arrow, part);
+        part.appendChild(document.createTextNode(` ${relText(list)}`));
+      });
+    });
 
     // Блоки моделей и проверки опускаются так, чтобы двухэтапная модель стояла прямо над связью
     // «эталоны → origin» (она идёт по строке эталонов): сдвиг — от положения блоков без сдвига.
